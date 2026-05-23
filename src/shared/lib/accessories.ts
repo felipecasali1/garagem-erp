@@ -1,0 +1,17 @@
+export const DEFAULT_ACCESSORIES = [
+  "Ar condicionado",
+  "Direção elétrica",
+  "Vidros elétricos",
+  "Trava elétrica",
+  "Airbag",
+  "ABS",
+  "Câmera de ré",
+  "Sensor de estacionamento",
+  "Multimídia",
+  "Teto solar",
+  "Bancos em couro",
+  "Rodas de liga",
+  "GPS",
+  "Faróis de LED",
+  "Piloto automático",
+];

@@ -1,0 +1,13 @@
+import type { Vehicle } from "@/shared/types/domain";
+
+export const vehicles: Vehicle[] = [
+  { id: 1, plate: "BRA-2E19", brand: "Toyota", model: "Corolla", version: "XEi 2.0", color: "Prata", fuel_type: "flex", transmission: "automatic", current_mileage: 32000, manufacture_year: 2022, model_year: 2023, cost_price: 92000, sale_price: 119900, published: true, status: "available" },
+  { id: 2, plate: "RJM-4D20", brand: "Honda", model: "Civic", version: "Touring", color: "Preto", fuel_type: "flex", transmission: "cvt", current_mileage: 18500, manufacture_year: 2023, model_year: 2023, cost_price: 130000, sale_price: 158900, published: true, status: "available" },
+  { id: 3, plate: "SPA-1A45", brand: "Volkswagen", model: "Nivus", version: "Highline", color: "Branco", fuel_type: "flex", transmission: "automatic", current_mileage: 12000, manufacture_year: 2024, model_year: 2024, cost_price: 105000, sale_price: 132500, published: true, status: "reserved" },
+  { id: 4, plate: "FIA-3C77", brand: "Fiat", model: "Pulse", version: "Impetus Turbo", color: "Vermelho", fuel_type: "flex", transmission: "cvt", current_mileage: 22500, manufacture_year: 2022, model_year: 2023, cost_price: 78000, sale_price: 96900, published: true, status: "available" },
+  { id: 5, plate: "JEE-5R88", brand: "Jeep", model: "Compass", version: "Limited Diesel", color: "Cinza", fuel_type: "diesel", transmission: "automatic", current_mileage: 45000, manufacture_year: 2021, model_year: 2022, cost_price: 145000, sale_price: 178900, published: false, status: "in_repair" },
+  { id: 6, plate: "CHV-7B12", brand: "Chevrolet", model: "Onix", version: "LTZ Turbo", color: "Azul", fuel_type: "flex", transmission: "automatic", current_mileage: 28000, manufacture_year: 2022, model_year: 2022, cost_price: 62000, sale_price: 82900, published: true, status: "sold" },
+  { id: 7, plate: "HYU-9K33", brand: "Hyundai", model: "HB20", version: "Comfort Plus", color: "Branco", fuel_type: "flex", transmission: "manual", current_mileage: 51000, manufacture_year: 2020, model_year: 2021, cost_price: 48000, sale_price: 64900, published: true, status: "available" },
+  { id: 8, plate: "BYD-2E55", brand: "BYD", model: "Dolphin", version: "Plus", color: "Verde", fuel_type: "electric", transmission: "automatic", current_mileage: 8500, manufacture_year: 2024, model_year: 2024, cost_price: 135000, sale_price: 159900, published: true, status: "available" },
+  { id: 9, plate: "REN-4P67", brand: "Renault", model: "Kwid", version: "Outsider", color: "Laranja", fuel_type: "flex", transmission: "manual", current_mileage: 19500, manufacture_year: 2023, model_year: 2023, cost_price: 52000, sale_price: 67500, published: true, status: "available" },
+];
