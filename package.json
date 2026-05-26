@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test:unit": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit"
+    "test:unit": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit",
+    "test:integration": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/integration",
+    "test": "tsc -p tsconfig.tests.json && node --test .test-dist/tests"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
