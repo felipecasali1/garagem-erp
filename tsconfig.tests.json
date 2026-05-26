@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": ".test-dist",
+    "rootDir": ".",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/shared/lib/format.ts",
+    "src/shared/lib/accessories.ts",
+    "src/shared/types/domain.ts",
+    "src/modules/checklist/types.ts",
+    "src/modules/checklist/lib/summarize-checklist.ts",
+    "src/modules/vehicles/types.ts",
+    "src/modules/vehicles/lib/normalize-vehicle-draft.ts",
+    "tests/unit/**/*.ts",
+    "tests/integration/**/*.ts"
+  ]
+}
