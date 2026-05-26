@@ -10,6 +10,7 @@ import {
 
 import appCss from "../styles/global.css?url";
 import { Toaster } from "@/shared/components/ui/sonner";
+import { AuthProvider } from "@/shared/supabase/auth";
 
 function NotFoundComponent() {
   return (
@@ -74,7 +75,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "GaragemERP - Sistema de gestão para revendas de veículos" },
-      { name: "description", content: "ERP completo para revendas e garagens: estoque, vendas, comissões e financeiro em uma plataforma única." },
+      {
+        name: "description",
+        content:
+          "ERP completo para revendas e garagens: estoque, vendas, comissões e financeiro em uma plataforma única.",
+      },
       { name: "author", content: "GaragemERP" },
       { property: "og:title", content: "GaragemERP - Sistema de gestão para revendas" },
       { property: "og:description", content: "ERP completo para revendas e garagens de veículos." },
@@ -114,8 +119,10 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
-      <Toaster richColors position="top-right" />
+      <AuthProvider>
+        <Outlet />
+        <Toaster richColors position="top-right" />
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

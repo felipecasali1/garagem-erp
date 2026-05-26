@@ -1,4 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
+import { useState } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -26,6 +27,8 @@ import {
   useSidebar,
 } from "@/shared/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
+import { useAuth } from "@/shared/supabase/auth";
+import { initials } from "@/shared/lib/format";
 
 const groups = [
   {
@@ -68,6 +71,21 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { signOut, session } = useAuth();
+  const [loggingOut, setLoggingOut] = useState(false);
+  const email = session?.user.email ?? "colaborador@garagemerp.local";
+  const displayName = email.split("@")[0]?.replace(/[._-]+/g, " ") || "Colaborador";
+
+  async function handleSignOut() {
+    try {
+      setLoggingOut(true);
+      await signOut();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoggingOut(false);
+    }
+  }
 
   return (
     <Sidebar collapsible="icon" className="border-sidebar-border">
@@ -123,18 +141,23 @@ export function AppSidebar() {
         <div className="flex items-center gap-2 px-2 py-2">
           <Avatar className="h-8 w-8">
             <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-              CL
+              {initials(displayName).slice(0, 2) || "GE"}
             </AvatarFallback>
           </Avatar>
           {!collapsed && (
             <>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-sidebar-foreground truncate">
-                  Carlos Lima
+                  {displayName}
                 </div>
-                <div className="text-xs text-sidebar-foreground/60 truncate">Gerente</div>
+                <div className="text-xs text-sidebar-foreground/60 truncate">{email}</div>
               </div>
               <button
+                type="button"
+                onClick={() => {
+                  void handleSignOut();
+                }}
+                disabled={loggingOut}
                 className="text-sidebar-foreground/60 hover:text-sidebar-foreground transition-colors"
                 aria-label="Sair"
               >

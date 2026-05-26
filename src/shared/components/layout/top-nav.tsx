@@ -6,6 +6,8 @@ import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { useTheme } from "@/shared/hooks/use-theme";
 import { CommandPalette, useCommandPalette } from "@/shared/components/layout/command-palette";
 import { NotificationsMenu } from "@/shared/components/layout/notifications";
+import { useAuth } from "@/shared/supabase/auth";
+import { initials } from "@/shared/lib/format";
 
 const labels: Record<string, string> = {
   "": "Dashboard",
@@ -25,6 +27,8 @@ export function TopNav() {
   const segments = pathname.split("/").filter(Boolean);
   const { theme, toggle } = useTheme();
   const { open, setOpen } = useCommandPalette();
+  const { session } = useAuth();
+  const userLabel = session?.user.email ?? "Colaborador";
 
   return (
     <header className="h-16 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30 flex items-center gap-3 px-4">
@@ -80,7 +84,9 @@ export function TopNav() {
         </Button>
         <NotificationsMenu />
         <Avatar className="h-8 w-8 ml-1">
-          <AvatarFallback className="bg-primary text-primary-foreground text-xs">CL</AvatarFallback>
+          <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+            {initials(userLabel.replace(/[@._-]+/g, " ")).slice(0, 2) || "GE"}
+          </AvatarFallback>
         </Avatar>
       </div>
 

@@ -1,10 +1,12 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState, type FormEvent } from "react";
 import { Eye, EyeOff, Lock, Mail, Car, TrendingUp, Shield } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
 import { Checkbox } from "@/shared/components/ui/checkbox";
+import { useAuth } from "@/shared/supabase/auth";
 
 export const Route = createFileRoute("/login")({
   head: () => ({ meta: [{ title: "Entrar | GaragemERP" }] }),
@@ -12,7 +14,39 @@ export const Route = createFileRoute("/login")({
 });
 
 function LoginPage() {
+  const navigate = useNavigate();
   const [show, setShow] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { loading, session, signIn } = useAuth();
+
+  useEffect(() => {
+    if (!loading && session) {
+      void navigate({ to: "/", replace: true });
+    }
+  }, [loading, navigate, session]);
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setErrorMessage(null);
+    setSubmitting(true);
+
+    try {
+      await signIn({ email, password });
+      toast.success("Login realizado com sucesso.");
+      void navigate({ to: "/", replace: true });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Nao foi possivel autenticar no Supabase.";
+      setErrorMessage(message);
+      toast.error("Falha ao conectar com o Supabase.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <div className="min-h-screen grid lg:grid-cols-2">
       {/* Brand panel */}
@@ -79,15 +113,23 @@ function LoginPage() {
           <form
             className="space-y-4"
             onSubmit={(e) => {
-              e.preventDefault();
-              window.location.href = "/";
+              void handleSubmit(e);
             }}
           >
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input id="email" type="email" placeholder="voce@garagem.com" className="pl-9" />
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="voce@garagem.com"
+                  className="pl-9"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
               </div>
             </div>
 
@@ -100,6 +142,10 @@ function LoginPage() {
                   type={show ? "text" : "password"}
                   placeholder="••••••••"
                   className="pl-9 pr-9"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
                 />
                 <button
                   type="button"
@@ -118,8 +164,14 @@ function LoginPage() {
               </Label>
             </div>
 
-            <Button type="submit" className="w-full" size="lg">
-              Entrar
+            {errorMessage ? (
+              <p className="text-sm text-destructive rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2">
+                {errorMessage}
+              </p>
+            ) : null}
+
+            <Button type="submit" className="w-full" size="lg" disabled={submitting}>
+              {submitting ? "Entrando..." : "Entrar"}
             </Button>
           </form>
 
