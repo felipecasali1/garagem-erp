@@ -15,6 +15,19 @@ export type TransactionCategory =
 export type TransactionStatus = "pending" | "paid" | "overdue" | "canceled";
 export type CommissionStatus = "pending" | "paid";
 export type PurchaseStatus = "pending" | "completed" | "canceled";
+export type PaymentMethod = "cash" | "financing" | "card" | "pix" | "trade_in";
+export type PaymentStatus = "pending" | "partial" | "paid";
+
+export interface Address {
+  id?: number;
+  zip_code: string;
+  city: string;
+  state: string;
+  neighborhood: string;
+  street: string;
+  number: string;
+  complement?: string;
+}
 
 export interface Person {
   id: number;
@@ -24,6 +37,7 @@ export interface Person {
   phone: string;
   email: string;
   type: PersonType;
+  primary_address?: Address;
 }
 
 export interface Employee {
@@ -35,6 +49,7 @@ export interface Employee {
   commission_type: CommissionType;
   active: boolean;
   hired_at: string;
+  notes?: string;
 }
 
 export interface Customer {
@@ -48,6 +63,8 @@ export interface Customer {
 export interface Vehicle {
   id: number;
   plate: string;
+  chassis?: string;
+  vin?: string;
   brand: string;
   model: string;
   version?: string;
@@ -62,6 +79,8 @@ export interface Vehicle {
   published: boolean;
   status: VehicleStatus;
   image?: string;
+  accessories?: string[];
+  notes?: string;
 }
 
 export interface Sale {
@@ -73,6 +92,10 @@ export interface Sale {
   discount: number;
   status: SaleStatus;
   sale_date: string;
+  notes?: string;
+  trade_in_vehicle?: Vehicle;
+  trade_in_value?: number;
+  payment?: SalePayment;
 }
 
 export interface Purchase {
@@ -82,6 +105,7 @@ export interface Purchase {
   total_value: number;
   purchase_date: string;
   status: PurchaseStatus;
+  notes?: string;
 }
 
 export interface FinancialTransaction {
@@ -92,6 +116,29 @@ export interface FinancialTransaction {
   amount: number;
   transaction_date: string;
   due_date?: string;
+  paid_at?: string;
   description: string;
   related?: string;
+}
+
+export interface Installment {
+  id: number;
+  number: number;
+  total_installments: number;
+  amount: number;
+  due_date: string;
+  status: TransactionStatus;
+  paid_at?: string;
+  description?: string;
+}
+
+export interface SalePayment {
+  id: number;
+  payment_method: PaymentMethod;
+  payment_status: PaymentStatus;
+  down_payment: number;
+  installments_count: number;
+  payment_date?: string;
+  remaining_amount: number;
+  installments?: Installment[];
 }
