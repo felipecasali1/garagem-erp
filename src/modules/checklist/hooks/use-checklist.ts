@@ -1,19 +1,11 @@
-import { useSyncExternalStore } from "react";
-import { checklistStore } from "@/modules/checklist/services/checklist-store";
+import { useQuery } from "@tanstack/react-query";
+import { checklistKeys, listChecklist } from "@/modules/checklist/services/checklist";
 
 export function useChecklist(vehicleId?: number) {
-  const subscribe = (fn: () => void) => {
-    const unsubscribe = checklistStore.subscribe(fn);
-    return () => {
-      unsubscribe();
-    };
-  };
+  const { data = [] } = useQuery({
+    queryKey: vehicleId == null ? checklistKeys.all : checklistKeys.byVehicle(vehicleId),
+    queryFn: () => listChecklist(vehicleId),
+  });
 
-  const all = useSyncExternalStore(
-    subscribe,
-    () => checklistStore.getAll(),
-    () => checklistStore.getAll(),
-  );
-
-  return vehicleId == null ? all : all.filter((item) => item.vehicle_id === vehicleId);
+  return data;
 }

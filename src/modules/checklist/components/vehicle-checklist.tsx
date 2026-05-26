@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
   Circle,
@@ -49,9 +50,11 @@ import { cn } from "@/shared/lib/utils";
 import { brl, fmtDate } from "@/shared/lib/format";
 import {
   CATEGORY_LABEL,
+  checklistKeys,
+  deleteChecklistItem,
   PRIORITY_META,
   STATUS_META,
-  checklistStore,
+  updateChecklistItem,
   findEmployee,
   summarize,
   useChecklist,
@@ -72,12 +75,42 @@ const STATUS_ICON: Record<ChecklistStatus, React.ComponentType<{ className?: str
 
 export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
   const items = useChecklist(vehicleId);
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<"all" | ChecklistStatus>("all");
   const [priorityFilter, setPriorityFilter] = useState<"all" | ChecklistPriority>("all");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ChecklistItem | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ChecklistItem | null>(null);
+  const invalidateChecklist = async () => {
+    await queryClient.invalidateQueries({ queryKey: checklistKeys.all });
+    await queryClient.invalidateQueries({ queryKey: checklistKeys.byVehicle(vehicleId) });
+  };
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: ChecklistStatus }) =>
+      updateChecklistItem(id, {
+        status,
+        completion_date: status === "completed" ? new Date().toISOString().slice(0, 10) : null,
+      }),
+    onSuccess: async (_item, variables) => {
+      await invalidateChecklist();
+      toast.success(`Status atualizado para "${STATUS_META[variables.status].label}"`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao atualizar o status.");
+    },
+  });
+  const deleteMutation = useMutation({
+    mutationFn: deleteChecklistItem,
+    onSuccess: async () => {
+      await invalidateChecklist();
+      toast.success("Item removido");
+      setConfirmDelete(null);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao remover item.");
+    },
+  });
 
   const summary = useMemo(() => summarize(items), [items]);
 
@@ -107,15 +140,12 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
   };
 
   const setStatus = (item: ChecklistItem, status: ChecklistStatus) => {
-    checklistStore.update(item.id, { status });
-    toast.success(`Status atualizado para "${STATUS_META[status].label}"`);
+    statusMutation.mutate({ id: item.id, status });
   };
 
   const remove = () => {
     if (!confirmDelete) return;
-    checklistStore.remove(confirmDelete.id);
-    toast.success("Item removido");
-    setConfirmDelete(null);
+    deleteMutation.mutate(confirmDelete.id);
   };
 
   return (
@@ -129,12 +159,18 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
                 <Wrench className="h-4 w-4 text-muted-foreground" />
                 <h3 className="font-display font-semibold">Preparação do Veículo</h3>
                 {summary.readyForSale && (
-                  <Badge className="bg-success/15 text-success border-success/30 border" variant="outline">
+                  <Badge
+                    className="bg-success/15 text-success border-success/30 border"
+                    variant="outline"
+                  >
                     <Sparkles className="h-3 w-3" /> Pronto para venda
                   </Badge>
                 )}
                 {summary.hasUrgent && (
-                  <Badge className="bg-destructive/15 text-destructive border-destructive/30 border" variant="outline">
+                  <Badge
+                    className="bg-destructive/15 text-destructive border-destructive/30 border"
+                    variant="outline"
+                  >
                     Urgente
                   </Badge>
                 )}
@@ -144,7 +180,7 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
               </p>
             </div>
             <div className="flex gap-2 shrink-0">
-              <Button size="sm" onClick={openNew}>
+              <Button type="button" size="sm" onClick={openNew}>
                 <Plus className="h-4 w-4" /> Novo item
               </Button>
             </div>
@@ -161,7 +197,11 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-2 border-t border-border">
             <Stat label="Pendentes" value={String(summary.pending)} accent="text-warning" />
             <Stat label="Em andamento" value={String(summary.inProgress)} accent="text-info" />
-            <Stat label="Aguardando peças" value={String(summary.waitingParts)} accent="text-orange-500" />
+            <Stat
+              label="Aguardando peças"
+              value={String(summary.waitingParts)}
+              accent="text-orange-500"
+            />
             <Stat label="Custo estimado" value={brl(summary.estimatedCost)} />
             <Stat label="Custo real" value={brl(summary.actualCost)} accent="text-foreground" />
           </div>
@@ -171,21 +211,35 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
         <Filter className="h-4 w-4 text-muted-foreground" />
-        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "all" | ChecklistStatus)}>
-          <SelectTrigger className="h-8 w-[180px]"><SelectValue /></SelectTrigger>
+        <Select
+          value={statusFilter}
+          onValueChange={(v) => setStatusFilter(v as "all" | ChecklistStatus)}
+        >
+          <SelectTrigger className="h-8 w-[180px]">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos os status</SelectItem>
             {Object.entries(STATUS_META).map(([k, m]) => (
-              <SelectItem key={k} value={k}>{m.label}</SelectItem>
+              <SelectItem key={k} value={k}>
+                {m.label}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
-        <Select value={priorityFilter} onValueChange={(v) => setPriorityFilter(v as "all" | ChecklistPriority)}>
-          <SelectTrigger className="h-8 w-[180px]"><SelectValue /></SelectTrigger>
+        <Select
+          value={priorityFilter}
+          onValueChange={(v) => setPriorityFilter(v as "all" | ChecklistPriority)}
+        >
+          <SelectTrigger className="h-8 w-[180px]">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas as prioridades</SelectItem>
             {Object.entries(PRIORITY_META).map(([k, m]) => (
-              <SelectItem key={k} value={k}>{m.label}</SelectItem>
+              <SelectItem key={k} value={k}>
+                {m.label}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -216,7 +270,7 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
                 Adicione tarefas de preparação, reparo ou inspeção.
               </p>
             </div>
-            <Button onClick={openNew} variant="outline" size="sm">
+            <Button type="button" onClick={openNew} variant="outline" size="sm">
               <Plus className="h-4 w-4" /> Criar primeiro item
             </Button>
           </CardContent>
@@ -248,10 +302,7 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
                     <button
                       type="button"
                       onClick={() =>
-                        setStatus(
-                          item,
-                          item.status === "completed" ? "pending" : "completed",
-                        )
+                        setStatus(item, item.status === "completed" ? "pending" : "completed")
                       }
                       className="mt-0.5 cursor-pointer"
                       title="Marcar como concluído"
@@ -304,11 +355,17 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
                           </span>
                         )}
                         <span>
-                          Estimado: <span className="font-medium text-foreground">{brl(item.estimated_cost)}</span>
+                          Estimado:{" "}
+                          <span className="font-medium text-foreground">
+                            {brl(item.estimated_cost)}
+                          </span>
                         </span>
                         {item.actual_cost > 0 && (
                           <span>
-                            Real: <span className="font-medium text-foreground">{brl(item.actual_cost)}</span>
+                            Real:{" "}
+                            <span className="font-medium text-foreground">
+                              {brl(item.actual_cost)}
+                            </span>
                           </span>
                         )}
                       </div>
@@ -369,10 +426,7 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
                         label="Atualizado em"
                         value={fmtDate(item.updated_at.slice(0, 10))}
                       />
-                      <DetailField
-                        label="Anexos"
-                        value="Nenhum anexo (em breve)"
-                      />
+                      <DetailField label="Anexos" value="Nenhum anexo (em breve)" />
                     </div>
                   )}
                 </CardContent>
@@ -394,7 +448,8 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir item?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. O item "{confirmDelete?.title}" será removido do checklist.
+              Esta ação não pode ser desfeita. O item "{confirmDelete?.title}" será removido do
+              checklist.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

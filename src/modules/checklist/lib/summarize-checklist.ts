@@ -1,0 +1,34 @@
+import type { ChecklistItem, ChecklistSummary } from "../types.js";
+
+export function summarizeChecklist(list: ChecklistItem[]): ChecklistSummary {
+  const active = list.filter((item) => item.status !== "cancelled");
+  const completed = active.filter((item) => item.status === "completed").length;
+  const pending = list.filter((item) => item.status === "pending").length;
+  const inProgress = list.filter((item) => item.status === "in_progress").length;
+  const waitingParts = list.filter((item) => item.status === "waiting_parts").length;
+  const cancelled = list.filter((item) => item.status === "cancelled").length;
+  const estimatedCost = list
+    .filter((item) => item.status !== "cancelled")
+    .reduce((sum, item) => sum + (item.estimated_cost || 0), 0);
+  const actualCost = list.reduce((sum, item) => sum + (item.actual_cost || 0), 0);
+  const progress = active.length === 0 ? 0 : Math.round((completed / active.length) * 100);
+  const readyForSale = active.length > 0 && completed === active.length;
+  const hasUrgent = list.some(
+    (item) =>
+      item.priority === "urgent" && item.status !== "completed" && item.status !== "cancelled",
+  );
+
+  return {
+    total: list.length,
+    completed,
+    pending,
+    inProgress,
+    waitingParts,
+    cancelled,
+    estimatedCost,
+    actualCost,
+    progress,
+    readyForSale,
+    hasUrgent,
+  };
+}

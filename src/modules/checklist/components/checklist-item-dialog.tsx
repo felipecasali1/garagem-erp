@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, type FormEvent } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -24,13 +25,15 @@ import { DatePicker } from "@/shared/components/ui/date-picker";
 import { toast } from "sonner";
 import {
   CATEGORY_LABEL,
+  checklistKeys,
+  createChecklistItem,
   PRIORITY_META,
   STATUS_META,
-  checklistStore,
   type ChecklistCategory,
   type ChecklistItem,
   type ChecklistPriority,
   type ChecklistStatus,
+  updateChecklistItem,
 } from "@/modules/checklist";
 import { employees } from "@/shared/mock-data";
 
@@ -91,6 +94,34 @@ export function ChecklistItemDialog({
       notes: "",
     },
   });
+  const queryClient = useQueryClient();
+  const invalidateChecklist = async () => {
+    await queryClient.invalidateQueries({ queryKey: checklistKeys.all });
+    await queryClient.invalidateQueries({ queryKey: checklistKeys.byVehicle(vehicleId) });
+  };
+  const createMutation = useMutation({
+    mutationFn: createChecklistItem,
+    onSuccess: async () => {
+      await invalidateChecklist();
+      toast.success("Item adicionado ao checklist");
+      onOpenChange(false);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao adicionar item.");
+    },
+  });
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Partial<ChecklistItem> }) =>
+      updateChecklistItem(id, payload),
+    onSuccess: async () => {
+      await invalidateChecklist();
+      toast.success("Item atualizado");
+      onOpenChange(false);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao atualizar item.");
+    },
+  });
 
   useEffect(() => {
     if (open) {
@@ -126,20 +157,33 @@ export function ChecklistItemDialog({
         ? Number(values.responsible_employee_id)
         : undefined,
       notes: values.notes || undefined,
+      attachments: item?.attachments ?? [],
     };
     if (item) {
-      checklistStore.update(item.id, payload);
-      toast.success("Item atualizado");
+      updateMutation.mutate({
+        id: item.id,
+        payload: {
+          ...payload,
+          completion_date:
+            values.status === "completed"
+              ? (item.completion_date ?? new Date().toISOString().slice(0, 10))
+              : undefined,
+        },
+      });
     } else {
-      checklistStore.add({
+      createMutation.mutate({
         ...payload,
-        completion_date: values.status === "completed" ? new Date().toISOString().slice(0, 10) : undefined,
+        completion_date:
+          values.status === "completed" ? new Date().toISOString().slice(0, 10) : undefined,
         attachments: [],
       });
-      toast.success("Item adicionado ao checklist");
     }
-    onOpenChange(false);
   });
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.stopPropagation();
+    void submit(event);
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -147,7 +191,7 @@ export function ChecklistItemDialog({
         <DialogHeader>
           <DialogTitle>{item ? "Editar item" : "Novo item de checklist"}</DialogTitle>
         </DialogHeader>
-        <form onSubmit={submit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
             <Label>
               Título <span className="text-destructive">*</span>
@@ -164,10 +208,14 @@ export function ChecklistItemDialog({
                 value={form.watch("category")}
                 onValueChange={(v) => form.setValue("category", v as ChecklistCategory)}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   {Object.entries(CATEGORY_LABEL).map(([k, label]) => (
-                    <SelectItem key={k} value={k}>{label}</SelectItem>
+                    <SelectItem key={k} value={k}>
+                      {label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -177,10 +225,14 @@ export function ChecklistItemDialog({
                 value={form.watch("status")}
                 onValueChange={(v) => form.setValue("status", v as ChecklistStatus)}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   {Object.entries(STATUS_META).map(([k, m]) => (
-                    <SelectItem key={k} value={k}>{m.label}</SelectItem>
+                    <SelectItem key={k} value={k}>
+                      {m.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -190,10 +242,14 @@ export function ChecklistItemDialog({
                 value={form.watch("priority")}
                 onValueChange={(v) => form.setValue("priority", v as ChecklistPriority)}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   {Object.entries(PRIORITY_META).map(([k, m]) => (
-                    <SelectItem key={k} value={k}>{m.label}</SelectItem>
+                    <SelectItem key={k} value={k}>
+                      {m.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -218,20 +274,28 @@ export function ChecklistItemDialog({
                 value={form.watch("responsible_employee_id") ?? ""}
                 onValueChange={(v) => form.setValue("responsible_employee_id", v || undefined)}
               >
-                <SelectTrigger><SelectValue placeholder="Selecionar funcionário" /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecionar funcionário" />
+                </SelectTrigger>
                 <SelectContent>
-                  {employees.filter((e) => e.active).map((e) => (
-                    <SelectItem key={e.id} value={String(e.id)}>
-                      {e.person.name} — {e.position}
-                    </SelectItem>
-                  ))}
+                  {employees
+                    .filter((e) => e.active)
+                    .map((e) => (
+                      <SelectItem key={e.id} value={String(e.id)}>
+                        {e.person.name} — {e.position}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </Field>
           </div>
 
           <Field label="Descrição">
-            <Textarea rows={3} placeholder="Detalhes da tarefa..." {...form.register("description")} />
+            <Textarea
+              rows={3}
+              placeholder="Detalhes da tarefa..."
+              {...form.register("description")}
+            />
           </Field>
 
           <Field label="Notas internas">
