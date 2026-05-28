@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/components/ui/select";
+import type { EmployeeDraft } from "@/modules/employees/types";
 import { toast } from "sonner";
 import { employees } from "@/shared/mock-data";
 
@@ -26,6 +27,36 @@ function EditEmployee() {
   const navigate = useNavigate();
   const e = employees.find((x) => String(x.id) === id);
   const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<EmployeeDraft>(() => ({
+    name: e?.person.name ?? "",
+    cpf: e?.person.cpf ?? "",
+    phone: e?.person.phone ?? "",
+    email: e?.person.email ?? "",
+    primary_address: {
+      zip_code: e?.person.primary_address?.zip_code ?? "",
+      city: e?.person.primary_address?.city ?? "",
+      state: e?.person.primary_address?.state ?? "",
+      neighborhood: e?.person.primary_address?.neighborhood ?? "",
+      street: e?.person.primary_address?.street ?? "",
+      number: e?.person.primary_address?.number ?? "",
+      complement: e?.person.primary_address?.complement ?? "",
+    },
+    position: e?.position ?? "",
+    hired_at: e?.hired_at,
+    salary: e?.salary ?? 0,
+    commission_type: e?.commission_type ?? "percentage",
+    commission_rate: e?.commission_rate ?? 0,
+    role: "seller",
+    password: "",
+    active: e?.active ?? true,
+  }));
+  const patchDraft = (patch: Partial<EmployeeDraft>) =>
+    setDraft((current) => ({ ...current, ...patch }));
+  const patchAddress = (patch: Partial<EmployeeDraft["primary_address"]>) =>
+    setDraft((current) => ({
+      ...current,
+      primary_address: { ...current.primary_address, ...patch },
+    }));
 
   if (!e) {
     return (
@@ -76,16 +107,49 @@ function EditEmployee() {
           <h2 className="font-display font-semibold">Dados pessoais</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Nome completo" required>
-              <Input defaultValue={e.person.name} required />
+              <Input value={draft.name} onChange={(e) => patchDraft({ name: e.target.value })} required />
             </Field>
             <Field label="CPF" required>
-              <Input defaultValue={e.person.cpf ?? ""} required />
+              <Input value={draft.cpf} onChange={(e) => patchDraft({ cpf: e.target.value })} required />
             </Field>
             <Field label="Telefone" required>
-              <Input defaultValue={e.person.phone} required />
+              <Input value={draft.phone} onChange={(e) => patchDraft({ phone: e.target.value })} required />
             </Field>
             <Field label="E-mail" required>
-              <Input type="email" defaultValue={e.person.email} required />
+              <Input type="email" value={draft.email} onChange={(e) => patchDraft({ email: e.target.value })} required />
+            </Field>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-6 space-y-4">
+          <h2 className="font-display font-semibold">Endereço principal</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Field label="CEP">
+              <Input value={draft.primary_address.zip_code} onChange={(e) => patchAddress({ zip_code: e.target.value })} placeholder="79000-000" />
+            </Field>
+            <Field label="Cidade">
+              <Input value={draft.primary_address.city} onChange={(e) => patchAddress({ city: e.target.value })} placeholder="Campo Grande" />
+            </Field>
+            <Field label="UF">
+              <Input value={draft.primary_address.state} onChange={(e) => patchAddress({ state: e.target.value })} placeholder="MS" maxLength={2} />
+            </Field>
+            <Field label="Bairro">
+              <Input value={draft.primary_address.neighborhood} onChange={(e) => patchAddress({ neighborhood: e.target.value })} placeholder="Centro" />
+            </Field>
+            <Field label="Rua">
+              <Input value={draft.primary_address.street} onChange={(e) => patchAddress({ street: e.target.value })} placeholder="Rua Exemplo" />
+            </Field>
+            <Field label="Número">
+              <Input value={draft.primary_address.number} onChange={(e) => patchAddress({ number: e.target.value })} placeholder="123" />
+            </Field>
+            <Field label="Complemento">
+              <Input
+                value={draft.primary_address.complement ?? ""}
+                onChange={(e) => patchAddress({ complement: e.target.value })}
+                placeholder="Sala, apto, referência..."
+              />
             </Field>
           </div>
         </CardContent>
@@ -96,16 +160,21 @@ function EditEmployee() {
           <h2 className="font-display font-semibold">Cargo e remuneração</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Cargo" required>
-              <Input defaultValue={e.position} required />
+              <Input value={draft.position} onChange={(e) => patchDraft({ position: e.target.value })} required />
             </Field>
             <Field label="Data de contratação">
-              <Input type="date" defaultValue={e.hired_at} />
+              <Input type="date" value={draft.hired_at ?? ""} onChange={(e) => patchDraft({ hired_at: e.target.value })} />
             </Field>
             <Field label="Salário base">
-              <Input type="number" step="0.01" defaultValue={e.salary} />
+              <Input type="number" step="0.01" value={draft.salary} onChange={(e) => patchDraft({ salary: Number(e.target.value) || 0 })} />
             </Field>
             <Field label="Tipo de comissão">
-              <Select defaultValue={e.commission_type}>
+              <Select
+                value={draft.commission_type}
+                onValueChange={(value) =>
+                  patchDraft({ commission_type: value as EmployeeDraft["commission_type"] })
+                }
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="percentage">Percentual</SelectItem>
@@ -114,7 +183,7 @@ function EditEmployee() {
               </Select>
             </Field>
             <Field label="Comissão">
-              <Input type="number" step="0.01" defaultValue={e.commission_rate} />
+              <Input type="number" step="0.01" value={draft.commission_rate} onChange={(e) => patchDraft({ commission_rate: Number(e.target.value) || 0 })} />
             </Field>
           </div>
           <div className="flex items-center justify-between rounded-md border border-border p-4">
@@ -124,7 +193,7 @@ function EditEmployee() {
                 Inativos não aparecem em novas vendas
               </div>
             </div>
-            <Switch defaultChecked={e.active} />
+            <Switch checked={draft.active} onCheckedChange={(value) => patchDraft({ active: value })} />
           </div>
         </CardContent>
       </Card>

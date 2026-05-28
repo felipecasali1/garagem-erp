@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Calendar,
@@ -15,9 +16,13 @@ import { Button } from "@/shared/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { brl } from "@/shared/lib/format";
-import { vehicles, sales, purchases } from "@/shared/mock-data";
 import { VehicleChecklist } from "@/modules/checklist/components/vehicle-checklist";
 import { useChecklist, summarize } from "@/modules/checklist";
+import {
+  getVehicleById,
+  setVehiclePublished,
+  vehicleKeys,
+} from "@/modules/vehicles/services/vehicles";
 
 export const Route = createFileRoute("/_app/vehicles/$id")({
   head: () => ({ meta: [{ title: "Detalhe do Veículo | GaragemERP" }] }),
@@ -42,9 +47,37 @@ const transLabel: Record<string, string> = {
 function VehicleDetail() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  const vehicle = vehicles.find((v) => String(v.id) === id);
+  const numericId = Number(id);
+  const queryClient = useQueryClient();
+  const {
+    data: vehicle,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: vehicleKeys.detail(numericId),
+    queryFn: () => getVehicleById(numericId),
+    enabled: Number.isFinite(numericId),
+  });
+  const publishMutation = useMutation({
+    mutationFn: ({ published }: { published: boolean }) =>
+      setVehiclePublished(numericId, published),
+    onSuccess: (nextVehicle) => {
+      queryClient.setQueryData(vehicleKeys.detail(nextVehicle.id), nextVehicle);
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
+    },
+  });
 
-  if (!vehicle) {
+  const checklistItems = useChecklist(vehicle?.id);
+
+  if (isLoading) {
+    return (
+      <div className="max-w-[1400px] mx-auto py-10 text-sm text-muted-foreground">
+        Carregando veículo...
+      </div>
+    );
+  }
+
+  if (error || !vehicle) {
     return (
       <div className="max-w-2xl mx-auto text-center py-20">
         <h2 className="font-display text-xl mb-2">Veículo não encontrado</h2>
@@ -53,14 +86,10 @@ function VehicleDetail() {
     );
   }
 
-  const checklistItems = useChecklist(vehicle.id);
   const checklistSummary = summarize(checklistItems);
   const totalInvested = vehicle.cost_price + checklistSummary.actualCost;
   const margin = vehicle.sale_price - totalInvested;
   const marginPct = totalInvested > 0 ? (margin / totalInvested) * 100 : 0;
-  const relatedSales = sales.filter((s) => s.vehicle.id === vehicle.id);
-  const relatedPurchases = purchases.filter((p) => p.vehicle.id === vehicle.id);
-
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -83,7 +112,7 @@ function VehicleDetail() {
             <Pencil className="h-4 w-4" /> Editar
           </Link>
         </Button>
-        <Button>
+        <Button onClick={() => publishMutation.mutate({ published: !vehicle.published })}>
           {vehicle.published ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           {vehicle.published ? "Despublicar" : "Publicar"}
         </Button>
@@ -143,10 +172,8 @@ function VehicleDetail() {
       <Tabs defaultValue="info">
         <TabsList>
           <TabsTrigger value="info">Informações</TabsTrigger>
-          <TabsTrigger value="checklist">
-            Checklist ({checklistSummary.total})
-          </TabsTrigger>
-          <TabsTrigger value="history">Histórico ({relatedSales.length + relatedPurchases.length})</TabsTrigger>
+          <TabsTrigger value="checklist">Checklist ({checklistSummary.total})</TabsTrigger>
+          <TabsTrigger value="history">Histórico (0)</TabsTrigger>
           <TabsTrigger value="accessories">Acessórios</TabsTrigger>
         </TabsList>
         <TabsContent value="checklist">
@@ -159,11 +186,17 @@ function VehicleDetail() {
               <Field label="Modelo" value={vehicle.model} />
               <Field label="Versão" value={vehicle.version ?? "-"} />
               <Field label="Placa" value={vehicle.plate} mono />
-              <Field label="Ano fabricação / modelo" value={`${vehicle.manufacture_year} / ${vehicle.model_year}`} />
+              <Field
+                label="Ano fabricação / modelo"
+                value={`${vehicle.manufacture_year} / ${vehicle.model_year}`}
+              />
               <Field label="Cor" value={vehicle.color} />
               <Field label="Combustível" value={fuelLabel[vehicle.fuel_type]} />
               <Field label="Câmbio" value={transLabel[vehicle.transmission]} />
-              <Field label="Quilometragem" value={`${vehicle.current_mileage.toLocaleString("pt-BR")} km`} />
+              <Field
+                label="Quilometragem"
+                value={`${vehicle.current_mileage.toLocaleString("pt-BR")} km`}
+              />
               <Field label="Status" value={vehicle.status} />
             </CardContent>
           </Card>
@@ -171,53 +204,32 @@ function VehicleDetail() {
         <TabsContent value="history">
           <Card>
             <CardContent className="p-6 space-y-3">
-              {[...relatedPurchases, ...relatedSales].length === 0 ? (
-                <div className="text-sm text-muted-foreground text-center py-8">
-                  Nenhum movimento registrado.
-                </div>
-              ) : (
-                <>
-                  {relatedPurchases.map((p) => (
-                    <div
-                      key={`p-${p.id}`}
-                      className="flex items-center justify-between border-b border-border pb-3"
-                    >
-                      <div>
-                        <div className="font-medium text-sm">Compra #{p.id}</div>
-                        <div className="text-xs text-muted-foreground">{p.supplier.name}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-semibold">{brl(p.total_value)}</div>
-                        <StatusBadge kind="purchase" value={p.status} />
-                      </div>
-                    </div>
-                  ))}
-                  {relatedSales.map((s) => (
-                    <div
-                      key={`s-${s.id}`}
-                      className="flex items-center justify-between border-b border-border pb-3 last:border-0"
-                    >
-                      <div>
-                        <div className="font-medium text-sm">Venda #{s.id}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {s.customer.person.name}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-semibold">{brl(s.total_value)}</div>
-                        <StatusBadge kind="sale" value={s.status} />
-                      </div>
-                    </div>
-                  ))}
-                </>
-              )}
+              <div className="text-sm text-muted-foreground text-center py-8">
+                O histórico de compras e vendas será exibido aqui quando esses módulos forem
+                migrados para o Supabase.
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
         <TabsContent value="accessories">
           <Card>
-            <CardContent className="p-6 text-sm text-muted-foreground">
-              Nenhum acessório cadastrado para este veículo.
+            <CardContent className="p-6 text-sm">
+              {vehicle.accessories && vehicle.accessories.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {vehicle.accessories.map((accessory) => (
+                    <span
+                      key={accessory}
+                      className="rounded-full border border-border bg-muted/40 px-3 py-1.5"
+                    >
+                      {accessory}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-muted-foreground">
+                  Nenhum acessório cadastrado para este veículo.
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Save, Plus, X, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -23,6 +24,8 @@ import {
   type ChecklistCategory,
   type ChecklistPriority,
 } from "@/modules/checklist";
+import type { VehicleChecklistDraft, VehicleDraft } from "@/modules/vehicles/types";
+import { createVehicle, vehicleKeys } from "@/modules/vehicles/services/vehicles";
 import { brl } from "@/shared/lib/format";
 
 export const Route = createFileRoute("/_app/vehicles/new")({
@@ -30,34 +33,53 @@ export const Route = createFileRoute("/_app/vehicles/new")({
   component: NewVehicle,
 });
 
-type DraftChecklist = {
-  id: string;
-  title: string;
-  category: ChecklistCategory;
-  priority: ChecklistPriority;
-  estimated_cost: number;
-  due_date?: string;
-};
-
 function NewVehicle() {
   const navigate = useNavigate();
-  const [saving, setSaving] = useState(false);
-
-  // Accessories
-  const [accessories, setAccessories] = useState<string[]>([]);
+  const queryClient = useQueryClient();
+  const [vehicleDraft, setVehicleDraft] = useState<VehicleDraft>({
+    plate: "",
+    chassis: "",
+    vin: "",
+    brand: "",
+    model: "",
+    version: "",
+    color: "",
+    fuel_type: "flex",
+    transmission: "automatic",
+    current_mileage: 0,
+    manufacture_year: new Date().getFullYear(),
+    model_year: new Date().getFullYear(),
+    cost_price: 0,
+    sale_price: 0,
+    published: false,
+    status: "available",
+    notes: "",
+    accessories: [],
+    checklist: [],
+  });
   const [customAcc, setCustomAcc] = useState("");
+  const patchVehicleDraft = (patch: Partial<VehicleDraft>) =>
+    setVehicleDraft((current) => ({ ...current, ...patch }));
   const toggleAcc = (a: string) =>
-    setAccessories((p) => (p.includes(a) ? p.filter((x) => x !== a) : [...p, a]));
+    setVehicleDraft((current) => ({
+      ...current,
+      accessories: current.accessories.includes(a)
+        ? current.accessories.filter((x) => x !== a)
+        : [...current.accessories, a],
+    }));
   const addCustomAcc = () => {
     const v = customAcc.trim();
     if (!v) return;
-    if (!accessories.includes(v)) setAccessories((p) => [...p, v]);
+    if (!vehicleDraft.accessories.includes(v)) {
+      setVehicleDraft((current) => ({
+        ...current,
+        accessories: [...current.accessories, v],
+      }));
+    }
     setCustomAcc("");
   };
 
-  // Checklist draft
-  const [checklist, setChecklist] = useState<DraftChecklist[]>([]);
-  const [draft, setDraft] = useState<DraftChecklist>({
+  const [checklistDraft, setChecklistDraft] = useState<VehicleChecklistDraft>({
     id: "",
     title: "",
     category: "mechanical",
@@ -66,12 +88,15 @@ function NewVehicle() {
     due_date: undefined,
   });
   const addChecklist = () => {
-    if (!draft.title.trim()) {
+    if (!checklistDraft.title.trim()) {
       toast.error("Informe o título da tarefa");
       return;
     }
-    setChecklist((p) => [...p, { ...draft, id: `d_${Date.now()}` }]);
-    setDraft({
+    setVehicleDraft((current) => ({
+      ...current,
+      checklist: [...current.checklist, { ...checklistDraft, id: `d_${Date.now()}` }],
+    }));
+    setChecklistDraft({
       id: "",
       title: "",
       category: "mechanical",
@@ -81,19 +106,29 @@ function NewVehicle() {
     });
   };
   const removeChecklist = (id: string) =>
-    setChecklist((p) => p.filter((x) => x.id !== id));
+    setVehicleDraft((current) => ({
+      ...current,
+      checklist: current.checklist.filter((x) => x.id !== id),
+    }));
 
-  const totalEstimated = checklist.reduce((s, x) => s + (x.estimated_cost || 0), 0);
+  const totalEstimated = vehicleDraft.checklist.reduce((s, x) => s + (x.estimated_cost || 0), 0);
+
+  const createMutation = useMutation({
+    mutationFn: createVehicle,
+    onSuccess: (vehicle) => {
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
+      queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
+      toast.success("Veículo cadastrado no Supabase");
+      void navigate({ to: "/vehicles/$id", params: { id: String(vehicle.id) } });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao salvar veículo.");
+    },
+  });
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
-    setTimeout(() => {
-      toast.success("Veículo cadastrado", {
-        description: `${accessories.length} acessório(s) e ${checklist.length} item(ns) de checklist`,
-      });
-      navigate({ to: "/vehicles" });
-    }, 600);
+    createMutation.mutate(vehicleDraft);
   };
 
   return (
@@ -107,8 +142,8 @@ function NewVehicle() {
         <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">
           Adicionar Veículo
         </h1>
-        <Button type="submit" disabled={saving}>
-          <Save className="h-4 w-4" /> {saving ? "Salvando..." : "Salvar"}
+        <Button type="submit" disabled={createMutation.isPending}>
+          <Save className="h-4 w-4" /> {createMutation.isPending ? "Salvando..." : "Salvar"}
         </Button>
       </div>
 
@@ -117,25 +152,57 @@ function NewVehicle() {
           <h2 className="font-display font-semibold">Identificação</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Placa" required>
-              <Input placeholder="ABC-1D23" required />
+              <Input
+                placeholder="ABC-1D23"
+                required
+                value={vehicleDraft.plate}
+                onChange={(e) => patchVehicleDraft({ plate: e.target.value })}
+              />
             </Field>
             <Field label="Chassi">
-              <Input placeholder="9BWZZZ377VT004251" />
+              <Input
+                placeholder="9BWZZZ377VT004251"
+                value={vehicleDraft.chassis}
+                onChange={(e) => patchVehicleDraft({ chassis: e.target.value })}
+              />
             </Field>
             <Field label="VIN">
-              <Input placeholder="1HGBH41JXMN109186" />
+              <Input
+                placeholder="1HGBH41JXMN109186"
+                value={vehicleDraft.vin}
+                onChange={(e) => patchVehicleDraft({ vin: e.target.value })}
+              />
             </Field>
             <Field label="Marca" required>
-              <Input placeholder="Toyota" required />
+              <Input
+                placeholder="Toyota"
+                required
+                value={vehicleDraft.brand}
+                onChange={(e) => patchVehicleDraft({ brand: e.target.value })}
+              />
             </Field>
             <Field label="Modelo" required>
-              <Input placeholder="Corolla" required />
+              <Input
+                placeholder="Corolla"
+                required
+                value={vehicleDraft.model}
+                onChange={(e) => patchVehicleDraft({ model: e.target.value })}
+              />
             </Field>
             <Field label="Versão">
-              <Input placeholder="XEi 2.0" />
+              <Input
+                placeholder="XEi 2.0"
+                value={vehicleDraft.version}
+                onChange={(e) => patchVehicleDraft({ version: e.target.value })}
+              />
             </Field>
             <Field label="Cor" required>
-              <Input placeholder="Prata" required />
+              <Input
+                placeholder="Prata"
+                required
+                value={vehicleDraft.color}
+                onChange={(e) => patchVehicleDraft({ color: e.target.value })}
+              />
             </Field>
           </div>
         </CardContent>
@@ -146,8 +213,15 @@ function NewVehicle() {
           <h2 className="font-display font-semibold">Especificações</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Field label="Combustível">
-              <Select defaultValue="flex">
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select
+                value={vehicleDraft.fuel_type}
+                onValueChange={(value) =>
+                  patchVehicleDraft({ fuel_type: value as VehicleDraft["fuel_type"] })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="flex">Flex</SelectItem>
                   <SelectItem value="gasoline">Gasolina</SelectItem>
@@ -158,8 +232,15 @@ function NewVehicle() {
               </Select>
             </Field>
             <Field label="Câmbio">
-              <Select defaultValue="automatic">
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select
+                value={vehicleDraft.transmission}
+                onValueChange={(value) =>
+                  patchVehicleDraft({ transmission: value as VehicleDraft["transmission"] })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="manual">Manual</SelectItem>
                   <SelectItem value="automatic">Automático</SelectItem>
@@ -168,17 +249,43 @@ function NewVehicle() {
               </Select>
             </Field>
             <Field label="Quilometragem">
-              <Input type="number" placeholder="0" />
+              <Input
+                type="number"
+                placeholder="0"
+                value={vehicleDraft.current_mileage}
+                onChange={(e) =>
+                  patchVehicleDraft({ current_mileage: Number(e.target.value) || 0 })
+                }
+              />
             </Field>
             <Field label="Ano fabricação">
-              <Input type="number" placeholder="2024" />
+              <Input
+                type="number"
+                placeholder="2024"
+                value={vehicleDraft.manufacture_year}
+                onChange={(e) =>
+                  patchVehicleDraft({ manufacture_year: Number(e.target.value) || 0 })
+                }
+              />
             </Field>
             <Field label="Ano modelo">
-              <Input type="number" placeholder="2024" />
+              <Input
+                type="number"
+                placeholder="2024"
+                value={vehicleDraft.model_year}
+                onChange={(e) => patchVehicleDraft({ model_year: Number(e.target.value) || 0 })}
+              />
             </Field>
             <Field label="Status">
-              <Select defaultValue="available">
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select
+                value={vehicleDraft.status}
+                onValueChange={(value) =>
+                  patchVehicleDraft({ status: value as VehicleDraft["status"] })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="available">Disponível</SelectItem>
                   <SelectItem value="reserved">Reservado</SelectItem>
@@ -196,14 +303,29 @@ function NewVehicle() {
           <h2 className="font-display font-semibold">Valores</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Custo de aquisição">
-              <Input type="number" placeholder="0,00" />
+              <Input
+                type="number"
+                placeholder="0,00"
+                value={vehicleDraft.cost_price}
+                onChange={(e) => patchVehicleDraft({ cost_price: Number(e.target.value) || 0 })}
+              />
             </Field>
             <Field label="Preço de venda">
-              <Input type="number" placeholder="0,00" />
+              <Input
+                type="number"
+                placeholder="0,00"
+                value={vehicleDraft.sale_price}
+                onChange={(e) => patchVehicleDraft({ sale_price: Number(e.target.value) || 0 })}
+              />
             </Field>
           </div>
           <Field label="Observações">
-            <Textarea rows={3} placeholder="Anotações internas..." />
+            <Textarea
+              rows={3}
+              placeholder="Anotações internas..."
+              value={vehicleDraft.notes}
+              onChange={(e) => patchVehicleDraft({ notes: e.target.value })}
+            />
           </Field>
         </CardContent>
       </Card>
@@ -218,11 +340,11 @@ function NewVehicle() {
                 Selecione os acessórios presentes no veículo.
               </p>
             </div>
-            <Badge variant="secondary">{accessories.length} selecionado(s)</Badge>
+            <Badge variant="secondary">{vehicleDraft.accessories.length} selecionado(s)</Badge>
           </div>
           <div className="flex flex-wrap gap-2">
             {DEFAULT_ACCESSORIES.map((a) => {
-              const active = accessories.includes(a);
+              const active = vehicleDraft.accessories.includes(a);
               return (
                 <button
                   key={a}
@@ -240,9 +362,9 @@ function NewVehicle() {
               );
             })}
           </div>
-          {accessories.filter((a) => !DEFAULT_ACCESSORIES.includes(a)).length > 0 && (
+          {vehicleDraft.accessories.filter((a) => !DEFAULT_ACCESSORIES.includes(a)).length > 0 && (
             <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
-              {accessories
+              {vehicleDraft.accessories
                 .filter((a) => !DEFAULT_ACCESSORIES.includes(a))
                 .map((a) => (
                   <Badge key={a} variant="outline" className="gap-1">
@@ -284,8 +406,7 @@ function NewVehicle() {
               </p>
             </div>
             <div className="text-sm">
-              Custo estimado:{" "}
-              <span className="font-semibold">{brl(totalEstimated)}</span>
+              Custo estimado: <span className="font-semibold">{brl(totalEstimated)}</span>
             </div>
           </div>
 
@@ -296,8 +417,8 @@ function NewVehicle() {
               </Label>
               <Input
                 placeholder="Ex.: Polimento"
-                value={draft.title}
-                onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                value={checklistDraft.title}
+                onChange={(e) => setChecklistDraft({ ...checklistDraft, title: e.target.value })}
               />
             </div>
             <div className="md:col-span-3">
@@ -305,15 +426,19 @@ function NewVehicle() {
                 Categoria
               </Label>
               <Select
-                value={draft.category}
+                value={checklistDraft.category}
                 onValueChange={(v) =>
-                  setDraft({ ...draft, category: v as ChecklistCategory })
+                  setChecklistDraft({ ...checklistDraft, category: v as ChecklistCategory })
                 }
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   {Object.entries(CATEGORY_LABEL).map(([k, label]) => (
-                    <SelectItem key={k} value={k}>{label}</SelectItem>
+                    <SelectItem key={k} value={k}>
+                      {label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -323,15 +448,19 @@ function NewVehicle() {
                 Prioridade
               </Label>
               <Select
-                value={draft.priority}
+                value={checklistDraft.priority}
                 onValueChange={(v) =>
-                  setDraft({ ...draft, priority: v as ChecklistPriority })
+                  setChecklistDraft({ ...checklistDraft, priority: v as ChecklistPriority })
                 }
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   {Object.entries(PRIORITY_META).map(([k, m]) => (
-                    <SelectItem key={k} value={k}>{m.label}</SelectItem>
+                    <SelectItem key={k} value={k}>
+                      {m.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -344,9 +473,12 @@ function NewVehicle() {
                 type="number"
                 step="0.01"
                 min="0"
-                value={draft.estimated_cost}
+                value={checklistDraft.estimated_cost}
                 onChange={(e) =>
-                  setDraft({ ...draft, estimated_cost: Number(e.target.value) || 0 })
+                  setChecklistDraft({
+                    ...checklistDraft,
+                    estimated_cost: Number(e.target.value) || 0,
+                  })
                 }
               />
             </div>
@@ -356,23 +488,21 @@ function NewVehicle() {
               </Button>
             </div>
             <div className="md:col-span-4">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                Prazo
-              </Label>
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Prazo</Label>
               <DatePicker
-                value={draft.due_date}
-                onChange={(v) => setDraft({ ...draft, due_date: v })}
+                value={checklistDraft.due_date}
+                onChange={(v) => setChecklistDraft({ ...checklistDraft, due_date: v })}
               />
             </div>
           </div>
 
-          {checklist.length === 0 ? (
+          {vehicleDraft.checklist.length === 0 ? (
             <div className="text-sm text-muted-foreground border border-dashed border-border rounded-md p-6 text-center">
               Nenhum item adicionado ao checklist ainda.
             </div>
           ) : (
             <div className="space-y-2">
-              {checklist.map((c) => (
+              {vehicleDraft.checklist.map((c) => (
                 <div
                   key={c.id}
                   className="flex items-center gap-3 rounded-md border border-border p-3"

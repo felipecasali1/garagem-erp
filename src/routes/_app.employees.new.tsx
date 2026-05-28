@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/components/ui/select";
+import type { EmployeeDraft } from "@/modules/employees/types";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/employees/new")({
@@ -23,20 +24,45 @@ export const Route = createFileRoute("/_app/employees/new")({
 
 function NewEmployee() {
   const navigate = useNavigate();
-  const [active, setActive] = useState(true);
-  const [hiredAt, setHiredAt] = useState<string | undefined>(new Date().toISOString().slice(0, 10));
-  const [commissionType, setCommissionType] = useState<"percentage" | "fixed">("percentage");
-  const [role, setRole] = useState("seller");
+  const [draft, setDraft] = useState<EmployeeDraft>({
+    name: "",
+    cpf: "",
+    phone: "",
+    email: "",
+    primary_address: {
+      zip_code: "",
+      city: "",
+      state: "",
+      neighborhood: "",
+      street: "",
+      number: "",
+      complement: "",
+    },
+    position: "",
+    hired_at: new Date().toISOString().slice(0, 10),
+    salary: 0,
+    commission_type: "percentage",
+    commission_rate: 0,
+    role: "seller",
+    password: "",
+    active: true,
+  });
   const [saving, setSaving] = useState(false);
+  const patchDraft = (patch: Partial<EmployeeDraft>) =>
+    setDraft((current) => ({ ...current, ...patch }));
+  const patchAddress = (patch: Partial<EmployeeDraft["primary_address"]>) =>
+    setDraft((current) => ({
+      ...current,
+      primary_address: { ...current.primary_address, ...patch },
+    }));
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const form = new FormData(e.currentTarget as HTMLFormElement);
-    if (!form.get("name")?.toString().trim()) {
+    if (!draft.name.trim()) {
       toast.error("Nome obrigatório");
       return;
     }
-    if (!form.get("position")?.toString().trim()) {
+    if (!draft.position.trim()) {
       toast.error("Cargo obrigatório");
       return;
     }
@@ -67,10 +93,91 @@ function NewEmployee() {
         <CardContent className="p-6 space-y-4">
           <h2 className="font-display font-semibold">Dados pessoais</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Nome completo" required><Input name="name" required /></Field>
-            <Field label="CPF" required><Input name="cpf" required placeholder="000.000.000-00" /></Field>
-            <Field label="Telefone" required><Input name="phone" required placeholder="(00) 00000-0000" /></Field>
-            <Field label="E-mail" required><Input type="email" name="email" required /></Field>
+            <Field label="Nome completo" required>
+              <Input value={draft.name} onChange={(e) => patchDraft({ name: e.target.value })} required />
+            </Field>
+            <Field label="CPF" required>
+              <Input
+                value={draft.cpf}
+                onChange={(e) => patchDraft({ cpf: e.target.value })}
+                required
+                placeholder="000.000.000-00"
+              />
+            </Field>
+            <Field label="Telefone" required>
+              <Input
+                value={draft.phone}
+                onChange={(e) => patchDraft({ phone: e.target.value })}
+                required
+                placeholder="(00) 00000-0000"
+              />
+            </Field>
+            <Field label="E-mail" required>
+              <Input
+                type="email"
+                value={draft.email}
+                onChange={(e) => patchDraft({ email: e.target.value })}
+                required
+              />
+            </Field>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-6 space-y-4">
+          <h2 className="font-display font-semibold">Endereço principal</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Field label="CEP">
+              <Input
+                value={draft.primary_address.zip_code}
+                onChange={(e) => patchAddress({ zip_code: e.target.value })}
+                placeholder="79000-000"
+              />
+            </Field>
+            <Field label="Cidade">
+              <Input
+                value={draft.primary_address.city}
+                onChange={(e) => patchAddress({ city: e.target.value })}
+                placeholder="Campo Grande"
+              />
+            </Field>
+            <Field label="UF">
+              <Input
+                value={draft.primary_address.state}
+                onChange={(e) => patchAddress({ state: e.target.value })}
+                placeholder="MS"
+                maxLength={2}
+              />
+            </Field>
+            <Field label="Bairro">
+              <Input
+                value={draft.primary_address.neighborhood}
+                onChange={(e) => patchAddress({ neighborhood: e.target.value })}
+                placeholder="Centro"
+              />
+            </Field>
+            <Field label="Rua">
+              <Input
+                value={draft.primary_address.street}
+                onChange={(e) => patchAddress({ street: e.target.value })}
+                placeholder="Rua Exemplo"
+              />
+            </Field>
+            <Field label="Número">
+              <Input
+                value={draft.primary_address.number}
+                onChange={(e) => patchAddress({ number: e.target.value })}
+                placeholder="123"
+              />
+            </Field>
+            <Field label="Complemento">
+              <Input
+                value={draft.primary_address.complement ?? ""}
+                onChange={(e) => patchAddress({ complement: e.target.value })}
+                placeholder="Sala, apto, referência..."
+              />
+            </Field>
           </div>
         </CardContent>
       </Card>
@@ -79,13 +186,37 @@ function NewEmployee() {
         <CardContent className="p-6 space-y-4">
           <h2 className="font-display font-semibold">Cargo e remuneração</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Cargo" required><Input name="position" required placeholder="Vendedor, Gerente..." /></Field>
-            <Field label="Data de contratação">
-              <DatePicker value={hiredAt} onChange={setHiredAt} name="hired_at" />
+            <Field label="Cargo" required>
+              <Input
+                value={draft.position}
+                onChange={(e) => patchDraft({ position: e.target.value })}
+                required
+                placeholder="Vendedor, Gerente..."
+              />
             </Field>
-            <Field label="Salário base"><Input type="number" step="0.01" name="salary" placeholder="0,00" /></Field>
+            <Field label="Data de contratação">
+              <DatePicker
+                value={draft.hired_at}
+                onChange={(value) => patchDraft({ hired_at: value })}
+                name="hired_at"
+              />
+            </Field>
+            <Field label="Salário base">
+              <Input
+                type="number"
+                step="0.01"
+                value={draft.salary}
+                onChange={(e) => patchDraft({ salary: Number(e.target.value) || 0 })}
+                placeholder="0,00"
+              />
+            </Field>
             <Field label="Tipo de comissão">
-              <Select value={commissionType} onValueChange={(v) => setCommissionType(v as typeof commissionType)}>
+              <Select
+                value={draft.commission_type}
+                onValueChange={(v) =>
+                  patchDraft({ commission_type: v as EmployeeDraft["commission_type"] })
+                }
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="percentage">Percentual</SelectItem>
@@ -93,8 +224,14 @@ function NewEmployee() {
                 </SelectContent>
               </Select>
             </Field>
-            <Field label={commissionType === "percentage" ? "Comissão (%)" : "Comissão (R$)"}>
-              <Input type="number" step="0.01" name="commission_rate" placeholder="0" />
+            <Field label={draft.commission_type === "percentage" ? "Comissão (%)" : "Comissão (R$)"}>
+              <Input
+                type="number"
+                step="0.01"
+                value={draft.commission_rate}
+                onChange={(e) => patchDraft({ commission_rate: Number(e.target.value) || 0 })}
+                placeholder="0"
+              />
             </Field>
           </div>
         </CardContent>
@@ -105,7 +242,10 @@ function NewEmployee() {
           <h2 className="font-display font-semibold">Acesso ao sistema</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Perfil de acesso">
-              <Select value={role} onValueChange={setRole}>
+              <Select
+                value={draft.role}
+                onValueChange={(value) => patchDraft({ role: value as EmployeeDraft["role"] })}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">Administrador</SelectItem>
@@ -115,14 +255,21 @@ function NewEmployee() {
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Senha temporária"><Input type="password" name="password" placeholder="Mínimo 8 caracteres" /></Field>
+            <Field label="Senha temporária">
+              <Input
+                type="password"
+                value={draft.password}
+                onChange={(e) => patchDraft({ password: e.target.value })}
+                placeholder="Mínimo 8 caracteres"
+              />
+            </Field>
           </div>
           <div className="flex items-center justify-between rounded-md border border-border p-4">
             <div>
               <div className="font-medium text-sm">Funcionário ativo</div>
               <div className="text-xs text-muted-foreground">Inativos não aparecem em novas vendas</div>
             </div>
-            <Switch checked={active} onCheckedChange={setActive} />
+            <Switch checked={draft.active} onCheckedChange={(value) => patchDraft({ active: value })} />
           </div>
         </CardContent>
       </Card>

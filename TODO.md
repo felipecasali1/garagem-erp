@@ -15,9 +15,8 @@
 
 ## Alta Prioridade
 
-- definir campos de tabelas que serão utilizados
-- fazer os migrations
+- fazer os migrations com policies e RLS
 - adaptar o projeto para comunicação com o Supabase
 - rodar o migration no Supabase
 - fazer a autenticação com Supabase Auth
-- proteger as rotas com autenticação
+- proteger as rotas com autenticação dependendo do nivel de acesso

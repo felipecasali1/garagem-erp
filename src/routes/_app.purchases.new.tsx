@@ -23,8 +23,10 @@ import {
   DialogTrigger,
 } from "@/shared/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
+import type { PurchaseDraft, SupplierOption } from "@/modules/purchases/types";
 import { customers as initialCustomers } from "@/shared/mock-data";
 import { initials } from "@/shared/lib/format";
+import type { Address, PersonType } from "@/shared/types/domain";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/purchases/new")({
@@ -32,37 +34,55 @@ export const Route = createFileRoute("/_app/purchases/new")({
   component: NewPurchase,
 });
 
-type Supplier = { id: number; name: string; document?: string; phone?: string; email?: string };
-
 function NewPurchase() {
   const navigate = useNavigate();
-  const [suppliers, setSuppliers] = useState<Supplier[]>(
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>(
     initialCustomers.map((c) => ({
       id: c.id,
       name: c.person.name,
-      document: c.person.cpf ?? c.person.cnpj,
+      cpf: c.person.cpf,
+      cnpj: c.person.cnpj,
       phone: c.person.phone,
       email: c.person.email,
+      type: c.person.type,
+      primary_address: c.person.primary_address,
     })),
   );
-  const [supplierId, setSupplierId] = useState<number | null>(null);
+  const [draft, setDraft] = useState<PurchaseDraft>({
+    supplier_id: null,
+    vehicle: {
+      plate: "",
+      model_label: "",
+      model_year: null,
+      current_mileage: null,
+    },
+    total_value: 0,
+    purchase_date: new Date().toISOString().slice(0, 10),
+    status: "pending",
+    notes: "",
+  });
   const [search, setSearch] = useState("");
-  const [purchaseDate, setPurchaseDate] = useState<string | undefined>(
-    new Date().toISOString().slice(0, 10),
-  );
   const [createOpen, setCreateOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const patchDraft = (patch: Partial<PurchaseDraft>) =>
+    setDraft((current) => ({ ...current, ...patch }));
+  const patchVehicle = (patch: Partial<PurchaseDraft["vehicle"]>) =>
+    setDraft((current) => ({
+      ...current,
+      vehicle: { ...current.vehicle, ...patch },
+    }));
 
   const filtered = useMemo(
     () =>
       suppliers.filter((s) =>
         s.name.toLowerCase().includes(search.toLowerCase()) ||
-        (s.document ?? "").includes(search),
+        `${s.cpf ?? ""}${s.cnpj ?? ""}`.includes(search),
       ),
     [suppliers, search],
   );
 
-  const selected = suppliers.find((s) => s.id === supplierId);
+  const selected = suppliers.find((s) => s.id === draft.supplier_id);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,10 +97,10 @@ function NewPurchase() {
     }, 500);
   };
 
-  const handleNewSupplier = (data: Omit<Supplier, "id">) => {
-    const s: Supplier = { id: Date.now(), ...data };
+  const handleNewSupplier = (data: Omit<SupplierOption, "id">) => {
+    const s: SupplierOption = { id: Date.now(), ...data };
     setSuppliers((arr) => [s, ...arr]);
-    setSupplierId(s.id);
+    patchDraft({ supplier_id: s.id });
     setCreateOpen(false);
     toast.success(`Fornecedor "${s.name}" criado`);
   };
@@ -119,10 +139,15 @@ function NewPurchase() {
               <div className="flex-1 min-w-0">
                 <div className="font-medium">{selected.name}</div>
                 <div className="text-xs text-muted-foreground truncate">
-                  {selected.document} · {selected.phone}
+                  {selected.cpf ?? selected.cnpj} · {selected.phone}
                 </div>
               </div>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setSupplierId(null)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => patchDraft({ supplier_id: null })}
+              >
                 Trocar
               </Button>
             </div>
@@ -150,7 +175,7 @@ function NewPurchase() {
                     <button
                       key={s.id}
                       type="button"
-                      onClick={() => setSupplierId(s.id)}
+                      onClick={() => patchDraft({ supplier_id: s.id })}
                       className="w-full flex items-center gap-3 p-3 text-left hover:bg-muted/40 cursor-pointer"
                     >
                       <Avatar className="h-8 w-8">
@@ -158,7 +183,9 @@ function NewPurchase() {
                       </Avatar>
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium truncate">{s.name}</div>
-                        <div className="text-xs text-muted-foreground truncate">{s.document}</div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {s.cpf ?? s.cnpj}
+                        </div>
                       </div>
                     </button>
                   ))
@@ -173,10 +200,42 @@ function NewPurchase() {
         <CardContent className="p-6 space-y-4">
           <h2 className="font-display font-semibold">Veículo adquirido</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Placa" required><Input required placeholder="ABC-1D23" /></Field>
-            <Field label="Marca / Modelo" required><Input required placeholder="Toyota Corolla" /></Field>
-            <Field label="Ano modelo"><Input type="number" /></Field>
-            <Field label="Quilometragem"><Input type="number" /></Field>
+            <Field label="Placa" required>
+              <Input
+                required
+                placeholder="ABC-1D23"
+                value={draft.vehicle.plate}
+                onChange={(e) => patchVehicle({ plate: e.target.value })}
+              />
+            </Field>
+            <Field label="Marca / Modelo" required>
+              <Input
+                required
+                placeholder="Toyota Corolla"
+                value={draft.vehicle.model_label}
+                onChange={(e) => patchVehicle({ model_label: e.target.value })}
+              />
+            </Field>
+            <Field label="Ano modelo">
+              <Input
+                type="number"
+                value={draft.vehicle.model_year ?? ""}
+                onChange={(e) =>
+                  patchVehicle({ model_year: e.target.value ? Number(e.target.value) : null })
+                }
+              />
+            </Field>
+            <Field label="Quilometragem">
+              <Input
+                type="number"
+                value={draft.vehicle.current_mileage ?? ""}
+                onChange={(e) =>
+                  patchVehicle({
+                    current_mileage: e.target.value ? Number(e.target.value) : null,
+                  })
+                }
+              />
+            </Field>
           </div>
         </CardContent>
       </Card>
@@ -185,12 +244,28 @@ function NewPurchase() {
         <CardContent className="p-6 space-y-4">
           <h2 className="font-display font-semibold">Dados financeiros</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Field label="Valor pago" required><Input type="number" required placeholder="0,00" /></Field>
+            <Field label="Valor pago" required>
+              <Input
+                type="number"
+                required
+                placeholder="0,00"
+                value={draft.total_value}
+                onChange={(e) => patchDraft({ total_value: Number(e.target.value) || 0 })}
+              />
+            </Field>
             <Field label="Data da compra" required>
-              <DatePicker value={purchaseDate} onChange={setPurchaseDate} required name="purchase_date" />
+              <DatePicker
+                value={draft.purchase_date}
+                onChange={(value) => patchDraft({ purchase_date: value })}
+                required
+                name="purchase_date"
+              />
             </Field>
             <Field label="Status">
-              <Select defaultValue="pending">
+              <Select
+                value={draft.status}
+                onValueChange={(value) => patchDraft({ status: value as PurchaseDraft["status"] })}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="pending">Pendente</SelectItem>
@@ -200,32 +275,113 @@ function NewPurchase() {
               </Select>
             </Field>
           </div>
-          <Field label="Observações"><Textarea rows={3} /></Field>
+          <Field label="Observações">
+            <Textarea
+              rows={3}
+              value={draft.notes}
+              onChange={(e) => patchDraft({ notes: e.target.value })}
+            />
+          </Field>
         </CardContent>
       </Card>
     </form>
   );
 }
 
-function NewSupplierDialog({ onCreate }: { onCreate: (s: Omit<Supplier, "id">) => void }) {
+function NewSupplierDialog({ onCreate }: { onCreate: (s: Omit<SupplierOption, "id">) => void }) {
   const [name, setName] = useState("");
   const [document, setDocument] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [type, setType] = useState<PersonType>("company");
+  const [address, setAddress] = useState<Address>({
+    zip_code: "",
+    city: "",
+    state: "",
+    neighborhood: "",
+    street: "",
+    number: "",
+    complement: "",
+  });
+  const patchAddress = (patch: Partial<Address>) =>
+    setAddress((current) => ({ ...current, ...patch }));
   return (
     <DialogContent>
       <DialogHeader>
         <DialogTitle>Novo Fornecedor</DialogTitle>
       </DialogHeader>
       <div className="space-y-4">
+        <Field label="Tipo">
+          <Select value={type} onValueChange={(value) => setType(value as PersonType)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="individual">Pessoa Física</SelectItem>
+              <SelectItem value="company">Pessoa Jurídica</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
         <Field label="Nome / Razão social" required>
           <Input value={name} onChange={(e) => setName(e.target.value)} required />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="CPF / CNPJ"><Input value={document} onChange={(e) => setDocument(e.target.value)} /></Field>
+          <Field label={type === "company" ? "CNPJ" : "CPF"}>
+            <Input value={document} onChange={(e) => setDocument(e.target.value)} />
+          </Field>
           <Field label="Telefone"><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
         </div>
         <Field label="E-mail"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="CEP">
+            <Input
+              placeholder="79000-000"
+              value={address.zip_code}
+              onChange={(e) => patchAddress({ zip_code: e.target.value })}
+            />
+          </Field>
+          <Field label="Cidade">
+            <Input
+              placeholder="Campo Grande"
+              value={address.city}
+              onChange={(e) => patchAddress({ city: e.target.value })}
+            />
+          </Field>
+          <Field label="UF">
+            <Input
+              placeholder="MS"
+              maxLength={2}
+              value={address.state}
+              onChange={(e) => patchAddress({ state: e.target.value })}
+            />
+          </Field>
+          <Field label="Bairro">
+            <Input
+              placeholder="Centro"
+              value={address.neighborhood}
+              onChange={(e) => patchAddress({ neighborhood: e.target.value })}
+            />
+          </Field>
+          <Field label="Rua">
+            <Input
+              placeholder="Rua Exemplo"
+              value={address.street}
+              onChange={(e) => patchAddress({ street: e.target.value })}
+            />
+          </Field>
+          <Field label="Número">
+            <Input
+              placeholder="123"
+              value={address.number}
+              onChange={(e) => patchAddress({ number: e.target.value })}
+            />
+          </Field>
+          <Field label="Complemento">
+            <Input
+              placeholder="Sala, apto, referência..."
+              value={address.complement ?? ""}
+              onChange={(e) => patchAddress({ complement: e.target.value })}
+            />
+          </Field>
+        </div>
       </div>
       <DialogFooter>
         <Button
@@ -235,7 +391,15 @@ function NewSupplierDialog({ onCreate }: { onCreate: (s: Omit<Supplier, "id">) =
               toast.error("Nome obrigatório");
               return;
             }
-            onCreate({ name, document, phone, email });
+            onCreate({
+              name,
+              cpf: type === "individual" ? document || undefined : undefined,
+              cnpj: type === "company" ? document || undefined : undefined,
+              phone,
+              email,
+              type,
+              primary_address: Object.values(address).some(Boolean) ? address : undefined,
+            });
           }}
         >
           <Plus className="h-4 w-4" /> Criar fornecedor

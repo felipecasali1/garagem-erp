@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/components/ui/select";
+import type { CustomerDraft } from "@/modules/customers/types";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/clients/new")({
@@ -22,13 +23,35 @@ export const Route = createFileRoute("/_app/clients/new")({
 
 function NewClient() {
   const navigate = useNavigate();
-  const [type, setType] = useState<"individual" | "company">("individual");
+  const [draft, setDraft] = useState<CustomerDraft>({
+    type: "individual",
+    name: "",
+    document: "",
+    phone: "",
+    email: "",
+    notes: "",
+    primary_address: {
+      zip_code: "",
+      city: "",
+      state: "",
+      neighborhood: "",
+      street: "",
+      number: "",
+      complement: "",
+    },
+  });
   const [saving, setSaving] = useState(false);
+  const patchDraft = (patch: Partial<CustomerDraft>) =>
+    setDraft((current) => ({ ...current, ...patch }));
+  const patchAddress = (patch: Partial<CustomerDraft["primary_address"]>) =>
+    setDraft((current) => ({
+      ...current,
+      primary_address: { ...current.primary_address, ...patch },
+    }));
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const form = new FormData(e.currentTarget as HTMLFormElement);
-    if (!form.get("name")?.toString().trim()) {
+    if (!draft.name.trim()) {
       toast.error("Informe o nome do cliente");
       return;
     }
@@ -59,7 +82,10 @@ function NewClient() {
         <CardContent className="p-6 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Tipo">
-              <Select value={type} onValueChange={(v) => setType(v as typeof type)}>
+              <Select
+                value={draft.type}
+                onValueChange={(v) => patchDraft({ type: v as CustomerDraft["type"] })}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="individual">Pessoa Física</SelectItem>
@@ -67,22 +93,116 @@ function NewClient() {
                 </SelectContent>
               </Select>
             </Field>
-            <Field label={type === "company" ? "Razão Social" : "Nome completo"} required>
-              <Input name="name" required />
+            <Field label={draft.type === "company" ? "Razão Social" : "Nome completo"} required>
+              <Input
+                name="name"
+                required
+                value={draft.name}
+                onChange={(e) => patchDraft({ name: e.target.value })}
+              />
             </Field>
-            <Field label={type === "company" ? "CNPJ" : "CPF"} required>
-              <Input name="document" required placeholder={type === "company" ? "00.000.000/0000-00" : "000.000.000-00"} />
+            <Field label={draft.type === "company" ? "CNPJ" : "CPF"} required>
+              <Input
+                name="document"
+                required
+                value={draft.document}
+                onChange={(e) => patchDraft({ document: e.target.value })}
+                placeholder={draft.type === "company" ? "00.000.000/0000-00" : "000.000.000-00"}
+              />
             </Field>
             <Field label="Telefone" required>
-              <Input name="phone" required placeholder="(00) 00000-0000" />
+              <Input
+                name="phone"
+                required
+                value={draft.phone}
+                onChange={(e) => patchDraft({ phone: e.target.value })}
+                placeholder="(00) 00000-0000"
+              />
             </Field>
             <Field label="E-mail" required>
-              <Input type="email" name="email" required />
+              <Input
+                type="email"
+                name="email"
+                required
+                value={draft.email}
+                onChange={(e) => patchDraft({ email: e.target.value })}
+              />
             </Field>
           </div>
           <Field label="Observações">
-            <Textarea rows={3} name="notes" placeholder="Notas internas..." />
+            <Textarea
+              rows={3}
+              name="notes"
+              value={draft.notes}
+              onChange={(e) => patchDraft({ notes: e.target.value })}
+              placeholder="Notas internas..."
+            />
           </Field>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-6 space-y-4">
+          <h2 className="font-display font-semibold">Endereço principal</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Field label="CEP">
+              <Input
+                name="zip_code"
+                value={draft.primary_address.zip_code}
+                onChange={(e) => patchAddress({ zip_code: e.target.value })}
+                placeholder="79000-000"
+              />
+            </Field>
+            <Field label="Cidade">
+              <Input
+                name="city"
+                value={draft.primary_address.city}
+                onChange={(e) => patchAddress({ city: e.target.value })}
+                placeholder="Campo Grande"
+              />
+            </Field>
+            <Field label="UF">
+              <Input
+                name="state"
+                value={draft.primary_address.state}
+                onChange={(e) => patchAddress({ state: e.target.value })}
+                placeholder="MS"
+                maxLength={2}
+              />
+            </Field>
+            <Field label="Bairro">
+              <Input
+                name="neighborhood"
+                value={draft.primary_address.neighborhood}
+                onChange={(e) => patchAddress({ neighborhood: e.target.value })}
+                placeholder="Centro"
+              />
+            </Field>
+            <Field label="Rua">
+              <Input
+                name="street"
+                value={draft.primary_address.street}
+                onChange={(e) => patchAddress({ street: e.target.value })}
+                placeholder="Rua Exemplo"
+              />
+            </Field>
+            <Field label="Número">
+              <Input
+                name="number"
+                value={draft.primary_address.number}
+                onChange={(e) => patchAddress({ number: e.target.value })}
+                placeholder="123"
+              />
+            </Field>
+            <Field label="Complemento">
+              <Input
+                name="complement"
+                value={draft.primary_address.complement ?? ""}
+                onChange={(e) => patchAddress({ complement: e.target.value })}
+                placeholder="Sala, apto, referência..."
+              />
+            </Field>
+          </div>
         </CardContent>
       </Card>
     </form>

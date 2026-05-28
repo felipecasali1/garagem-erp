@@ -44,9 +44,18 @@ The current UI already contains screens or behavior for:
 
 Important implementation note:
 
-- there is no real persistence layer yet
+- Supabase Auth login is now wired into the `/login` screen with client-side session handling
+- the `_app` layout now redirects unauthenticated users back to `/login`
+- logout is available from the sidebar and current session email is shown in the shell
+- the vehicles module is wired to Supabase for core CRUD, accessory persistence, publish/unpublish, and checklist persistence, but it still depends on the schema + RLS migrations being applied first
+- vehicle history still intentionally waits on the purchases/sales module migration, so the vehicle detail page shows a placeholder there instead of mock-backed records
+- an initial relational schema draft now exists under `supabase/migrations/20260523120000_initial_schema.sql`
+- a dedicated bootstrap helper now exists to create the first internal `people` + `employees` + `users` records from an existing `auth.users` email after migrations are applied
+- Supabase env usage currently expects `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` for browser access; server-side fallback also reads `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
+- a lightweight automated test setup now exists via `npm test`, `npm run test:unit`, and `npm run test:integration`, compiling selected pure TypeScript modules to `.test-dist` and executing them with Node's built-in test runner
+- current coverage includes unit tests for formatting helpers, default accessories consistency, checklist summary business rules, vehicle draft normalization, plus an integration-style workflow test for vehicle preparation and margin calculation
 - most entities come from `src/lib/mock-data.ts`
-- checklist items use an in-memory store in `src/lib/checklist.ts`
+- checklist items are now fetched and mutated through Supabase in the checklist module
 - some features shown in the UI are still synthetic/demo behavior, especially users, installments, notifications, and settings data
 
 ## Current Code Structure
@@ -77,10 +86,13 @@ src/
       components/
       services/
     purchases/
+      types.ts
       services/
     sales/
+      types.ts
       services/
     vehicles/
+      types.ts
       services/
   routes/
   shared/
@@ -458,11 +470,8 @@ Approved for V1:
 - `financial_transactions`
 - `company_settings`
 
-Review before migrations:
+Review before implementation:
 
-- `installments`
-  Reason: the concept is correct, but the exact ownership still needs a final decision
-  Define whether installments belong to `sale_payments`, `financial_transactions`, or both
 - `notifications`
   Reason: the UI implies notifications, but the event model is not yet mature enough to justify schema lock-in
 
@@ -483,11 +492,11 @@ Recommended V1 migration scope:
 13. `commissions`
 14. `purchases`
 15. `financial_transactions`
-16. `company_settings`
+16. `installments`
+17. `company_settings`
 
 Suggested V1.1 or later:
 
-- `installments`
 - `notifications`
 
 Notes for Supabase planning:
@@ -499,6 +508,7 @@ Notes for Supabase planning:
 - `vehicle_checklist_items.attachments` can start as JSON and be normalized later if uploads become a first-class feature
 - `financial_transactions` should be treated as the financial ledger table
 - `sale_payments` is worth keeping separate because the current product already implies partial payments, financing, and trade-in scenarios
+- `installments` in the current draft can point to `sale_payments`, `financial_transactions`, or both; that is intentionally flexible until the service layer is implemented
 
 ## Relationship Summary
 
@@ -535,6 +545,7 @@ When working in this repository, assume:
 - settings/users/accessories/notifications exist in the product scope even if not fully persisted yet
 - sales, purchases, commissions, and finance should stay consistent with each other
 - vehicle profitability depends on `cost_price + preparation costs` versus `sale_price`
+- addresses now exist in the shared frontend model as an optional `Person.primary_address`; keep richer address relations in the database layer, but use the single primary address shape for person-facing forms until the UI needs multiple addresses
 
 ## Suggested File Structure
 
@@ -594,7 +605,8 @@ Rules to follow:
 - move reusable primitives to `shared/components/ui/`
 - move global shell pieces to `shared/components/layout/`
 - move domain-specific state, mock data, and adapters to `modules/*/services/`
-- keep compatibility barrels in `src/lib/` only as a transition layer
+- keep form draft types close to their domain modules in `modules/*/types.ts` when they represent multi-step or pre-persistence UI state
+- keep compatibility glue in `src/lib/` only when removing it immediately would cause broad churn
 - prefer new imports from `shared/` and `modules/` instead of growing `src/lib/`
 - use the module `services/` layer as the seam for replacing mocks with Supabase access later
 
@@ -603,8 +615,10 @@ Rules to follow:
 This context was consolidated from:
 
 - `classdiagram.pdf`
-- `src/lib/types.ts`
 - `src/lib/mock-data.ts`
-- `src/lib/checklist.ts`
+- `src/shared/types/domain.ts`
+- `src/modules/checklist/index.ts`
+- `src/modules/checklist/services/checklist-store.ts`
 - current routes for vehicles, sales, purchases, financial, login, and settings
 - the currently implemented modular structure under `src/app`, `src/modules`, `src/shared`, and `src/styles`
+- `supabase/migrations/20260523120000_initial_schema.sql`

@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutGrid,
   List,
@@ -18,7 +19,11 @@ import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { brl } from "@/shared/lib/format";
-import { vehicles } from "@/shared/mock-data";
+import {
+  listVehicles,
+  setVehiclePublished,
+  vehicleKeys,
+} from "@/modules/vehicles/services/vehicles";
 import {
   Table,
   TableBody,
@@ -45,10 +50,43 @@ function VehiclesPage() {
   const [view, setView] = useState<"grid" | "table">("grid");
   const [q, setQ] = useState("");
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const {
+    data: vehicles = [],
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: vehicleKeys.all,
+    queryFn: listVehicles,
+  });
+  const publishMutation = useMutation({
+    mutationFn: ({ id, published }: { id: number; published: boolean }) =>
+      setVehiclePublished(id, published),
+    onSuccess: (vehicle) => {
+      queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
+    },
+  });
 
   const filtered = vehicles.filter(
     (v) => !q || `${v.brand} ${v.model} ${v.plate}`.toLowerCase().includes(q.toLowerCase()),
   );
+
+  if (isLoading) {
+    return (
+      <div className="max-w-[1600px] mx-auto py-10 text-sm text-muted-foreground">
+        Carregando veículos do Supabase...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-[1600px] mx-auto py-10 text-sm text-destructive">
+        Falha ao carregar veículos: {error instanceof Error ? error.message : "erro desconhecido"}.
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-[1600px] mx-auto">
@@ -109,6 +147,11 @@ function VehiclesPage() {
                   <StatusBadge kind="vehicle" value={v.status} />
                 </div>
                 <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    publishMutation.mutate({ id: v.id, published: !v.published });
+                  }}
                   className="absolute top-3 right-3 h-8 w-8 rounded-full bg-background/80 backdrop-blur flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
                   title={v.published ? "Despublicar" : "Publicar"}
                 >
@@ -151,7 +194,9 @@ function VehiclesPage() {
                     <div className="font-display font-semibold text-lg">{brl(v.sale_price)}</div>
                   </div>
                   <Button size="sm" variant="outline" asChild onClick={(e) => e.stopPropagation()}>
-                    <Link to="/vehicles/$id" params={{ id: String(v.id) }}>Ver detalhes</Link>
+                    <Link to="/vehicles/$id" params={{ id: String(v.id) }}>
+                      Ver detalhes
+                    </Link>
                   </Button>
                 </div>
               </CardContent>
@@ -177,7 +222,11 @@ function VehiclesPage() {
             </TableHeader>
             <TableBody>
               {filtered.map((v) => (
-                <TableRow key={v.id} onClick={() => navigate({ to: "/vehicles/$id", params: { id: String(v.id) } })} className="cursor-pointer">
+                <TableRow
+                  key={v.id}
+                  onClick={() => navigate({ to: "/vehicles/$id", params: { id: String(v.id) } })}
+                  className="cursor-pointer"
+                >
                   <TableCell>
                     <span className="plate-chip">{v.plate}</span>
                   </TableCell>
@@ -200,6 +249,10 @@ function VehiclesPage() {
                     <Button
                       size="icon"
                       variant="ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        publishMutation.mutate({ id: v.id, published: !v.published });
+                      }}
                       aria-label={v.published ? `Despublicar ${v.plate}` : `Publicar ${v.plate}`}
                     >
                       {v.published ? (
@@ -212,8 +265,14 @@ function VehiclesPage() {
                   <TableCell className="text-muted-foreground">{brl(v.sale_price)}</TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">
-                      <Button size="icon" variant="ghost" aria-label={`Editar ${v.plate}`}>
-                        <Pencil className="h-4 w-4" />
+                      <Button size="icon" variant="ghost" asChild aria-label={`Editar ${v.plate}`}>
+                        <Link
+                          to="/vehicles/edit/$id"
+                          params={{ id: String(v.id) }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Link>
                       </Button>
                       <Button size="icon" variant="ghost" aria-label={`Mais ações para ${v.plate}`}>
                         <MoreHorizontal className="h-4 w-4" />
