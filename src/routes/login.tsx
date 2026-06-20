@@ -41,7 +41,7 @@ function LoginPage() {
       const message =
         error instanceof Error ? error.message : "Nao foi possivel autenticar no Supabase.";
       setErrorMessage(message);
-      toast.error("Falha ao conectar com o Supabase.");
+      toast.error("Falha ao realizar login.");
     } finally {
       setSubmitting(false);
     }

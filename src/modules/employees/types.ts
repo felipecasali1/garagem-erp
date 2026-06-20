@@ -13,7 +13,5 @@ export type EmployeeDraft = {
   salary: number;
   commission_type: CommissionType;
   commission_rate: number;
-  role: EmployeeAccessRole;
-  password: string;
   active: boolean;
 };

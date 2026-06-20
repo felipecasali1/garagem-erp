@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { ArrowLeft, Save } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -14,6 +15,7 @@ import {
   SelectValue,
 } from "@/shared/components/ui/select";
 import type { CustomerDraft } from "@/modules/customers/types";
+import { createCustomer } from "@/modules/customers/services/customers";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/clients/new")({
@@ -40,7 +42,18 @@ function NewClient() {
       complement: "",
     },
   });
-  const [saving, setSaving] = useState(false);
+
+  const createMutation = useMutation({
+    mutationFn: createCustomer,
+    onSuccess: async (customer) => {
+      toast.success("Cliente cadastrado");
+      await navigate({ to: "/clients/$id", params: { id: String(customer.id) } });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao cadastrar cliente.");
+    },
+  });
+
   const patchDraft = (patch: Partial<CustomerDraft>) =>
     setDraft((current) => ({ ...current, ...patch }));
   const patchAddress = (patch: Partial<CustomerDraft["primary_address"]>) =>
@@ -55,11 +68,7 @@ function NewClient() {
       toast.error("Informe o nome do cliente");
       return;
     }
-    setSaving(true);
-    setTimeout(() => {
-      toast.success("Cliente cadastrado");
-      navigate({ to: "/clients" });
-    }, 500);
+    createMutation.mutate(draft);
   };
 
   return (
@@ -70,11 +79,9 @@ function NewClient() {
             <ArrowLeft className="h-4 w-4" /> Clientes
           </Link>
         </Button>
-        <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">
-          Novo Cliente
-        </h1>
-        <Button type="submit" disabled={saving}>
-          <Save className="h-4 w-4" /> {saving ? "Salvando..." : "Salvar"}
+        <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">Novo Cliente</h1>
+        <Button type="submit" disabled={createMutation.isPending}>
+          <Save className="h-4 w-4" /> {createMutation.isPending ? "Salvando..." : "Salvar"}
         </Button>
       </div>
 
@@ -86,7 +93,9 @@ function NewClient() {
                 value={draft.type}
                 onValueChange={(v) => patchDraft({ type: v as CustomerDraft["type"] })}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="individual">Pessoa Física</SelectItem>
                   <SelectItem value="company">Pessoa Jurídica</SelectItem>
@@ -209,7 +218,15 @@ function NewClient() {
   );
 }
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="space-y-1.5">
       <Label className="text-xs uppercase tracking-wide text-muted-foreground">

@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { ArrowLeft, Save } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -7,15 +8,9 @@ import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
 import { Switch } from "@/shared/components/ui/switch";
 import { DatePicker } from "@/shared/components/ui/date-picker";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/shared/components/ui/select";
-import type { EmployeeDraft } from "@/modules/employees/types";
 import { toast } from "sonner";
+import { createEmployee } from "@/modules/employees/services/employees";
+import type { EmployeeDraft } from "@/modules/employees/types";
 
 export const Route = createFileRoute("/_app/employees/new")({
   head: () => ({ meta: [{ title: "Novo Funcionário | GaragemERP" }] }),
@@ -43,11 +38,20 @@ function NewEmployee() {
     salary: 0,
     commission_type: "percentage",
     commission_rate: 0,
-    role: "seller",
-    password: "",
     active: true,
   });
-  const [saving, setSaving] = useState(false);
+
+  const createMutation = useMutation({
+    mutationFn: createEmployee,
+    onSuccess: async (employee) => {
+      toast.success("Funcionário cadastrado");
+      await navigate({ to: "/employees/$id", params: { id: String(employee.id) } });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao cadastrar funcionário.");
+    },
+  });
+
   const patchDraft = (patch: Partial<EmployeeDraft>) =>
     setDraft((current) => ({ ...current, ...patch }));
   const patchAddress = (patch: Partial<EmployeeDraft["primary_address"]>) =>
@@ -56,21 +60,9 @@ function NewEmployee() {
       primary_address: { ...current.primary_address, ...patch },
     }));
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!draft.name.trim()) {
-      toast.error("Nome obrigatório");
-      return;
-    }
-    if (!draft.position.trim()) {
-      toast.error("Cargo obrigatório");
-      return;
-    }
-    setSaving(true);
-    setTimeout(() => {
-      toast.success("Funcionário cadastrado");
-      navigate({ to: "/employees" });
-    }, 500);
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    createMutation.mutate(draft);
   };
 
   return (
@@ -84,8 +76,8 @@ function NewEmployee() {
         <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">
           Novo Funcionário
         </h1>
-        <Button type="submit" disabled={saving}>
-          <Save className="h-4 w-4" /> {saving ? "Salvando..." : "Salvar"}
+        <Button type="submit" disabled={createMutation.isPending}>
+          <Save className="h-4 w-4" /> {createMutation.isPending ? "Salvando..." : "Salvar"}
         </Button>
       </div>
 
@@ -94,7 +86,11 @@ function NewEmployee() {
           <h2 className="font-display font-semibold">Dados pessoais</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Nome completo" required>
-              <Input value={draft.name} onChange={(e) => patchDraft({ name: e.target.value })} required />
+              <Input
+                value={draft.name}
+                onChange={(e) => patchDraft({ name: e.target.value })}
+                required
+              />
             </Field>
             <Field label="CPF" required>
               <Input
@@ -211,20 +207,22 @@ function NewEmployee() {
               />
             </Field>
             <Field label="Tipo de comissão">
-              <Select
+              <select
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 value={draft.commission_type}
-                onValueChange={(v) =>
-                  patchDraft({ commission_type: v as EmployeeDraft["commission_type"] })
+                onChange={(e) =>
+                  patchDraft({
+                    commission_type: e.target.value as EmployeeDraft["commission_type"],
+                  })
                 }
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="percentage">Percentual</SelectItem>
-                  <SelectItem value="fixed">Valor fixo</SelectItem>
-                </SelectContent>
-              </Select>
+                <option value="percentage">Percentual</option>
+                <option value="fixed">Valor fixo</option>
+              </select>
             </Field>
-            <Field label={draft.commission_type === "percentage" ? "Comissão (%)" : "Comissão (R$)"}>
+            <Field
+              label={draft.commission_type === "percentage" ? "Comissão (%)" : "Comissão (R$)"}
+            >
               <Input
                 type="number"
                 step="0.01"
@@ -234,42 +232,17 @@ function NewEmployee() {
               />
             </Field>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="p-6 space-y-4">
-          <h2 className="font-display font-semibold">Acesso ao sistema</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Perfil de acesso">
-              <Select
-                value={draft.role}
-                onValueChange={(value) => patchDraft({ role: value as EmployeeDraft["role"] })}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">Administrador</SelectItem>
-                  <SelectItem value="manager">Gerente</SelectItem>
-                  <SelectItem value="seller">Vendedor</SelectItem>
-                  <SelectItem value="financial">Financeiro</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Senha temporária">
-              <Input
-                type="password"
-                value={draft.password}
-                onChange={(e) => patchDraft({ password: e.target.value })}
-                placeholder="Mínimo 8 caracteres"
-              />
-            </Field>
-          </div>
           <div className="flex items-center justify-between rounded-md border border-border p-4">
             <div>
               <div className="font-medium text-sm">Funcionário ativo</div>
-              <div className="text-xs text-muted-foreground">Inativos não aparecem em novas vendas</div>
+              <div className="text-xs text-muted-foreground">
+                Inativos não aparecem em novas vendas nem nos responsáveis
+              </div>
             </div>
-            <Switch checked={draft.active} onCheckedChange={(value) => patchDraft({ active: value })} />
+            <Switch
+              checked={draft.active}
+              onCheckedChange={(value) => patchDraft({ active: value })}
+            />
           </div>
         </CardContent>
       </Card>
@@ -277,7 +250,15 @@ function NewEmployee() {
   );
 }
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="space-y-1.5">
       <Label className="text-xs uppercase tracking-wide text-muted-foreground">

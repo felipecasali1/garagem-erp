@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Save, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -14,8 +15,13 @@ import {
   SelectValue,
 } from "@/shared/components/ui/select";
 import type { CustomerDraft } from "@/modules/customers/types";
+import {
+  customerKeys,
+  deleteCustomer,
+  getCustomerById,
+  updateCustomer,
+} from "@/modules/customers/services/customers";
 import { toast } from "sonner";
-import { customers } from "@/shared/mock-data";
 
 export const Route = createFileRoute("/_app/clients/edit/$id")({
   head: () => ({ meta: [{ title: "Editar Cliente | GaragemERP" }] }),
@@ -25,33 +31,72 @@ export const Route = createFileRoute("/_app/clients/edit/$id")({
 function EditClient() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  const c = customers.find((x) => String(x.id) === id);
-  const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState<CustomerDraft>(() => ({
-    type: c?.person.type ?? "individual",
-    name: c?.person.name ?? "",
-    document: c?.person.cpf ?? c?.person.cnpj ?? "",
-    phone: c?.person.phone ?? "",
-    email: c?.person.email ?? "",
-    notes: c?.notes ?? "",
-    primary_address: {
-      zip_code: c?.person.primary_address?.zip_code ?? "",
-      city: c?.person.primary_address?.city ?? "",
-      state: c?.person.primary_address?.state ?? "",
-      neighborhood: c?.person.primary_address?.neighborhood ?? "",
-      street: c?.person.primary_address?.street ?? "",
-      number: c?.person.primary_address?.number ?? "",
-      complement: c?.person.primary_address?.complement ?? "",
+  const customerId = Number(id);
+  const { data: customer, isLoading } = useQuery({
+    queryKey: customerKeys.detail(customerId),
+    queryFn: () => getCustomerById(customerId),
+    enabled: Number.isFinite(customerId),
+  });
+  const [draft, setDraft] = useState<CustomerDraft | null>(null);
+
+  useEffect(() => {
+    if (!customer) return;
+    setDraft({
+      type: customer.person.type,
+      name: customer.person.name,
+      document: customer.person.cpf ?? customer.person.cnpj ?? "",
+      phone: customer.person.phone,
+      email: customer.person.email,
+      notes: customer.notes ?? "",
+      primary_address: {
+        zip_code: customer.person.primary_address?.zip_code ?? "",
+        city: customer.person.primary_address?.city ?? "",
+        state: customer.person.primary_address?.state ?? "",
+        neighborhood: customer.person.primary_address?.neighborhood ?? "",
+        street: customer.person.primary_address?.street ?? "",
+        number: customer.person.primary_address?.number ?? "",
+        complement: customer.person.primary_address?.complement ?? "",
+      },
+    });
+  }, [customer]);
+
+  const updateMutation = useMutation({
+    mutationFn: (values: CustomerDraft) => updateCustomer(customerId, values),
+    onSuccess: async () => {
+      toast.success("Cliente atualizado");
+      await navigate({ to: "/clients/$id", params: { id } });
     },
-  }));
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao atualizar cliente.");
+    },
+  });
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteCustomer(customerId),
+    onSuccess: async () => {
+      toast.success("Cliente removido");
+      await navigate({ to: "/clients" });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao excluir cliente.");
+    },
+  });
+
   const patchDraft = (patch: Partial<CustomerDraft>) =>
-    setDraft((current) => ({ ...current, ...patch }));
+    setDraft((current) => (current ? { ...current, ...patch } : current));
   const patchAddress = (patch: Partial<CustomerDraft["primary_address"]>) =>
-    setDraft((current) => ({
-      ...current,
-      primary_address: { ...current.primary_address, ...patch },
-    }));
-  if (!c) {
+    setDraft((current) =>
+      current ? { ...current, primary_address: { ...current.primary_address, ...patch } } : current,
+    );
+
+  if (isLoading) {
+    return (
+      <div className="max-w-3xl mx-auto py-16 text-sm text-muted-foreground">
+        Carregando cliente...
+      </div>
+    );
+  }
+
+  if (!customer || !draft) {
     return (
       <div className="max-w-2xl mx-auto text-center py-20">
         <h2 className="font-display text-xl mb-2">Cliente não encontrado</h2>
@@ -60,13 +105,9 @@ function EditClient() {
     );
   }
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    setTimeout(() => {
-      toast.success("Cliente atualizado");
-      navigate({ to: "/clients/$id", params: { id } });
-    }, 500);
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    updateMutation.mutate(draft);
   };
 
   return (
@@ -80,18 +121,11 @@ function EditClient() {
         <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">
           Editar Cliente
         </h1>
-        <Button
-          variant="outline"
-          type="button"
-          onClick={() => {
-            toast.success("Cliente removido");
-            navigate({ to: "/clients" });
-          }}
-        >
+        <Button variant="outline" type="button" onClick={() => deleteMutation.mutate()}>
           <Trash2 className="h-4 w-4" /> Excluir
         </Button>
-        <Button type="submit" disabled={saving}>
-          <Save className="h-4 w-4" /> {saving ? "Salvando..." : "Salvar"}
+        <Button type="submit" disabled={updateMutation.isPending}>
+          <Save className="h-4 w-4" /> {updateMutation.isPending ? "Salvando..." : "Salvar"}
         </Button>
       </div>
 
@@ -103,7 +137,9 @@ function EditClient() {
                 value={draft.type}
                 onValueChange={(v) => patchDraft({ type: v as CustomerDraft["type"] })}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="individual">Pessoa Física</SelectItem>
                   <SelectItem value="company">Pessoa Jurídica</SelectItem>

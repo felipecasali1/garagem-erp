@@ -9,6 +9,7 @@
 ## Média Prioridade
 
 - adaptar frontend para receber os dados do Supabase nas tabelas, estatísticas e outros
+- clientes e endereços já estão com persistência real; próximo passo é conectar vendas/purchases para fechar o histórico
 - facilitar/melhorar checklist
 - definir a questão dos níveis de acesso e como isso será feito no SUpabase
 - melhoria e revisão nos formulários 

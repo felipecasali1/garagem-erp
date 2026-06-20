@@ -55,8 +55,12 @@ Important implementation note:
 - a lightweight automated test setup now exists via `npm test`, `npm run test:unit`, and `npm run test:integration`, compiling selected pure TypeScript modules to `.test-dist` and executing them with Node's built-in test runner
 - current coverage includes unit tests for formatting helpers, default accessories consistency, checklist summary business rules, vehicle draft normalization, plus an integration-style workflow test for vehicle preparation and margin calculation
 - most entities come from `src/lib/mock-data.ts`
-- checklist items are now fetched and mutated through Supabase in the checklist module
-- some features shown in the UI are still synthetic/demo behavior, especially users, installments, notifications, and settings data
+- checklist items are now fetched and mutated through Supabase in the checklist module, and the responsible employee picker now reads real `employees` rows instead of mock employee data
+- the employees module now reads and mutates real `people` + `employees` rows from Supabase
+- the settings "Usuários" tab now creates real auth accounts plus linked `people` + `employees` + `public.users` records through a server-side admin action, and the current user's own access toggle is protected in the UI
+- the clients module now reads and mutates real `people` + `addresses` + `customers` rows from Supabase, and the main client form/detail pages now treat the address as part of the real persisted flow instead of mock data
+- the vehicle detail page now treats margin as `sale_price - (cost_price + estimated checklist preparation cost)`, while still showing the realized preparation cost separately
+- some features shown in the UI are still synthetic/demo behavior, especially installments, notifications, company settings, and the remaining sales/purchases/financial mock screens
 
 ## Current Code Structure
 
