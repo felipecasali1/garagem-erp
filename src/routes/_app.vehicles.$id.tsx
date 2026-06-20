@@ -87,9 +87,10 @@ function VehicleDetail() {
   }
 
   const checklistSummary = summarize(checklistItems);
-  const totalInvested = vehicle.cost_price + checklistSummary.actualCost;
-  const margin = vehicle.sale_price - totalInvested;
-  const marginPct = totalInvested > 0 ? (margin / totalInvested) * 100 : 0;
+  const estimatedInvested = vehicle.cost_price + checklistSummary.estimatedCost;
+  const actualInvested = vehicle.cost_price + checklistSummary.actualCost;
+  const margin = vehicle.sale_price - estimatedInvested;
+  const marginPct = estimatedInvested > 0 ? (margin / estimatedInvested) * 100 : 0;
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -134,16 +135,24 @@ function VehicleDetail() {
             </div>
             <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border">
               <div>
-                <div className="text-xs text-muted-foreground">Custo</div>
+                <div className="text-xs text-muted-foreground">Custo de compra</div>
                 <div className="font-medium">{brl(vehicle.cost_price)}</div>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground">Preparação</div>
+                <div className="text-xs text-muted-foreground">Preparação estimada</div>
+                <div className="font-medium">{brl(checklistSummary.estimatedCost)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Preparação realizada</div>
                 <div className="font-medium">{brl(checklistSummary.actualCost)}</div>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground">Investido</div>
-                <div className="font-medium">{brl(totalInvested)}</div>
+                <div className="text-xs text-muted-foreground">Investido estimado</div>
+                <div className="font-medium">{brl(estimatedInvested)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Investido real</div>
+                <div className="font-medium">{brl(actualInvested)}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Margem estimada</div>

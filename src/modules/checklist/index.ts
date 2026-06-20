@@ -4,7 +4,6 @@ export {
   checklistKeys,
   createChecklistItem,
   deleteChecklistItem,
-  findEmployee,
   summarize,
   updateChecklistItem,
 } from "@/modules/checklist/services/checklist";

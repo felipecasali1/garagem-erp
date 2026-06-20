@@ -21,7 +21,7 @@ export function AppLayout() {
         <div className="text-center space-y-2">
           <p className="text-lg font-medium text-foreground">Verificando sua sessão...</p>
           <p className="text-sm text-muted-foreground">
-            Conectando ao Supabase para carregar o acesso.
+            Conectando ao sistema para carregar o acesso.
           </p>
         </div>
       </div>

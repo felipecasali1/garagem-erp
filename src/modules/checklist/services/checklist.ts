@@ -1,5 +1,4 @@
 import { supabase } from "@/shared/supabase/client";
-import { employees } from "@/modules/employees/services/employees.mock";
 import { summarizeChecklist } from "@/modules/checklist/lib/summarize-checklist";
 import type { ChecklistItem, ChecklistSummary } from "@/modules/checklist/types";
 
@@ -150,9 +149,4 @@ export async function deleteChecklistItem(id: string) {
 
 export function summarize(list: ChecklistItem[]): ChecklistSummary {
   return summarizeChecklist(list);
-}
-
-export function findEmployee(id?: number) {
-  if (!id) return undefined;
-  return employees.find((employee) => employee.id === id);
 }

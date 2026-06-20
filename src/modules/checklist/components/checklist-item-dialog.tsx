@@ -1,5 +1,5 @@
 import { useEffect, type FormEvent } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -35,7 +35,7 @@ import {
   type ChecklistStatus,
   updateChecklistItem,
 } from "@/modules/checklist";
-import { employees } from "@/shared/mock-data";
+import { employeeKeys, listActiveEmployees } from "@/modules/employees/services/employees";
 
 const schema = z.object({
   title: z.string().trim().min(2, "Título obrigatório").max(120),
@@ -95,6 +95,10 @@ export function ChecklistItemDialog({
     },
   });
   const queryClient = useQueryClient();
+  const { data: employees = [] } = useQuery({
+    queryKey: employeeKeys.active,
+    queryFn: listActiveEmployees,
+  });
   const invalidateChecklist = async () => {
     await queryClient.invalidateQueries({ queryKey: checklistKeys.all });
     await queryClient.invalidateQueries({ queryKey: checklistKeys.byVehicle(vehicleId) });
@@ -278,13 +282,17 @@ export function ChecklistItemDialog({
                   <SelectValue placeholder="Selecionar funcionário" />
                 </SelectTrigger>
                 <SelectContent>
-                  {employees
-                    .filter((e) => e.active)
-                    .map((e) => (
-                      <SelectItem key={e.id} value={String(e.id)}>
-                        {e.person.name} — {e.position}
+                  {employees.length === 0 ? (
+                    <SelectItem value="__none__" disabled>
+                      Nenhum funcionário ativo disponível
+                    </SelectItem>
+                  ) : (
+                    employees.map((employee) => (
+                      <SelectItem key={employee.id} value={String(employee.id)}>
+                        {employee.person.name} — {employee.position}
                       </SelectItem>
-                    ))}
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </Field>

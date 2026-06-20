@@ -31,6 +31,13 @@ test("summarizeChecklist calcula status e custos corretamente", () => {
     assert.equal(summary.actualCost, 230);
     assert.equal(summary.progress, 33);
 });
+test("summarizeChecklist usa custo estimado quando o item concluido ainda nao tem custo real", () => {
+    const summary = summarizeChecklist([
+        item({ id: "1", status: "completed", estimated_cost: 120, actual_cost: 0 }),
+        item({ id: "2", status: "completed", estimated_cost: 80, actual_cost: 55 }),
+    ]);
+    assert.equal(summary.actualCost, 175);
+});
 test("summarizeChecklist ignora itens cancelados no progresso e no custo estimado", () => {
     const summary = summarizeChecklist([
         item({ id: "1", status: "completed", estimated_cost: 100, actual_cost: 80 }),

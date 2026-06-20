@@ -58,7 +58,7 @@ test("fluxo de preparacao integra normalizacao do veiculo, checklist e margem es
       title: "Polimento",
       status: "completed",
       estimated_cost: 500,
-      actual_cost: 450,
+      actual_cost: 0,
     }),
     criarChecklistItem({
       id: "2",
@@ -71,17 +71,18 @@ test("fluxo de preparacao integra normalizacao do veiculo, checklist e margem es
   ];
 
   const resumo = summarizeChecklist(checklist);
-  const totalInvestido = veiculoNormalizado.cost_price + resumo.actualCost;
-  const margem = veiculoNormalizado.sale_price - totalInvestido;
+  const totalInvestidoEstimado = veiculoNormalizado.cost_price + resumo.estimatedCost;
+  const margem = veiculoNormalizado.sale_price - totalInvestidoEstimado;
 
   assert.equal(veiculoNormalizado.plate, "QAD-1F23");
   assert.equal(veiculoNormalizado.brand, "Toyota");
   assert.equal(resumo.readyForSale, true);
   assert.equal(resumo.progress, 100);
-  assert.equal(resumo.actualCost, 630);
-  assert.equal(totalInvestido, 90630);
-  assert.equal(margem, 29270);
-  assert.equal(brl(margem), "R$ 29.270,00");
+  assert.equal(resumo.estimatedCost, 700);
+  assert.equal(resumo.actualCost, 680);
+  assert.equal(totalInvestidoEstimado, 90700);
+  assert.equal(margem, 29200);
+  assert.equal(brl(margem), "R$ 29.200,00");
 });
 
 test("fluxo de preparacao mantem veiculo indisponivel para venda quando ainda existem pendencias", () => {
@@ -108,13 +109,13 @@ test("fluxo de preparacao mantem veiculo indisponivel para venda quando ainda ex
   ];
 
   const resumo = summarizeChecklist(checklist);
-  const totalInvestido = veiculoNormalizado.cost_price + resumo.actualCost;
-  const margem = veiculoNormalizado.sale_price - totalInvestido;
+  const totalInvestidoEstimado = veiculoNormalizado.cost_price + resumo.estimatedCost;
+  const margem = veiculoNormalizado.sale_price - totalInvestidoEstimado;
 
   assert.equal(veiculoNormalizado.notes, "aguardando oficina");
   assert.equal(resumo.readyForSale, false);
   assert.equal(resumo.hasUrgent, true);
   assert.equal(resumo.inProgress, 1);
-  assert.equal(totalInvestido, 90650);
-  assert.equal(brl(margem), "R$ 14.350,00");
+  assert.equal(totalInvestidoEstimado, 91500);
+  assert.equal(brl(margem), "R$ 13.500,00");
 });

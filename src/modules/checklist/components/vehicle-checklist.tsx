@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
   Circle,
@@ -55,13 +55,13 @@ import {
   PRIORITY_META,
   STATUS_META,
   updateChecklistItem,
-  findEmployee,
   summarize,
   useChecklist,
   type ChecklistItem,
   type ChecklistPriority,
   type ChecklistStatus,
 } from "@/modules/checklist";
+import { employeeKeys, listEmployees } from "@/modules/employees/services/employees";
 import { ChecklistItemDialog } from "./checklist-item-dialog";
 import { toast } from "sonner";
 
@@ -75,6 +75,10 @@ const STATUS_ICON: Record<ChecklistStatus, React.ComponentType<{ className?: str
 
 export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
   const items = useChecklist(vehicleId);
+  const { data: employees = [] } = useQuery({
+    queryKey: employeeKeys.all,
+    queryFn: listEmployees,
+  });
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<"all" | ChecklistStatus>("all");
   const [priorityFilter, setPriorityFilter] = useState<"all" | ChecklistPriority>("all");
@@ -282,7 +286,7 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
             const StatusIcon = STATUS_ICON[item.status];
             const status = STATUS_META[item.status];
             const priority = PRIORITY_META[item.priority];
-            const employee = findEmployee(item.responsible_employee_id);
+            const employee = employees.find((entry) => entry.id === item.responsible_employee_id);
             const isOverdue =
               item.due_date &&
               item.status !== "completed" &&
@@ -349,11 +353,13 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
                             {isOverdue && " (atrasado)"}
                           </span>
                         )}
-                        {employee && (
+                        {employee || item.responsible_employee_id ? (
                           <span className="inline-flex items-center gap-1">
-                            <UserIcon className="h-3.5 w-3.5" /> {employee.person.name}
+                            <UserIcon className="h-3.5 w-3.5" />{" "}
+                            {employee?.person.name ??
+                              `Funcionário #${item.responsible_employee_id}`}
                           </span>
-                        )}
+                        ) : null}
                         <span>
                           Estimado:{" "}
                           <span className="font-medium text-foreground">
