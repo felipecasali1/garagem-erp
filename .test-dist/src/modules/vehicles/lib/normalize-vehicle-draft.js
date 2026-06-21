@@ -1,8 +1,9 @@
+import { normalizePlate, normalizeUpper } from "../../../shared/lib/field-format.js";
 export function normalizeVehicleDraft(draft) {
     return {
-        plate: draft.plate.trim().toUpperCase(),
-        chassis: draft.chassis.trim() || null,
-        vin: draft.vin.trim() || null,
+        plate: normalizePlate(draft.plate),
+        chassis: normalizeUpper(draft.chassis).replace(/\s+/g, "") || null,
+        vin: normalizeUpper(draft.vin).replace(/\s+/g, "") || null,
         brand: draft.brand.trim(),
         model: draft.model.trim(),
         version: draft.version.trim() || null,

@@ -18,6 +18,7 @@ import {
 } from "@/shared/components/ui/select";
 import { toast } from "sonner";
 import { DEFAULT_ACCESSORIES } from "@/shared/lib/accessories";
+import { PlateInput } from "@/shared/components/form/field-inputs";
 import {
   CATEGORY_LABEL,
   PRIORITY_META,
@@ -152,11 +153,11 @@ function NewVehicle() {
           <h2 className="font-display font-semibold">Identificação</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Placa" required>
-              <Input
+              <PlateInput
                 placeholder="ABC-1D23"
                 required
                 value={vehicleDraft.plate}
-                onChange={(e) => patchVehicleDraft({ plate: e.target.value })}
+                onValueChange={(value) => patchVehicleDraft({ plate: value })}
               />
             </Field>
             <Field label="Chassi">
@@ -252,7 +253,7 @@ function NewVehicle() {
               <Input
                 type="number"
                 placeholder="0"
-                value={vehicleDraft.current_mileage}
+                value={vehicleDraft.current_mileage || ""}
                 onChange={(e) =>
                   patchVehicleDraft({ current_mileage: Number(e.target.value) || 0 })
                 }
@@ -262,7 +263,7 @@ function NewVehicle() {
               <Input
                 type="number"
                 placeholder="2024"
-                value={vehicleDraft.manufacture_year}
+                value={vehicleDraft.manufacture_year || ""}
                 onChange={(e) =>
                   patchVehicleDraft({ manufacture_year: Number(e.target.value) || 0 })
                 }
@@ -272,7 +273,7 @@ function NewVehicle() {
               <Input
                 type="number"
                 placeholder="2024"
-                value={vehicleDraft.model_year}
+                value={vehicleDraft.model_year || ""}
                 onChange={(e) => patchVehicleDraft({ model_year: Number(e.target.value) || 0 })}
               />
             </Field>
@@ -306,7 +307,7 @@ function NewVehicle() {
               <Input
                 type="number"
                 placeholder="0,00"
-                value={vehicleDraft.cost_price}
+                value={vehicleDraft.cost_price || ""}
                 onChange={(e) => patchVehicleDraft({ cost_price: Number(e.target.value) || 0 })}
               />
             </Field>
@@ -314,7 +315,7 @@ function NewVehicle() {
               <Input
                 type="number"
                 placeholder="0,00"
-                value={vehicleDraft.sale_price}
+                value={vehicleDraft.sale_price || ""}
                 onChange={(e) => patchVehicleDraft({ sale_price: Number(e.target.value) || 0 })}
               />
             </Field>
@@ -473,7 +474,7 @@ function NewVehicle() {
                 type="number"
                 step="0.01"
                 min="0"
-                value={checklistDraft.estimated_cost}
+                value={checklistDraft.estimated_cost || ""}
                 onChange={(e) =>
                   setChecklistDraft({
                     ...checklistDraft,

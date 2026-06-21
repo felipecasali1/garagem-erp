@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabase } from "@/shared/supabase/client";
+import { normalizePhone } from "@/shared/lib/field-format";
 import type { PersonType } from "@/shared/types/domain";
 import type { EmployeeAccessRole } from "@/modules/employees/types";
 
@@ -138,7 +139,7 @@ const createSystemUserServer = createServerFn({ method: "POST" })
         p_access_role: data.role,
         p_is_admin: data.isAdmin ?? data.role === "admin",
         p_person_type: data.personType ?? "individual",
-        p_phone: normalizeText(data.phone),
+        p_phone: normalizeText(normalizePhone(data.phone ?? "")),
       },
     );
 

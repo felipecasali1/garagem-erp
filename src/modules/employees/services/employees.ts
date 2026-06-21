@@ -1,4 +1,5 @@
 import { supabase } from "@/shared/supabase/client";
+import { normalizeCep, normalizeCpf, normalizePhone, normalizeUf } from "@/shared/lib/field-format";
 import type { Address, Employee, PersonType } from "@/shared/types/domain";
 import type { EmployeeAccessRole, EmployeeDraft } from "@/modules/employees/types";
 
@@ -230,8 +231,8 @@ async function upsertPrimaryAddress(personId: number, address: EmployeeDraft["pr
     complement: normalizeText(address.complement),
     neighborhood: normalizeText(address.neighborhood),
     city: normalizeText(address.city),
-    state: normalizeText(address.state),
-    zip_code: normalizeText(address.zip_code),
+    state: normalizeText(normalizeUf(address.state)),
+    zip_code: normalizeText(normalizeCep(address.zip_code)),
     is_primary: true,
   };
 
@@ -255,8 +256,8 @@ async function createPersonAndEmployee(draft: EmployeeDraft) {
     .insert({
       name: draft.name.trim(),
       type: "individual",
-      cpf: normalizeText(draft.cpf),
-      phone: normalizeText(draft.phone),
+      cpf: normalizeText(normalizeCpf(draft.cpf)),
+      phone: normalizeText(normalizePhone(draft.phone)),
       email: normalizeText(draft.email),
     })
     .select("id")
@@ -301,8 +302,8 @@ export async function updateEmployee(id: number, draft: EmployeeDraft) {
     .from("people")
     .update({
       name: draft.name.trim(),
-      cpf: normalizeText(draft.cpf),
-      phone: normalizeText(draft.phone),
+      cpf: normalizeText(normalizeCpf(draft.cpf)),
+      phone: normalizeText(normalizePhone(draft.phone)),
       email: normalizeText(draft.email),
     })
     .eq("id", employee.person.id);

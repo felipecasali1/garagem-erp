@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
+import { formatDocument, formatPhone, formatCep } from "@/shared/lib/field-format";
 import { customerKeys, getCustomerById } from "@/modules/customers/services/customers";
 
 export const Route = createFileRoute("/_app/clients/$id")({
@@ -78,8 +79,21 @@ function ClientDetail() {
               </div>
             </div>
             <div className="space-y-2 text-sm text-left border-t border-border pt-4">
-              <Row icon={FileText} value={customer.person.cpf ?? customer.person.cnpj ?? "-"} />
-              <Row icon={Phone} value={customer.person.phone} />
+              <Row
+                icon={FileText}
+                value={
+                  customer.person.cpf || customer.person.cnpj
+                    ? formatDocument(
+                        customer.person.cpf ?? customer.person.cnpj ?? "",
+                        customer.person.type,
+                      )
+                    : "-"
+                }
+              />
+              <Row
+                icon={Phone}
+                value={customer.person.phone ? formatPhone(customer.person.phone) : "-"}
+              />
               <Row icon={Mail} value={customer.person.email} />
               <Row icon={Calendar} value={`Cliente desde ${fmtDate(customer.created_at)}`} />
               <Row icon={ShoppingBag} value={`Total: ${brl(customer.total_purchases)}`} />
@@ -101,7 +115,11 @@ function ClientDetail() {
                 <Info icon={MapPin} label="Bairro" value={address.neighborhood || "-"} />
                 <Info icon={MapPin} label="Cidade" value={address.city || "-"} />
                 <Info icon={MapPin} label="UF" value={address.state || "-"} />
-                <Info icon={MapPin} label="CEP" value={address.zip_code || "-"} />
+                <Info
+                  icon={MapPin}
+                  label="CEP"
+                  value={address.zip_code ? formatCep(address.zip_code) : "-"}
+                />
               </div>
             ) : (
               <div className="text-sm text-muted-foreground">

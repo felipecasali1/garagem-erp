@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from "@/shared/components/ui/select";
 import { Badge } from "@/shared/components/ui/badge";
+import { CepInput, CpfCnpjInput, PhoneInput, UfInput } from "@/shared/components/form/field-inputs";
 import { initials, fmtDate } from "@/shared/lib/format";
 import { toast } from "sonner";
 import { useAuth } from "@/shared/supabase/auth";
@@ -134,13 +135,13 @@ function CompanyTab() {
               <Input defaultValue="GaragemERP" />
             </Field>
             <Field label="CNPJ">
-              <Input defaultValue="12.345.678/0001-90" />
+              <CpfCnpjInput value="12345678000190" onValueChange={() => {}} personType="company" />
             </Field>
             <Field label="Inscrição estadual">
               <Input defaultValue="123.456.789.000" />
             </Field>
             <Field label="Telefone">
-              <Input defaultValue="(11) 4002-8922" />
+              <PhoneInput value="1140028922" onValueChange={() => {}} />
             </Field>
             <Field label="E-mail">
               <Input type="email" defaultValue="contato@garagemerp.com.br" />
@@ -151,24 +152,13 @@ function CompanyTab() {
             <h3 className="font-display font-semibold mb-3">Endereço</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label="CEP">
-                <Input defaultValue="04567-000" />
+                <CepInput value="04567000" onValueChange={() => {}} />
               </Field>
               <Field label="Cidade">
                 <Input defaultValue="São Paulo" />
               </Field>
               <Field label="UF">
-                <Select defaultValue="SP">
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["SP", "RJ", "MG", "PR", "RS", "SC", "BA"].map((u) => (
-                      <SelectItem key={u} value={u}>
-                        {u}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <UfInput value="SP" onValueChange={() => {}} />
               </Field>
               <Field label="Rua">
                 <Input defaultValue="Av. Brigadeiro Faria Lima" />
@@ -476,7 +466,7 @@ function NewUserDialog() {
             />
           </Field>
           <Field label="Telefone">
-            <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <PhoneInput value={phone} onValueChange={setPhone} />
           </Field>
           <Field label="Cargo">
             <Input value={position} onChange={(e) => setPosition(e.target.value)} />

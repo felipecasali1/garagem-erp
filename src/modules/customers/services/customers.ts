@@ -1,4 +1,10 @@
 import { supabase } from "@/shared/supabase/client";
+import {
+  normalizeCep,
+  normalizeDocument,
+  normalizePhone,
+  normalizeUf,
+} from "@/shared/lib/field-format";
 import type { Address, Customer, PersonType } from "@/shared/types/domain";
 import type { CustomerDraft } from "@/modules/customers/types";
 
@@ -141,8 +147,8 @@ async function upsertPrimaryAddress(personId: number, address: CustomerDraft["pr
     complement: normalizeText(address.complement),
     neighborhood: normalizeText(address.neighborhood),
     city: normalizeText(address.city),
-    state: normalizeText(address.state),
-    zip_code: normalizeText(address.zip_code),
+    state: normalizeText(normalizeUf(address.state)),
+    zip_code: normalizeText(normalizeCep(address.zip_code)),
     is_primary: true,
   };
 
@@ -167,9 +173,15 @@ async function createPersonAndCustomer(draft: CustomerDraft) {
     .insert({
       name: draft.name.trim(),
       type: draft.type,
-      cpf: documentField === "cpf" ? normalizeText(draft.document) : null,
-      cnpj: documentField === "cnpj" ? normalizeText(draft.document) : null,
-      phone: normalizeText(draft.phone),
+      cpf:
+        documentField === "cpf"
+          ? normalizeText(normalizeDocument(draft.document, "individual"))
+          : null,
+      cnpj:
+        documentField === "cnpj"
+          ? normalizeText(normalizeDocument(draft.document, "company"))
+          : null,
+      phone: normalizeText(normalizePhone(draft.phone)),
       email: normalizeText(draft.email),
     })
     .select("id")
@@ -228,9 +240,15 @@ export async function updateCustomer(id: number, draft: CustomerDraft) {
     .update({
       name: draft.name.trim(),
       type: draft.type,
-      cpf: documentField === "cpf" ? normalizeText(draft.document) : null,
-      cnpj: documentField === "cnpj" ? normalizeText(draft.document) : null,
-      phone: normalizeText(draft.phone),
+      cpf:
+        documentField === "cpf"
+          ? normalizeText(normalizeDocument(draft.document, "individual"))
+          : null,
+      cnpj:
+        documentField === "cnpj"
+          ? normalizeText(normalizeDocument(draft.document, "company"))
+          : null,
+      phone: normalizeText(normalizePhone(draft.phone)),
       email: normalizeText(draft.email),
     })
     .eq("id", customer.person.id);

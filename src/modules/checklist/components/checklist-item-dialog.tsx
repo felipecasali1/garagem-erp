@@ -87,8 +87,8 @@ export function ChecklistItemDialog({
       category: "mechanical",
       status: "pending",
       priority: "medium",
-      estimated_cost: 0,
-      actual_cost: 0,
+      estimated_cost: "" as unknown as number,
+      actual_cost: "" as unknown as number,
       due_date: undefined,
       responsible_employee_id: undefined,
       notes: "",
@@ -262,10 +262,22 @@ export function ChecklistItemDialog({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Field label="Custo estimado (R$)">
-              <Input type="number" step="0.01" min="0" {...form.register("estimated_cost")} />
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="0,00"
+                {...form.register("estimated_cost")}
+              />
             </Field>
             <Field label="Custo real (R$)">
-              <Input type="number" step="0.01" min="0" {...form.register("actual_cost")} />
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="0,00"
+                {...form.register("actual_cost")}
+              />
             </Field>
             <Field label="Prazo">
               <DatePicker

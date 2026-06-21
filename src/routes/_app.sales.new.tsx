@@ -19,6 +19,7 @@ import { StatusBadge } from "@/shared/components/status-badge";
 import type { SaleDraft } from "@/modules/sales/types";
 import { vehicles, customers, employees } from "@/shared/mock-data";
 import { brl, initials } from "@/shared/lib/format";
+import { formatDocument } from "@/shared/lib/field-format";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/sales/new")({
@@ -57,8 +58,7 @@ function NewSale() {
   const employee = employees.find((e) => e.id === draft.employee_id);
   const total = (vehicle?.sale_price ?? 0) - draft.discount;
   const remaining = Math.max(0, total - draft.down_payment);
-  const installmentValue =
-    draft.installments_count > 0 ? remaining / draft.installments_count : 0;
+  const installmentValue = draft.installments_count > 0 ? remaining / draft.installments_count : 0;
 
   const canNext =
     (step === 0 && vehicle) || (step === 1 && customer) || (step === 2 && employee) || step === 3;
@@ -87,12 +87,13 @@ function NewSale() {
             return (
               <div
                 key={s.key}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm shrink-0 ${active
-                  ? "bg-primary text-primary-foreground"
-                  : done
-                    ? "bg-success/10 text-success"
-                    : "text-muted-foreground"
-                  }`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm shrink-0 ${
+                  active
+                    ? "bg-primary text-primary-foreground"
+                    : done
+                      ? "bg-success/10 text-success"
+                      : "text-muted-foreground"
+                }`}
               >
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-background/20 text-xs">
                   {done ? <Check className="h-3 w-3" /> : i + 1}
@@ -114,8 +115,9 @@ function NewSale() {
                 <button
                   key={v.id}
                   onClick={() => patchDraft({ vehicle_id: v.id })}
-                  className={`text-left rounded-xl border-2 p-4 transition ${sel ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
-                    }`}
+                  className={`text-left rounded-xl border-2 p-4 transition ${
+                    sel ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
+                  }`}
                 >
                   <div className="flex justify-between items-start mb-2">
                     <div>
@@ -144,8 +146,9 @@ function NewSale() {
               <button
                 key={c.id}
                 onClick={() => patchDraft({ customer_id: c.id })}
-                className={`flex items-center gap-3 rounded-xl border-2 p-4 transition ${sel ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
-                  }`}
+                className={`flex items-center gap-3 rounded-xl border-2 p-4 transition ${
+                  sel ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
+                }`}
               >
                 <Avatar>
                   <AvatarFallback className="bg-muted text-xs">
@@ -155,7 +158,7 @@ function NewSale() {
                 <div className="flex-1 text-left min-w-0">
                   <div className="font-medium truncate">{c.person.name}</div>
                   <div className="text-xs text-muted-foreground truncate">
-                    {c.person.cpf ?? c.person.cnpj}
+                    {formatDocument(c.person.cpf ?? c.person.cnpj ?? "", c.person.type)}
                   </div>
                 </div>
               </button>
@@ -196,7 +199,7 @@ function NewSale() {
                 <Label className="text-xs uppercase text-muted-foreground">Desconto</Label>
                 <Input
                   type="number"
-                  value={draft.discount}
+                  value={draft.discount || ""}
                   onChange={(e) => patchDraft({ discount: Number(e.target.value) || 0 })}
                 />
               </div>
@@ -214,14 +217,18 @@ function NewSale() {
               <h3 className="font-display font-semibold">Pagamento</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <Label className="text-xs uppercase text-muted-foreground">Forma de pagamento</Label>
+                  <Label className="text-xs uppercase text-muted-foreground">
+                    Forma de pagamento
+                  </Label>
                   <Select
                     value={draft.payment_method}
                     onValueChange={(value) =>
                       patchDraft({ payment_method: value as SaleDraft["payment_method"] })
                     }
                   >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="cash">À vista</SelectItem>
                       <SelectItem value="financing">Financiamento</SelectItem>
@@ -232,14 +239,18 @@ function NewSale() {
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs uppercase text-muted-foreground">Status do pagamento</Label>
+                  <Label className="text-xs uppercase text-muted-foreground">
+                    Status do pagamento
+                  </Label>
                   <Select
                     value={draft.payment_status}
                     onValueChange={(value) =>
                       patchDraft({ payment_status: value as SaleDraft["payment_status"] })
                     }
                   >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="pending">Pendente</SelectItem>
                       <SelectItem value="partial">Parcial</SelectItem>
@@ -251,7 +262,7 @@ function NewSale() {
                   <Label className="text-xs uppercase text-muted-foreground">Entrada (R$)</Label>
                   <Input
                     type="number"
-                    value={draft.down_payment}
+                    value={draft.down_payment || ""}
                     onChange={(e) => patchDraft({ down_payment: Number(e.target.value) || 0 })}
                   />
                 </div>
@@ -260,14 +271,16 @@ function NewSale() {
                   <Input
                     type="number"
                     min={1}
-                    value={draft.installments_count}
+                    value={draft.installments_count || ""}
                     onChange={(e) =>
                       patchDraft({ installments_count: Number(e.target.value) || 1 })
                     }
                   />
                 </div>
                 <div className="space-y-1.5 md:col-span-2">
-                  <Label className="text-xs uppercase text-muted-foreground">Data do pagamento</Label>
+                  <Label className="text-xs uppercase text-muted-foreground">
+                    Data do pagamento
+                  </Label>
                   <DatePicker
                     value={draft.payment_date}
                     onChange={(value) => patchDraft({ payment_date: value })}
@@ -296,7 +309,10 @@ function NewSale() {
         <Card>
           <CardContent className="p-6 space-y-4">
             <h2 className="font-display font-semibold text-lg">Resumo da venda</h2>
-            <Row label="Veículo" value={`${vehicle?.brand} ${vehicle?.model} - ${vehicle?.plate}`} />
+            <Row
+              label="Veículo"
+              value={`${vehicle?.brand} ${vehicle?.model} - ${vehicle?.plate}`}
+            />
             <Row label="Cliente" value={customer?.person.name ?? "-"} />
             <Row label="Vendedor" value={employee?.person.name ?? "-"} />
             <Row label="Desconto" value={brl(draft.discount)} />

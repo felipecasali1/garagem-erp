@@ -14,6 +14,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
+import { formatCpf, formatPhone, formatCep } from "@/shared/lib/field-format";
 import { employeeKeys, getEmployeeById } from "@/modules/employees/services/employees";
 import { useQuery } from "@tanstack/react-query";
 
@@ -103,8 +104,14 @@ function EmployeeDetail() {
               </div>
             </div>
             <div className="space-y-2 text-sm text-left border-t border-border pt-4">
-              <Row icon={FileText} value={employee.person.cpf ?? "-"} />
-              <Row icon={Phone} value={employee.person.phone} />
+              <Row
+                icon={FileText}
+                value={employee.person.cpf ? formatCpf(employee.person.cpf) : "-"}
+              />
+              <Row
+                icon={Phone}
+                value={employee.person.phone ? formatPhone(employee.person.phone) : "-"}
+              />
               <Row icon={Mail} value={employee.person.email} />
               <Row icon={Calendar} value={`Contratado em ${fmtDate(employee.hired_at)}`} />
               <Row icon={Briefcase} value={`Salário: ${brl(employee.salary)}`} />
@@ -146,8 +153,15 @@ function EmployeeDetail() {
                   />
                   <Info label="Bairro" value={employee.person.primary_address.neighborhood} />
                   <Info label="Cidade" value={employee.person.primary_address.city} />
-                  <Info label="UF" value={employee.person.primary_address.state} />
-                  <Info label="CEP" value={employee.person.primary_address.zip_code} />
+                  <Info label="UF" value={employee.person.primary_address.state || "-"} />
+                  <Info
+                    label="CEP"
+                    value={
+                      employee.person.primary_address.zip_code
+                        ? formatCep(employee.person.primary_address.zip_code)
+                        : "-"
+                    }
+                  />
                 </div>
               ) : (
                 <div className="text-sm text-muted-foreground">Nenhum endereço cadastrado.</div>

@@ -8,6 +8,13 @@ import { Label } from "@/shared/components/ui/label";
 import { Textarea } from "@/shared/components/ui/textarea";
 import { DatePicker } from "@/shared/components/ui/date-picker";
 import {
+  CepInput,
+  CpfCnpjInput,
+  PhoneInput,
+  PlateInput,
+  UfInput,
+} from "@/shared/components/form/field-inputs";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -26,6 +33,7 @@ import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import type { PurchaseDraft, SupplierOption } from "@/modules/purchases/types";
 import { customers as initialCustomers } from "@/shared/mock-data";
 import { initials } from "@/shared/lib/format";
+import { formatDocument, formatPhone } from "@/shared/lib/field-format";
 import type { Address, PersonType } from "@/shared/types/domain";
 import { toast } from "sonner";
 
@@ -75,9 +83,10 @@ function NewPurchase() {
 
   const filtered = useMemo(
     () =>
-      suppliers.filter((s) =>
-        s.name.toLowerCase().includes(search.toLowerCase()) ||
-        `${s.cpf ?? ""}${s.cnpj ?? ""}`.includes(search),
+      suppliers.filter(
+        (s) =>
+          s.name.toLowerCase().includes(search.toLowerCase()) ||
+          `${s.cpf ?? ""}${s.cnpj ?? ""}`.includes(search),
       ),
     [suppliers, search],
   );
@@ -113,7 +122,9 @@ function NewPurchase() {
             <ArrowLeft className="h-4 w-4" /> Compras
           </Link>
         </Button>
-        <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">Registrar Compra</h1>
+        <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">
+          Registrar Compra
+        </h1>
         <Button type="submit" disabled={saving}>
           <Save className="h-4 w-4" /> {saving ? "Salvando..." : "Salvar"}
         </Button>
@@ -135,11 +146,16 @@ function NewPurchase() {
 
           {selected ? (
             <div className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
-              <Avatar><AvatarFallback className="bg-muted text-xs">{initials(selected.name)}</AvatarFallback></Avatar>
+              <Avatar>
+                <AvatarFallback className="bg-muted text-xs">
+                  {initials(selected.name)}
+                </AvatarFallback>
+              </Avatar>
               <div className="flex-1 min-w-0">
                 <div className="font-medium">{selected.name}</div>
                 <div className="text-xs text-muted-foreground truncate">
-                  {selected.cpf ?? selected.cnpj} · {selected.phone}
+                  {formatDocument(selected.cpf ?? selected.cnpj ?? "", selected.type)} ·{" "}
+                  {formatPhone(selected.phone)}
                 </div>
               </div>
               <Button
@@ -179,12 +195,14 @@ function NewPurchase() {
                       className="w-full flex items-center gap-3 p-3 text-left hover:bg-muted/40 cursor-pointer"
                     >
                       <Avatar className="h-8 w-8">
-                        <AvatarFallback className="text-xs bg-muted">{initials(s.name)}</AvatarFallback>
+                        <AvatarFallback className="text-xs bg-muted">
+                          {initials(s.name)}
+                        </AvatarFallback>
                       </Avatar>
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium truncate">{s.name}</div>
                         <div className="text-xs text-muted-foreground truncate">
-                          {s.cpf ?? s.cnpj}
+                          {formatDocument(s.cpf ?? s.cnpj ?? "", s.type)}
                         </div>
                       </div>
                     </button>
@@ -201,11 +219,11 @@ function NewPurchase() {
           <h2 className="font-display font-semibold">Veículo adquirido</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Placa" required>
-              <Input
+              <PlateInput
                 required
                 placeholder="ABC-1D23"
                 value={draft.vehicle.plate}
-                onChange={(e) => patchVehicle({ plate: e.target.value })}
+                onValueChange={(value) => patchVehicle({ plate: value })}
               />
             </Field>
             <Field label="Marca / Modelo" required>
@@ -249,7 +267,7 @@ function NewPurchase() {
                 type="number"
                 required
                 placeholder="0,00"
-                value={draft.total_value}
+                value={draft.total_value || ""}
                 onChange={(e) => patchDraft({ total_value: Number(e.target.value) || 0 })}
               />
             </Field>
@@ -266,7 +284,9 @@ function NewPurchase() {
                 value={draft.status}
                 onValueChange={(value) => patchDraft({ status: value as PurchaseDraft["status"] })}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="pending">Pendente</SelectItem>
                   <SelectItem value="completed">Concluída</SelectItem>
@@ -313,7 +333,9 @@ function NewSupplierDialog({ onCreate }: { onCreate: (s: Omit<SupplierOption, "i
       <div className="space-y-4">
         <Field label="Tipo">
           <Select value={type} onValueChange={(value) => setType(value as PersonType)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="individual">Pessoa Física</SelectItem>
               <SelectItem value="company">Pessoa Jurídica</SelectItem>
@@ -325,17 +347,21 @@ function NewSupplierDialog({ onCreate }: { onCreate: (s: Omit<SupplierOption, "i
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label={type === "company" ? "CNPJ" : "CPF"}>
-            <Input value={document} onChange={(e) => setDocument(e.target.value)} />
+            <CpfCnpjInput value={document} onValueChange={setDocument} personType={type} />
           </Field>
-          <Field label="Telefone"><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
+          <Field label="Telefone">
+            <PhoneInput value={phone} onValueChange={setPhone} />
+          </Field>
         </div>
-        <Field label="E-mail"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        <Field label="E-mail">
+          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="CEP">
-            <Input
+            <CepInput
               placeholder="79000-000"
               value={address.zip_code}
-              onChange={(e) => patchAddress({ zip_code: e.target.value })}
+              onValueChange={(value) => patchAddress({ zip_code: value })}
             />
           </Field>
           <Field label="Cidade">
@@ -346,11 +372,10 @@ function NewSupplierDialog({ onCreate }: { onCreate: (s: Omit<SupplierOption, "i
             />
           </Field>
           <Field label="UF">
-            <Input
+            <UfInput
               placeholder="MS"
-              maxLength={2}
               value={address.state}
-              onChange={(e) => patchAddress({ state: e.target.value })}
+              onValueChange={(value) => patchAddress({ state: value })}
             />
           </Field>
           <Field label="Bairro">
@@ -409,7 +434,15 @@ function NewSupplierDialog({ onCreate }: { onCreate: (s: Omit<SupplierOption, "i
   );
 }
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="space-y-1.5">
       <Label className="text-xs uppercase tracking-wide text-muted-foreground">

@@ -27,7 +27,7 @@ function makeDraft(overrides = {}) {
 }
 test("normalizeVehicleDraft limpa campos textuais e coloca a placa em maiusculo", () => {
     const normalized = normalizeVehicleDraft(makeDraft());
-    assert.equal(normalized.plate, "ABC-1D23");
+    assert.equal(normalized.plate, "ABC1D23");
     assert.equal(normalized.brand, "Toyota");
     assert.equal(normalized.model, "Corolla");
     assert.equal(normalized.color, "Prata");

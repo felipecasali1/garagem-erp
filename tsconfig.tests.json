@@ -18,6 +18,7 @@
   },
   "include": [
     "src/shared/lib/format.ts",
+    "src/shared/lib/field-format.ts",
     "src/shared/lib/accessories.ts",
     "src/shared/types/domain.ts",
     "src/modules/checklist/types.ts",

@@ -59,6 +59,7 @@ Important implementation note:
 - the employees module now reads and mutates real `people` + `employees` rows from Supabase
 - the settings "Usuários" tab now creates real auth accounts plus linked `people` + `employees` + `public.users` records through a server-side admin action, and the current user's own access toggle is protected in the UI
 - the clients module now reads and mutates real `people` + `addresses` + `customers` rows from Supabase, and the main client form/detail pages now treat the address as part of the real persisted flow instead of mock data
+- shared form inputs now normalize CPF/CNPJ, phone, CEP, UF, plate and numeric entry patterns so the database receives consistent values regardless of how the user types them
 - the vehicle detail page now treats margin as `sale_price - (cost_price + estimated checklist preparation cost)`, while still showing the realized preparation cost separately
 - some features shown in the UI are still synthetic/demo behavior, especially installments, notifications, company settings, and the remaining sales/purchases/financial mock screens
 

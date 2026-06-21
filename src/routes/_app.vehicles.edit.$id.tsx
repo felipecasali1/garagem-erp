@@ -18,6 +18,7 @@ import {
 } from "@/shared/components/ui/select";
 import { toast } from "sonner";
 import { DEFAULT_ACCESSORIES } from "@/shared/lib/accessories";
+import { PlateInput } from "@/shared/components/form/field-inputs";
 import type { VehicleDraft } from "@/modules/vehicles/types";
 import {
   deleteVehicle,
@@ -178,10 +179,11 @@ function EditVehicle() {
           <h2 className="font-display font-semibold">Identificação</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Placa" required>
-              <Input
+              <PlateInput
                 required
                 value={draft.plate}
-                onChange={(e) => updateDraft({ plate: e.target.value })}
+                onValueChange={(value) => updateDraft({ plate: value })}
+                placeholder="ABC-1D23"
               />
             </Field>
             <Field label="Chassi">
@@ -267,21 +269,21 @@ function EditVehicle() {
             <Field label="Quilometragem">
               <Input
                 type="number"
-                value={draft.current_mileage}
+                value={draft.current_mileage || ""}
                 onChange={(e) => updateDraft({ current_mileage: Number(e.target.value) || 0 })}
               />
             </Field>
             <Field label="Ano fabricação">
               <Input
                 type="number"
-                value={draft.manufacture_year}
+                value={draft.manufacture_year || ""}
                 onChange={(e) => updateDraft({ manufacture_year: Number(e.target.value) || 0 })}
               />
             </Field>
             <Field label="Ano modelo">
               <Input
                 type="number"
-                value={draft.model_year}
+                value={draft.model_year || ""}
                 onChange={(e) => updateDraft({ model_year: Number(e.target.value) || 0 })}
               />
             </Field>
@@ -312,14 +314,14 @@ function EditVehicle() {
             <Field label="Custo de aquisição">
               <Input
                 type="number"
-                value={draft.cost_price}
+                value={draft.cost_price || ""}
                 onChange={(e) => updateDraft({ cost_price: Number(e.target.value) || 0 })}
               />
             </Field>
             <Field label="Preço de venda">
               <Input
                 type="number"
-                value={draft.sale_price}
+                value={draft.sale_price || ""}
                 onChange={(e) => updateDraft({ sale_price: Number(e.target.value) || 0 })}
               />
             </Field>

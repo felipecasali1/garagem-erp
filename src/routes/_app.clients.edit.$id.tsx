@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/components/ui/select";
+import { CepInput, CpfCnpjInput, PhoneInput, UfInput } from "@/shared/components/form/field-inputs";
 import type { CustomerDraft } from "@/modules/customers/types";
 import {
   customerKeys,
@@ -154,17 +155,20 @@ function EditClient() {
               />
             </Field>
             <Field label={draft.type === "company" ? "CNPJ" : "CPF"} required>
-              <Input
+              <CpfCnpjInput
                 value={draft.document}
-                onChange={(e) => patchDraft({ document: e.target.value })}
+                onValueChange={(value) => patchDraft({ document: value })}
                 required
+                personType={draft.type}
+                placeholder={draft.type === "company" ? "00.000.000/0000-00" : "000.000.000-00"}
               />
             </Field>
             <Field label="Telefone" required>
-              <Input
+              <PhoneInput
                 value={draft.phone}
-                onChange={(e) => patchDraft({ phone: e.target.value })}
+                onValueChange={(value) => patchDraft({ phone: value })}
                 required
+                placeholder="(00) 00000-0000"
               />
             </Field>
             <Field label="E-mail" required>
@@ -192,9 +196,9 @@ function EditClient() {
           <h2 className="font-display font-semibold">Endereço principal</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Field label="CEP">
-              <Input
+              <CepInput
                 value={draft.primary_address.zip_code}
-                onChange={(e) => patchAddress({ zip_code: e.target.value })}
+                onValueChange={(value) => patchAddress({ zip_code: value })}
                 placeholder="79000-000"
               />
             </Field>
@@ -206,11 +210,10 @@ function EditClient() {
               />
             </Field>
             <Field label="UF">
-              <Input
+              <UfInput
                 value={draft.primary_address.state}
-                onChange={(e) => patchAddress({ state: e.target.value })}
+                onValueChange={(value) => patchAddress({ state: value })}
                 placeholder="MS"
-                maxLength={2}
               />
             </Field>
             <Field label="Bairro">

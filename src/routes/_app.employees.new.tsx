@@ -11,6 +11,7 @@ import { DatePicker } from "@/shared/components/ui/date-picker";
 import { toast } from "sonner";
 import { createEmployee } from "@/modules/employees/services/employees";
 import type { EmployeeDraft } from "@/modules/employees/types";
+import { CepInput, CpfCnpjInput, PhoneInput, UfInput } from "@/shared/components/form/field-inputs";
 
 export const Route = createFileRoute("/_app/employees/new")({
   head: () => ({ meta: [{ title: "Novo Funcionário | GaragemERP" }] }),
@@ -93,17 +94,18 @@ function NewEmployee() {
               />
             </Field>
             <Field label="CPF" required>
-              <Input
+              <CpfCnpjInput
                 value={draft.cpf}
-                onChange={(e) => patchDraft({ cpf: e.target.value })}
+                onValueChange={(value) => patchDraft({ cpf: value })}
                 required
+                personType="individual"
                 placeholder="000.000.000-00"
               />
             </Field>
             <Field label="Telefone" required>
-              <Input
+              <PhoneInput
                 value={draft.phone}
-                onChange={(e) => patchDraft({ phone: e.target.value })}
+                onValueChange={(value) => patchDraft({ phone: value })}
                 required
                 placeholder="(00) 00000-0000"
               />
@@ -125,9 +127,9 @@ function NewEmployee() {
           <h2 className="font-display font-semibold">Endereço principal</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Field label="CEP">
-              <Input
+              <CepInput
                 value={draft.primary_address.zip_code}
-                onChange={(e) => patchAddress({ zip_code: e.target.value })}
+                onValueChange={(value) => patchAddress({ zip_code: value })}
                 placeholder="79000-000"
               />
             </Field>
@@ -139,11 +141,10 @@ function NewEmployee() {
               />
             </Field>
             <Field label="UF">
-              <Input
+              <UfInput
                 value={draft.primary_address.state}
-                onChange={(e) => patchAddress({ state: e.target.value })}
+                onValueChange={(value) => patchAddress({ state: value })}
                 placeholder="MS"
-                maxLength={2}
               />
             </Field>
             <Field label="Bairro">
@@ -201,7 +202,7 @@ function NewEmployee() {
               <Input
                 type="number"
                 step="0.01"
-                value={draft.salary}
+                value={draft.salary || ""}
                 onChange={(e) => patchDraft({ salary: Number(e.target.value) || 0 })}
                 placeholder="0,00"
               />
@@ -226,7 +227,7 @@ function NewEmployee() {
               <Input
                 type="number"
                 step="0.01"
-                value={draft.commission_rate}
+                value={draft.commission_rate || ""}
                 onChange={(e) => patchDraft({ commission_rate: Number(e.target.value) || 0 })}
                 placeholder="0"
               />

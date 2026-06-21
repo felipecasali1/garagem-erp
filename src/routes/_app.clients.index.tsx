@@ -14,6 +14,7 @@ import {
 } from "@/shared/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
+import { formatDocument, formatPhone } from "@/shared/lib/field-format";
 import {
   Table,
   TableBody,
@@ -106,9 +107,11 @@ function ClientsPage() {
                     </div>
                   </TableCell>
                   <TableCell className="font-mono text-xs">
-                    {c.person.cpf ?? c.person.cnpj}
+                    {formatDocument(c.person.cpf ?? c.person.cnpj ?? "", c.person.type)}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">{c.person.phone}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatPhone(c.person.phone)}
+                  </TableCell>
                   <TableCell className="text-muted-foreground">{c.person.email}</TableCell>
                   <TableCell className="text-muted-foreground">{brl(c.total_purchases)}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">
