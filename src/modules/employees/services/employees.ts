@@ -1,5 +1,6 @@
 import { supabase } from "@/shared/supabase/client";
 import { normalizeCep, normalizeCpf, normalizePhone, normalizeUf } from "@/shared/lib/field-format";
+import { getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
 import type { Address, Employee, PersonType } from "@/shared/types/domain";
 import type { EmployeeAccessRole, EmployeeDraft } from "@/modules/employees/types";
 
@@ -251,28 +252,20 @@ async function upsertPrimaryAddress(personId: number, address: EmployeeDraft["pr
 }
 
 async function createPersonAndEmployee(draft: EmployeeDraft) {
-  const { data: person, error: personError } = await supabase
-    .from("people")
-    .insert({
-      name: draft.name.trim(),
-      type: "individual",
-      cpf: normalizeText(normalizeCpf(draft.cpf)),
-      phone: normalizeText(normalizePhone(draft.phone)),
-      email: normalizeText(draft.email),
-    })
-    .select("id")
-    .single();
+  const personId = await getOrCreatePersonIdByDocument({
+    name: draft.name,
+    type: "individual",
+    document: draft.cpf,
+    phone: draft.phone,
+    email: draft.email,
+  });
 
-  if (personError) {
-    throw new Error(personError.message);
-  }
-
-  await upsertPrimaryAddress(person.id, draft.primary_address);
+  await upsertPrimaryAddress(personId, draft.primary_address);
 
   const { data: employee, error: employeeError } = await supabase
     .from("employees")
     .insert({
-      person_id: person.id,
+      person_id: personId,
       position: draft.position.trim(),
       salary: draft.salary,
       commission_rate: draft.commission_rate,

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Users, Sparkles, Sliders, Plus, Trash2, Upload, Shield } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
@@ -31,6 +31,7 @@ import { CepInput, CpfCnpjInput, PhoneInput, UfInput } from "@/shared/components
 import { initials, fmtDate } from "@/shared/lib/format";
 import { toast } from "sonner";
 import { useAuth } from "@/shared/supabase/auth";
+import { employeeKeys, listEmployees } from "@/modules/employees/services/employees";
 import {
   userKeys,
   createSystemUser,
@@ -396,6 +397,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function NewUserDialog() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+  const { data: employees = [] } = useQuery({
+    queryKey: employeeKeys.all,
+    queryFn: listEmployees,
+  });
+  const availableEmployees = employees.filter((employee) => !employee.user_id);
+  const [employeeId, setEmployeeId] = useState("new");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -407,8 +414,10 @@ function NewUserDialog() {
     mutationFn: createSystemUser,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: userKeys.all });
+      await queryClient.invalidateQueries({ queryKey: employeeKeys.all });
       toast.success("Usuário criado e vinculado ao acesso interno");
       setOpen(false);
+      setEmployeeId("new");
       setName("");
       setEmail("");
       setPassword("");
@@ -421,6 +430,28 @@ function NewUserDialog() {
       toast.error(error instanceof Error ? error.message : "Falha ao criar usuário.");
     },
   });
+
+  useEffect(() => {
+    if (employeeId === "new") {
+      setName("");
+      setEmail("");
+      setPhone("");
+      setPosition("Funcionário");
+      return;
+    }
+
+    const selected = employees.find((employee) => String(employee.id) === employeeId);
+    if (!selected) {
+      return;
+    }
+
+    setName(selected.person.name);
+    setEmail(selected.person.email);
+    setPhone(selected.person.phone);
+    setPosition(selected.position);
+  }, [employeeId, employees]);
+
+  const selectedEmployee = employees.find((employee) => String(employee.id) === employeeId);
 
   const submit = () => {
     if (!name.trim() || !email.trim() || password.trim().length < 8) {
@@ -436,6 +467,7 @@ function NewUserDialog() {
       position,
       active,
       isAdmin: role === "admin",
+      employeeId: employeeId === "new" ? undefined : Number(employeeId),
     });
   };
 
@@ -451,6 +483,21 @@ function NewUserDialog() {
           <DialogTitle>Novo Usuário</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
+          <Field label="Funcionário vinculado">
+            <Select value={employeeId} onValueChange={setEmployeeId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Criar novo funcionário ou vincular existente" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="new">Criar novo funcionário</SelectItem>
+                {availableEmployees.map((employee) => (
+                  <SelectItem key={employee.id} value={String(employee.id)}>
+                    {employee.person.name} — {employee.position}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
           <Field label="Nome completo">
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
@@ -468,9 +515,11 @@ function NewUserDialog() {
           <Field label="Telefone">
             <PhoneInput value={phone} onValueChange={setPhone} />
           </Field>
-          <Field label="Cargo">
-            <Input value={position} onChange={(e) => setPosition(e.target.value)} />
-          </Field>
+          {!selectedEmployee && (
+            <Field label="Cargo">
+              <Input value={position} onChange={(e) => setPosition(e.target.value)} />
+            </Field>
+          )}
           <Field label="Perfil de acesso">
             <Select value={role} onValueChange={setRole}>
               <SelectTrigger>

@@ -13,6 +13,7 @@
 - padronizar mais máscaras e campos numéricos nas telas restantes
 - facilitar/melhorar checklist
 - definir a questão dos níveis de acesso e como isso será feito no SUpabase
+- finalizar o fluxo de provisionamento de acesso para funcionários existentes, sem misturar cadastro operacional com login do sistema
 - melhoria e revisão nos formulários 
 
 ## Alta Prioridade

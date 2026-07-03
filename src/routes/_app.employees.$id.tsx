@@ -138,6 +138,11 @@ function EmployeeDetail() {
                       ? "Ativo"
                       : "Inativo"}
                 </div>
+                {employee.user_active == null && (
+                  <Button variant="outline" size="sm" className="mt-3" asChild>
+                    <Link to="/settings">Criar acesso nas configurações</Link>
+                  </Button>
+                )}
               </div>
             </div>
 

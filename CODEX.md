@@ -57,9 +57,11 @@ Important implementation note:
 - most entities come from `src/lib/mock-data.ts`
 - checklist items are now fetched and mutated through Supabase in the checklist module, and the responsible employee picker now reads real `employees` rows instead of mock employee data
 - the employees module now reads and mutates real `people` + `employees` rows from Supabase
-- the settings "Usuários" tab now creates real auth accounts plus linked `people` + `employees` + `public.users` records through a server-side admin action, and the current user's own access toggle is protected in the UI
+- the settings "Usuários" tab now provisions real auth accounts through a server-side admin action and can either create a new internal employee bundle or link access to an existing employee; the current user's own access toggle remains protected in the UI
 - the clients module now reads and mutates real `people` + `addresses` + `customers` rows from Supabase, and the main client form/detail pages now treat the address as part of the real persisted flow instead of mock data
 - shared form inputs now normalize CPF/CNPJ, phone, CEP, UF, plate and numeric entry patterns so the database receives consistent values regardless of how the user types them
+- people records are now reused by document when creating customers or employees, so one person can legitimately have more than one role instead of failing on duplicate CPF/CNPJ
+- employees and system users are intentionally separate concepts: the employee form keeps the HR record focused, while system access is provisioned separately or linked from the users/settings flow
 - the vehicle detail page now treats margin as `sale_price - (cost_price + estimated checklist preparation cost)`, while still showing the realized preparation cost separately
 - some features shown in the UI are still synthetic/demo behavior, especially installments, notifications, company settings, and the remaining sales/purchases/financial mock screens
 

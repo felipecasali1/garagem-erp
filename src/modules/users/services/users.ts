@@ -59,6 +59,7 @@ export type CreateSystemUserInput = {
   active?: boolean;
   personType?: PersonType;
   isAdmin?: boolean;
+  employeeId?: number;
 };
 
 function normalizeText(value?: string) {
@@ -107,6 +108,7 @@ const createSystemUserServer = createServerFn({ method: "POST" })
       active: z.boolean().optional(),
       personType: z.enum(["individual", "company"]).optional(),
       isAdmin: z.boolean().optional(),
+      employeeId: z.number().int().positive().optional(),
     }),
   )
   .handler(async ({ data }) => {
@@ -114,6 +116,93 @@ const createSystemUserServer = createServerFn({ method: "POST" })
 
     const email = data.email.trim();
     const name = data.name.trim();
+
+    const createAuthUser = async () => {
+      const { data: authResult, error: authError } = await supabaseAdmin.auth.admin.createUser({
+        email,
+        password: data.password,
+        email_confirm: true,
+        user_metadata: { name },
+      });
+
+      if (authError) {
+        throw new Error(authError.message);
+      }
+
+      if (!authResult.user) {
+        throw new Error("Falha ao criar o usuário de autenticação.");
+      }
+
+      return authResult.user.id;
+    };
+
+    if (data.employeeId) {
+      const { data: employee, error: employeeError } = await supabaseAdmin
+        .from("employees")
+        .select("id, person_id, person:people(id, name, email, phone, type)")
+        .eq("id", data.employeeId)
+        .maybeSingle();
+
+      if (employeeError) {
+        throw new Error(employeeError.message);
+      }
+
+      if (!employee?.person) {
+        throw new Error("Funcionário não encontrado para vincular ao usuário.");
+      }
+
+      const { data: existingUser, error: existingUserError } = await supabaseAdmin
+        .from("users")
+        .select("id")
+        .or(`person_id.eq.${employee.person_id},employee_id.eq.${data.employeeId}`)
+        .maybeSingle();
+
+      if (existingUserError) {
+        throw new Error(existingUserError.message);
+      }
+
+      if (existingUser) {
+        throw new Error("Esse funcionário já possui acesso ao sistema.");
+      }
+
+      const authUserId = await createAuthUser();
+
+      const { error: personError } = await supabaseAdmin
+        .from("people")
+        .update({
+          name,
+          email,
+          phone: normalizeText(normalizePhone(data.phone ?? "")),
+        })
+        .eq("id", employee.person_id);
+
+      if (personError) {
+        await supabaseAdmin.auth.admin.deleteUser(authUserId);
+        throw new Error(personError.message);
+      }
+
+      const { data: userId, error: insertError } = await supabaseAdmin
+        .from("users")
+        .insert({
+          auth_user_id: authUserId,
+          person_id: employee.person_id,
+          employee_id: employee.id,
+          access_role: data.role,
+          is_admin: data.isAdmin ?? data.role === "admin",
+          active: data.active ?? true,
+          email_verified_at: new Date().toISOString(),
+          invited_at: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+
+      if (insertError) {
+        await supabaseAdmin.auth.admin.deleteUser(authUserId);
+        throw new Error(insertError.message);
+      }
+
+      return userId.id;
+    }
 
     const { data: authResult, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,

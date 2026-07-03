@@ -5,6 +5,7 @@ import {
   normalizePhone,
   normalizeUf,
 } from "@/shared/lib/field-format";
+import { getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
 import type { Address, Customer, PersonType } from "@/shared/types/domain";
 import type { CustomerDraft } from "@/modules/customers/types";
 
@@ -167,36 +168,20 @@ async function upsertPrimaryAddress(personId: number, address: CustomerDraft["pr
 }
 
 async function createPersonAndCustomer(draft: CustomerDraft) {
-  const documentField = draft.type === "company" ? "cnpj" : "cpf";
-  const { data: person, error: personError } = await supabase
-    .from("people")
-    .insert({
-      name: draft.name.trim(),
-      type: draft.type,
-      cpf:
-        documentField === "cpf"
-          ? normalizeText(normalizeDocument(draft.document, "individual"))
-          : null,
-      cnpj:
-        documentField === "cnpj"
-          ? normalizeText(normalizeDocument(draft.document, "company"))
-          : null,
-      phone: normalizeText(normalizePhone(draft.phone)),
-      email: normalizeText(draft.email),
-    })
-    .select("id")
-    .single();
+  const personId = await getOrCreatePersonIdByDocument({
+    name: draft.name,
+    type: draft.type,
+    document: draft.document,
+    phone: draft.phone,
+    email: draft.email,
+  });
 
-  if (personError) {
-    throw new Error(personError.message);
-  }
-
-  await upsertPrimaryAddress(person.id, draft.primary_address);
+  await upsertPrimaryAddress(personId, draft.primary_address);
 
   const { data: customer, error: customerError } = await supabase
     .from("customers")
     .insert({
-      person_id: person.id,
+      person_id: personId,
       notes: normalizeText(draft.notes),
     })
     .select("id")
