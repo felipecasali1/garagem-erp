@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/shared/components/ui/select";
 import { toast } from "sonner";
+import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { DEFAULT_ACCESSORIES } from "@/shared/lib/accessories";
 import { PlateInput } from "@/shared/components/form/field-inputs";
 import type { VehicleDraft } from "@/modules/vehicles/types";
@@ -49,6 +50,8 @@ function EditVehicle() {
   });
   const [draft, setDraft] = useState<VehicleDraft | null>(null);
   const [customAcc, setCustomAcc] = useState("");
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [confirmAccessoryRemove, setConfirmAccessoryRemove] = useState<string | null>(null);
   const updateDraft = (patch: Partial<VehicleDraft>) =>
     setDraft((current) => (current ? { ...current, ...patch } : current));
   const toggleAcc = (accessory: string) =>
@@ -162,9 +165,7 @@ function EditVehicle() {
         <Button
           variant="outline"
           type="button"
-          onClick={() => {
-            deleteMutation.mutate();
-          }}
+          onClick={() => setConfirmDeleteOpen(true)}
           disabled={deleteMutation.isPending}
         >
           <Trash2 className="h-4 w-4" /> Excluir
@@ -225,6 +226,41 @@ function EditVehicle() {
           </div>
         </CardContent>
       </Card>
+      <ConfirmActionDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title="Excluir veículo?"
+        description="Esta ação não pode ser desfeita. O veículo será removido permanentemente do sistema."
+        confirmLabel={deleteMutation.isPending ? "Excluindo..." : "Excluir"}
+        confirmDisabled={deleteMutation.isPending}
+        onConfirm={() => {
+          setConfirmDeleteOpen(false);
+          deleteMutation.mutate();
+        }}
+      />
+      <ConfirmActionDialog
+        open={confirmAccessoryRemove != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAccessoryRemove(null);
+        }}
+        title="Remover acessório?"
+        description="Este acessório personalizado será removido da lista deste veículo."
+        confirmLabel="Remover"
+        onConfirm={() => {
+          if (!confirmAccessoryRemove) return;
+          const accessory = confirmAccessoryRemove;
+          setConfirmAccessoryRemove(null);
+          setDraft((current) =>
+            current
+              ? {
+                  ...current,
+                  accessories: current.accessories.filter((value) => value !== accessory),
+                }
+              : current,
+          );
+          toast.success("Acessório removido");
+        }}
+      />
 
       <Card>
         <CardContent className="p-6 space-y-4">
@@ -386,7 +422,7 @@ function EditVehicle() {
                 .map((accessory) => (
                   <Badge key={accessory} variant="outline" className="gap-1">
                     {accessory}
-                    <button type="button" onClick={() => toggleAcc(accessory)}>
+                    <button type="button" onClick={() => setConfirmAccessoryRemove(accessory)}>
                       <X className="h-3 w-3" />
                     </button>
                   </Badge>

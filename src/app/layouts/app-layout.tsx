@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Outlet } from "@tanstack/react-router";
+import { useRouterState } from "@tanstack/react-router";
 import { AppSidebar } from "@/shared/components/layout/app-sidebar";
 import { TopNav } from "@/shared/components/layout/top-nav";
 import { SidebarInset, SidebarProvider } from "@/shared/components/ui/sidebar";
@@ -8,12 +9,22 @@ import { useAuth } from "@/shared/supabase/auth";
 
 export function AppLayout() {
   const navigate = useNavigate();
-  const { loading, session } = useAuth();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { loading, session, isAdmin } = useAuth();
+
+  const isEmployeesArea = pathname.startsWith("/employees");
 
   useEffect(() => {
     if (loading || session) return;
     void navigate({ to: "/login", replace: true });
   }, [loading, navigate, session]);
+
+  useEffect(() => {
+    if (loading || !session) return;
+    if (!isAdmin && isEmployeesArea) {
+      void navigate({ to: "/", replace: true });
+    }
+  }, [isAdmin, isEmployeesArea, loading, navigate, session]);
 
   if (loading) {
     return (

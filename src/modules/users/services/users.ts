@@ -62,6 +62,14 @@ export type CreateSystemUserInput = {
   employeeId?: number;
 };
 
+export type LinkSystemUserInput = {
+  userId: number;
+  employeeId: number;
+  role: EmployeeAccessRole;
+  active?: boolean;
+  isAdmin?: boolean;
+};
+
 function normalizeText(value?: string) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
@@ -277,6 +285,134 @@ export async function createSystemUser(input: CreateSystemUserInput) {
   return createSystemUserServer({ data: input });
 }
 
+const linkSystemUserToEmployeeServer = createServerFn({ method: "POST" })
+  .inputValidator(
+    z.object({
+      userId: z.number().int().positive(),
+      employeeId: z.number().int().positive(),
+      role: z.enum(["admin", "manager", "seller", "financial"]),
+      active: z.boolean().optional(),
+      isAdmin: z.boolean().optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/shared/supabase/server");
+
+    const [{ data: user, error: userError }, { data: employee, error: employeeError }] =
+      await Promise.all([
+        supabaseAdmin
+          .from("users")
+          .select("id, person_id, employee_id, access_role, active, is_admin, auth_user_id")
+          .eq("id", data.userId)
+          .maybeSingle(),
+        supabaseAdmin
+          .from("employees")
+          .select("id, person_id, person:people(id, name, email, phone, type)")
+          .eq("id", data.employeeId)
+          .maybeSingle(),
+      ]);
+
+    if (userError) {
+      throw new Error(userError.message);
+    }
+
+    if (employeeError) {
+      throw new Error(employeeError.message);
+    }
+
+    if (!user) {
+      throw new Error("Usuário não encontrado.");
+    }
+
+    if (!employee?.person) {
+      throw new Error("Funcionário não encontrado.");
+    }
+
+    if (user.employee_id && user.employee_id !== employee.id) {
+      throw new Error("Esse usuário já está vinculado a outro funcionário.");
+    }
+
+    if (user.person_id !== employee.person_id) {
+      throw new Error("O usuário e o funcionário precisam ser a mesma pessoa para vincular.");
+    }
+
+    const { data: existingLink, error: linkError } = await supabaseAdmin
+      .from("users")
+      .select("id")
+      .eq("employee_id", employee.id)
+      .maybeSingle();
+
+    if (linkError) {
+      throw new Error(linkError.message);
+    }
+
+    if (existingLink && existingLink.id !== user.id) {
+      throw new Error("Esse funcionário já possui outro acesso ao sistema.");
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from("users")
+      .update({
+        employee_id: employee.id,
+        access_role: data.role,
+        is_admin: data.isAdmin ?? data.role === "admin",
+        active: data.active ?? user.active,
+      })
+      .eq("id", user.id);
+
+    if (updateError) {
+      throw new Error(updateError.message);
+    }
+
+    return user.id;
+  });
+
+export async function linkSystemUserToEmployee(input: LinkSystemUserInput) {
+  return linkSystemUserToEmployeeServer({ data: input });
+}
+
 export async function setSystemUserActive(id: number, active: boolean) {
   return setSystemUserActiveServer({ data: { id, active } });
+}
+
+const deleteSystemUserServer = createServerFn({ method: "POST" })
+  .inputValidator(
+    z.object({
+      id: z.number().int().positive(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/shared/supabase/server");
+
+    const { data: user, error: lookupError } = await supabaseAdmin
+      .from("users")
+      .select("id, auth_user_id")
+      .eq("id", data.id)
+      .maybeSingle();
+
+    if (lookupError) {
+      throw new Error(lookupError.message);
+    }
+
+    if (!user) {
+      throw new Error("Usuário não encontrado.");
+    }
+
+    const { error: deleteError } = await supabaseAdmin.from("users").delete().eq("id", data.id);
+    if (deleteError) {
+      throw new Error(deleteError.message);
+    }
+
+    if (user.auth_user_id) {
+      const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(
+        user.auth_user_id,
+      );
+      if (authDeleteError) {
+        throw new Error(authDeleteError.message);
+      }
+    }
+  });
+
+export async function deleteSystemUser(id: number) {
+  return deleteSystemUserServer({ data: { id } });
 }

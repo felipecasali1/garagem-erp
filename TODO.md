@@ -10,16 +10,11 @@
 
 - adaptar frontend para receber os dados do Supabase nas tabelas, estatísticas e outros
 - clientes e endereços já estão com persistência real; próximo passo é conectar vendas/purchases para fechar o histórico
-- padronizar mais máscaras e campos numéricos nas telas restantes
-- facilitar/melhorar checklist
-- definir a questão dos níveis de acesso e como isso será feito no SUpabase
+- definir a questão dos níveis de acesso e como isso será feito no Supabase
 - finalizar o fluxo de provisionamento de acesso para funcionários existentes, sem misturar cadastro operacional com login do sistema
-- melhoria e revisão nos formulários 
+- concluir a navegação baseada em `access_role` para esconder e limitar áreas administrativas conforme o perfil
+- consolidar a política de exclusão versus arquivamento para clientes, fornecedores e funcionários usados em vendas/compras para não perder histórico, priorizando desativação quando houver vínculo com vendas ou compras
 
 ## Alta Prioridade
 
-- fazer os migrations com policies e RLS
-- adaptar o projeto para comunicação com o Supabase
-- rodar o migration no Supabase
-- fazer a autenticação com Supabase Auth
 - proteger as rotas com autenticação dependendo do nivel de acesso

@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, MoreHorizontal, Pencil, Trash2, Power, PowerOff } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
@@ -23,6 +24,7 @@ import {
   TableRow,
 } from "@/shared/components/ui/table";
 import { toast } from "sonner";
+import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
 import {
   employeeKeys,
@@ -40,6 +42,11 @@ export const Route = createFileRoute("/_app/employees/")({
 function EmployeesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [confirmToggle, setConfirmToggle] = useState<{
+    id: number;
+    nextActive: boolean;
+  } | null>(null);
   const { data: employees = [], isLoading } = useQuery({
     queryKey: employeeKeys.all,
     queryFn: listEmployees,
@@ -111,9 +118,9 @@ function EmployeesPage() {
                     employee={employee}
                     navigate={navigate}
                     onToggleActive={() =>
-                      toggleMutation.mutate({ id: employee.id, active: !employee.active })
+                      setConfirmToggle({ id: employee.id, nextActive: !employee.active })
                     }
-                    onDelete={() => deleteMutation.mutate(employee.id)}
+                    onDelete={() => setConfirmDelete(employee.id)}
                   />
                 ))}
               </TableBody>
@@ -121,6 +128,42 @@ function EmployeesPage() {
           )}
         </CardContent>
       </Card>
+      <ConfirmActionDialog
+        open={confirmDelete != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDelete(null);
+        }}
+        title="Excluir funcionário?"
+        description="Esta ação não pode ser desfeita. O funcionário será removido permanentemente do sistema."
+        confirmLabel={deleteMutation.isPending ? "Excluindo..." : "Excluir"}
+        confirmDisabled={deleteMutation.isPending || confirmDelete == null}
+        onConfirm={() => {
+          if (confirmDelete == null) return;
+          const id = confirmDelete;
+          setConfirmDelete(null);
+          deleteMutation.mutate(id);
+        }}
+      />
+      <ConfirmActionDialog
+        open={confirmToggle != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmToggle(null);
+        }}
+        title={confirmToggle?.nextActive ? "Ativar funcionário?" : "Desativar funcionário?"}
+        description={
+          confirmToggle?.nextActive
+            ? "O funcionário voltará a aparecer como ativo no sistema."
+            : "O funcionário deixará de aparecer como ativo e o acesso interno também será desativado."
+        }
+        confirmLabel={toggleMutation.isPending ? "Atualizando..." : "Confirmar"}
+        confirmDisabled={toggleMutation.isPending || confirmToggle == null}
+        onConfirm={() => {
+          if (confirmToggle == null) return;
+          const next = confirmToggle;
+          setConfirmToggle(null);
+          toggleMutation.mutate({ id: next.id, active: next.nextActive });
+        }}
+      />
     </div>
   );
 }
@@ -197,27 +240,27 @@ function EmployeeRow({
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuLabel>Ações</DropdownMenuLabel>
               <DropdownMenuItem
-                onClick={() =>
+                onSelect={() =>
                   navigate({ to: "/employees/$id", params: { id: String(employee.id) } })
                 }
               >
                 <Eye className="h-4 w-4" /> Ver detalhes
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() =>
+                onSelect={() =>
                   navigate({ to: "/employees/edit/$id", params: { id: String(employee.id) } })
                 }
               >
                 <Pencil className="h-4 w-4" /> Editar
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={onToggleActive}>
+              <DropdownMenuItem onSelect={onToggleActive}>
                 {employee.active ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4" />}
                 {employee.active ? "Desativar" : "Ativar"}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
-                onClick={onDelete}
+                onSelect={onDelete}
               >
                 <Trash2 className="h-4 w-4" /> Excluir
               </DropdownMenuItem>

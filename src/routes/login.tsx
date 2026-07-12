@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
-import { Checkbox } from "@/shared/components/ui/checkbox";
 import { useAuth } from "@/shared/supabase/auth";
 
 export const Route = createFileRoute("/login")({
@@ -19,8 +18,9 @@ function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [awaitingLogin, setAwaitingLogin] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const { loading, session, signIn } = useAuth();
+  const { loading, session, signIn, accessError } = useAuth();
 
   useEffect(() => {
     if (!loading && session) {
@@ -28,22 +28,42 @@ function LoginPage() {
     }
   }, [loading, navigate, session]);
 
+  useEffect(() => {
+    if (!awaitingLogin) {
+      return;
+    }
+
+    if (accessError) {
+      setErrorMessage(accessError);
+      toast.error(accessError);
+      setSubmitting(false);
+      setAwaitingLogin(false);
+      return;
+    }
+
+    if (session) {
+      toast.success("Login realizado com sucesso.");
+      setSubmitting(false);
+      setAwaitingLogin(false);
+      void navigate({ to: "/", replace: true });
+    }
+  }, [accessError, awaitingLogin, navigate, session]);
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErrorMessage(null);
     setSubmitting(true);
+    setAwaitingLogin(true);
 
     try {
       await signIn({ email, password });
-      toast.success("Login realizado com sucesso.");
-      void navigate({ to: "/", replace: true });
     } catch (error) {
+      setAwaitingLogin(false);
+      setSubmitting(false);
       const message =
         error instanceof Error ? error.message : "Nao foi possivel autenticar no Supabase.";
       setErrorMessage(message);
       toast.error("Falha ao realizar login.");
-    } finally {
-      setSubmitting(false);
     }
   }
 
@@ -155,13 +175,6 @@ function LoginPage() {
                   {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Checkbox id="remember" />
-              <Label htmlFor="remember" className="text-sm font-normal cursor-pointer">
-                Lembrar de mim
-              </Label>
             </div>
 
             {errorMessage ? (

@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/shared/components/ui/select";
 import { CepInput, CpfCnpjInput, PhoneInput, UfInput } from "@/shared/components/form/field-inputs";
+import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import type { CustomerDraft } from "@/modules/customers/types";
 import {
   customerKeys,
@@ -39,6 +40,7 @@ function EditClient() {
     enabled: Number.isFinite(customerId),
   });
   const [draft, setDraft] = useState<CustomerDraft | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   useEffect(() => {
     if (!customer) return;
@@ -122,7 +124,7 @@ function EditClient() {
         <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">
           Editar Cliente
         </h1>
-        <Button variant="outline" type="button" onClick={() => deleteMutation.mutate()}>
+        <Button variant="outline" type="button" onClick={() => setConfirmDeleteOpen(true)}>
           <Trash2 className="h-4 w-4" /> Excluir
         </Button>
         <Button type="submit" disabled={updateMutation.isPending}>
@@ -247,6 +249,18 @@ function EditClient() {
           </div>
         </CardContent>
       </Card>
+      <ConfirmActionDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title="Excluir cliente?"
+        description="Esta ação não pode ser desfeita. O cliente será removido permanentemente do sistema."
+        confirmLabel={deleteMutation.isPending ? "Excluindo..." : "Excluir"}
+        confirmDisabled={deleteMutation.isPending}
+        onConfirm={() => {
+          setConfirmDeleteOpen(false);
+          deleteMutation.mutate();
+        }}
+      />
     </form>
   );
 }

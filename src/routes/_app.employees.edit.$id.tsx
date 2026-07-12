@@ -9,6 +9,7 @@ import { Label } from "@/shared/components/ui/label";
 import { Switch } from "@/shared/components/ui/switch";
 import { DatePicker } from "@/shared/components/ui/date-picker";
 import { toast } from "sonner";
+import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { CepInput, CpfCnpjInput, PhoneInput, UfInput } from "@/shared/components/form/field-inputs";
 import {
   deleteEmployee,
@@ -32,6 +33,7 @@ function EditEmployee() {
     queryFn: () => getEmployeeById(employeeId),
   });
   const [draft, setDraft] = useState<EmployeeDraft | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   useEffect(() => {
     if (!employee) return;
@@ -117,7 +119,7 @@ function EditEmployee() {
         <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">
           Editar Funcionário
         </h1>
-        <Button variant="outline" type="button" onClick={() => deleteMutation.mutate()}>
+        <Button variant="outline" type="button" onClick={() => setConfirmDeleteOpen(true)}>
           <Trash2 className="h-4 w-4" /> Excluir
         </Button>
         <Button type="submit" disabled={updateMutation.isPending}>
@@ -285,6 +287,18 @@ function EditEmployee() {
           </div>
         </CardContent>
       </Card>
+      <ConfirmActionDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title="Excluir funcionário?"
+        description="Esta ação não pode ser desfeita. O funcionário será removido permanentemente do sistema."
+        confirmLabel={deleteMutation.isPending ? "Excluindo..." : "Excluir"}
+        confirmDisabled={deleteMutation.isPending}
+        onConfirm={() => {
+          setConfirmDeleteOpen(false);
+          deleteMutation.mutate();
+        }}
+      />
     </form>
   );
 }

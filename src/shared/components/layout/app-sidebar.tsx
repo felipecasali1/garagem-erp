@@ -71,10 +71,26 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { signOut, session } = useAuth();
+  const { signOut, session, isAdmin } = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
   const email = session?.user.email ?? "colaborador@garagemerp.local";
   const displayName = email.split("@")[0]?.replace(/[._-]+/g, " ") || "Colaborador";
+  const visibleGroups = groups
+    .map((group) => {
+      if (group.label === "Cadastros" && !isAdmin) {
+        return {
+          ...group,
+          items: group.items.filter((item) => item.title !== "Funcionários"),
+        };
+      }
+
+      if (group.label === "Configurações" && !isAdmin) {
+        return null;
+      }
+
+      return group;
+    })
+    .filter((group): group is (typeof groups)[number] => group !== null);
 
   async function handleSignOut() {
     try {
@@ -108,7 +124,7 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {groups.map((group) => (
+        {visibleGroups.map((group) => (
           <SidebarGroup key={group.label}>
             <SidebarGroupLabel className="text-sidebar-foreground/50 text-[10px] uppercase tracking-wider">
               {group.label}

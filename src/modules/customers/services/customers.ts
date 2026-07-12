@@ -5,7 +5,7 @@ import {
   normalizePhone,
   normalizeUf,
 } from "@/shared/lib/field-format";
-import { getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
+import { deletePersonIfUnused, getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
 import type { Address, Customer, PersonType } from "@/shared/types/domain";
 import type { CustomerDraft } from "@/modules/customers/types";
 
@@ -259,8 +259,11 @@ export async function updateCustomer(id: number, draft: CustomerDraft) {
 }
 
 export async function deleteCustomer(id: number) {
+  const customer = await getCustomerById(id);
   const { error } = await supabase.from("customers").delete().eq("id", id);
   if (error) {
     throw new Error(error.message);
   }
+
+  await deletePersonIfUnused(customer.person.id);
 }

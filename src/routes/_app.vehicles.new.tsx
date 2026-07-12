@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/shared/components/ui/select";
 import { toast } from "sonner";
+import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { DEFAULT_ACCESSORIES } from "@/shared/lib/accessories";
 import { PlateInput } from "@/shared/components/form/field-inputs";
 import {
@@ -59,6 +60,8 @@ function NewVehicle() {
     checklist: [],
   });
   const [customAcc, setCustomAcc] = useState("");
+  const [confirmAccessoryRemove, setConfirmAccessoryRemove] = useState<string | null>(null);
+  const [confirmChecklistRemove, setConfirmChecklistRemove] = useState<string | null>(null);
   const patchVehicleDraft = (patch: Partial<VehicleDraft>) =>
     setVehicleDraft((current) => ({ ...current, ...patch }));
   const toggleAcc = (a: string) =>
@@ -370,7 +373,7 @@ function NewVehicle() {
                 .map((a) => (
                   <Badge key={a} variant="outline" className="gap-1">
                     {a}
-                    <button type="button" onClick={() => toggleAcc(a)}>
+                    <button type="button" onClick={() => setConfirmAccessoryRemove(a)}>
                       <X className="h-3 w-3" />
                     </button>
                   </Badge>
@@ -527,7 +530,7 @@ function NewVehicle() {
                     type="button"
                     variant="ghost"
                     size="icon"
-                    onClick={() => removeChecklist(c.id)}
+                    onClick={() => setConfirmChecklistRemove(c.id)}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -537,6 +540,45 @@ function NewVehicle() {
           )}
         </CardContent>
       </Card>
+      <ConfirmActionDialog
+        open={confirmAccessoryRemove != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAccessoryRemove(null);
+        }}
+        title="Remover acessório?"
+        description="Este acessório personalizado será removido da lista deste veículo."
+        confirmLabel="Remover"
+        onConfirm={() => {
+          if (!confirmAccessoryRemove) return;
+          const accessory = confirmAccessoryRemove;
+          setConfirmAccessoryRemove(null);
+          setVehicleDraft((current) =>
+            current
+              ? {
+                  ...current,
+                  accessories: current.accessories.filter((value) => value !== accessory),
+                }
+              : current,
+          );
+          toast.success("Acessório removido");
+        }}
+      />
+      <ConfirmActionDialog
+        open={confirmChecklistRemove != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmChecklistRemove(null);
+        }}
+        title="Remover item?"
+        description="Este item será removido do checklist deste veículo antes de salvar."
+        confirmLabel="Remover"
+        onConfirm={() => {
+          if (!confirmChecklistRemove) return;
+          const itemId = confirmChecklistRemove;
+          setConfirmChecklistRemove(null);
+          removeChecklist(itemId);
+          toast.success("Item removido");
+        }}
+      />
     </form>
   );
 }

@@ -58,6 +58,14 @@ Important implementation note:
 - checklist items are now fetched and mutated through Supabase in the checklist module, and the responsible employee picker now reads real `employees` rows instead of mock employee data
 - the employees module now reads and mutates real `people` + `employees` rows from Supabase
 - the settings "Usuários" tab now provisions real auth accounts through a server-side admin action and can either create a new internal employee bundle or link access to an existing employee; the current user's own access toggle remains protected in the UI
+- the settings "Usuários" tab can be deep-linked with `?tab=users`, and the user dialog now has two flows: create a brand-new access account or link an existing internal user to an existing employee without recreating auth
+- internal login now resolves the linked `public.users` row after Supabase Auth sign-in, and inactive users are signed out immediately; `access_role` now drives the visible navigation, with employee and user management restricted to admins
+- inactive users are now blocked at the database policy layer too: authenticated requests require an active internal user, and the self-select policy for `public.users` also checks `active = true`
+- employee activation/deactivation is now executed by a database function so `employees.active` and the linked `public.users.active` flag change atomically instead of relying on separate client-side updates
+- destructive UI actions now use a shared confirmation dialog pattern, including record deletion and local remove actions in vehicle/accessory lists
+- deleting an employee or customer now also removes the underlying `people` row only when that person is no longer referenced by employees, customers, users, or suppliers
+- customers, suppliers, and employees that appear in sales or purchases are protected by foreign keys, so the database already prevents hard deletion when history would be lost; in those cases the safer path is deactivation or archiving instead of deletion
+- system user deletion is separate from business-history entities: admins can remove `public.users` and the linked Supabase Auth account, while customers/suppliers/employees that appear in sales or purchases should be archived or deactivated instead of hard-deleted when history must remain intact
 - the clients module now reads and mutates real `people` + `addresses` + `customers` rows from Supabase, and the main client form/detail pages now treat the address as part of the real persisted flow instead of mock data
 - shared form inputs now normalize CPF/CNPJ, phone, CEP, UF, plate and numeric entry patterns so the database receives consistent values regardless of how the user types them
 - people records are now reused by document when creating customers or employees, so one person can legitimately have more than one role instead of failing on duplicate CPF/CNPJ

@@ -1,6 +1,6 @@
 import { supabase } from "@/shared/supabase/client";
 import { normalizeCep, normalizeCpf, normalizePhone, normalizeUf } from "@/shared/lib/field-format";
-import { getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
+import { deletePersonIfUnused, getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
 import type { Address, Employee, PersonType } from "@/shared/types/domain";
 import type { EmployeeAccessRole, EmployeeDraft } from "@/modules/employees/types";
 
@@ -327,28 +327,24 @@ export async function updateEmployee(id: number, draft: EmployeeDraft) {
 }
 
 export async function setEmployeeActive(id: number, active: boolean) {
-  const employee = await getEmployeeById(id);
+  const { error } = await supabase.rpc("set_employee_active_status", {
+    p_employee_id: id,
+    p_active: active,
+  });
 
-  const { error } = await supabase.from("employees").update({ active }).eq("id", id);
   if (error) {
     throw new Error(error.message);
   }
 
-  const { error: userError } = await supabase
-    .from("users")
-    .update({ active })
-    .eq("employee_id", id);
-
-  if (userError) {
-    throw new Error(userError.message);
-  }
-
-  return getEmployeeById(employee.id);
+  return getEmployeeById(id);
 }
 
 export async function deleteEmployee(id: number) {
+  const employee = await getEmployeeById(id);
   const { error } = await supabase.from("employees").delete().eq("id", id);
   if (error) {
     throw new Error(error.message);
   }
+
+  await deletePersonIfUnused(employee.person.id);
 }

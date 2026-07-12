@@ -29,6 +29,8 @@ import {
   deleteCustomer,
   listCustomers,
 } from "@/modules/customers/services/customers";
+import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
+import { useState } from "react";
 
 export const Route = createFileRoute("/_app/clients/")({
   head: () => ({ meta: [{ title: "Clientes | GaragemERP" }] }),
@@ -38,6 +40,7 @@ export const Route = createFileRoute("/_app/clients/")({
 function ClientsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const { data: customers = [], isLoading } = useQuery({
     queryKey: customerKeys.all,
     queryFn: listCustomers,
@@ -160,7 +163,7 @@ function ClientsPage() {
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             className="text-destructive focus:text-destructive"
-                            onClick={() => deleteMutation.mutate(c.id)}
+                            onSelect={() => setConfirmDelete(c.id)}
                           >
                             <Trash2 className="h-4 w-4" /> Remover
                           </DropdownMenuItem>
@@ -174,6 +177,22 @@ function ClientsPage() {
           </Table>
         )}
       </Card>
+      <ConfirmActionDialog
+        open={confirmDelete != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDelete(null);
+        }}
+        title="Remover cliente?"
+        description="Esta ação não pode ser desfeita. O cliente será removido permanentemente do sistema."
+        confirmLabel={deleteMutation.isPending ? "Removendo..." : "Remover"}
+        confirmDisabled={deleteMutation.isPending || confirmDelete == null}
+        onConfirm={() => {
+          if (confirmDelete == null) return;
+          const id = confirmDelete;
+          setConfirmDelete(null);
+          deleteMutation.mutate(id);
+        }}
+      />
     </div>
   );
 }

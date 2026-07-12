@@ -63,3 +63,35 @@ export async function getOrCreatePersonIdByDocument(input: PersonInput) {
 
   return (created satisfies PersonLookup).id;
 }
+
+async function hasPersonLinks(personId: number) {
+  const tables = ["customers", "employees", "users", "suppliers"] as const;
+  const results = await Promise.all(
+    tables.map((table) => supabase.from(table).select("id").eq("person_id", personId).limit(1)),
+  );
+
+  for (const result of results) {
+    if (result.error) {
+      throw new Error(result.error.message);
+    }
+    if ((result.data ?? []).length > 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export async function deletePersonIfUnused(personId: number) {
+  const linked = await hasPersonLinks(personId);
+  if (linked) {
+    return false;
+  }
+
+  const { error } = await supabase.from("people").delete().eq("id", personId);
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return true;
+}

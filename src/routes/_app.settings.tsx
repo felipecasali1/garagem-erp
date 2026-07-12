@@ -11,6 +11,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Textarea } from "@/shared/components/ui/textarea";
 import { Switch } from "@/shared/components/ui/switch";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
+import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import {
   Dialog,
   DialogContent,
@@ -34,14 +35,24 @@ import { useAuth } from "@/shared/supabase/auth";
 import { employeeKeys, listEmployees } from "@/modules/employees/services/employees";
 import {
   userKeys,
+  deleteSystemUser,
   createSystemUser,
+  linkSystemUserToEmployee,
   listSystemUsers,
   setSystemUserActive,
 } from "@/modules/users/services/users";
+import type { SystemUserRecord } from "@/modules/users/services/users";
 import type { EmployeeAccessRole } from "@/modules/employees/types";
 
 export const Route = createFileRoute("/_app/settings")({
   head: () => ({ meta: [{ title: "Configurações | GaragemERP" }] }),
+  validateSearch: (search: { tab?: unknown }): { tab?: SettingsTab } => {
+    const tab = typeof search.tab === "string" ? search.tab : undefined;
+    if (tab === "company" || tab === "users" || tab === "accessories" || tab === "general") {
+      return { tab };
+    }
+    return {};
+  },
   component: SettingsPage,
 });
 
@@ -63,23 +74,35 @@ const initialAccessories = [
   "Piloto automático",
 ];
 
+type SettingsTab = "company" | "users" | "accessories" | "general";
+
 function SettingsPage() {
+  const { isAdmin } = useAuth();
+  const { tab: searchTab } = Route.useSearch();
+  const [tab, setTab] = useState<SettingsTab>(searchTab ?? "company");
+
+  useEffect(() => {
+    setTab(searchTab ?? "company");
+  }, [searchTab]);
+
   return (
     <div className="max-w-5xl mx-auto">
       <PageHeader
         title="Configurações"
         description="Empresa, usuários, acessórios e preferências."
       />
-      <Tabs defaultValue="company">
+      <Tabs value={tab} onValueChange={(value) => setTab(value as SettingsTab)}>
         <TabsList className="mb-4">
           <TabsTrigger value="company">
             <Building2 className="h-4 w-4 mr-2" />
             Empresa
           </TabsTrigger>
-          <TabsTrigger value="users">
-            <Users className="h-4 w-4 mr-2" />
-            Usuários
-          </TabsTrigger>
+          {isAdmin && (
+            <TabsTrigger value="users">
+              <Users className="h-4 w-4 mr-2" />
+              Usuários
+            </TabsTrigger>
+          )}
           <TabsTrigger value="accessories">
             <Sparkles className="h-4 w-4 mr-2" />
             Acessórios
@@ -93,9 +116,11 @@ function SettingsPage() {
         <TabsContent value="company">
           <CompanyTab />
         </TabsContent>
-        <TabsContent value="users">
-          <UsersTab />
-        </TabsContent>
+        {isAdmin && (
+          <TabsContent value="users">
+            <UsersTab />
+          </TabsContent>
+        )}
         <TabsContent value="accessories">
           <AccessoriesTab />
         </TabsContent>
@@ -185,12 +210,14 @@ function CompanyTab() {
 function UsersTab() {
   const { session } = useAuth();
   const queryClient = useQueryClient();
+  const [confirmDeleteUserId, setConfirmDeleteUserId] = useState<number | null>(null);
   const { data: users = [], isLoading } = useQuery({
     queryKey: userKeys.all,
     queryFn: listSystemUsers,
   });
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: userKeys.all });
+    await queryClient.invalidateQueries({ queryKey: employeeKeys.all });
   };
   const toggleMutation = useMutation({
     mutationFn: ({ id, active }: { id: number; active: boolean }) =>
@@ -203,86 +230,132 @@ function UsersTab() {
       toast.error(error instanceof Error ? error.message : "Falha ao atualizar usuário.");
     },
   });
+  const deleteMutation = useMutation({
+    mutationFn: deleteSystemUser,
+    onSuccess: async () => {
+      await invalidate();
+      toast.success("Usuário removido");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao excluir usuário.");
+    },
+  });
   return (
-    <Card>
-      <CardContent className="p-0">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <div>
-            <h3 className="font-display font-semibold">Usuários do sistema</h3>
-            <p className="text-xs text-muted-foreground">{users.length} usuários cadastrados</p>
+    <>
+      <Card>
+        <CardContent className="p-0">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+            <div>
+              <h3 className="font-display font-semibold">Usuários do sistema</h3>
+              <p className="text-xs text-muted-foreground">{users.length} usuários cadastrados</p>
+            </div>
+            <NewUserDialog users={users} />
           </div>
-          <NewUserDialog />
-        </div>
-        {isLoading ? (
-          <div className="p-8 text-sm text-muted-foreground">Carregando usuários...</div>
-        ) : (
-          <div className="divide-y divide-border">
-            {users.map((u) => (
-              <div key={u.id} className="flex items-center gap-4 px-6 py-4">
-                <Avatar>
-                  <AvatarFallback className="bg-muted text-xs">{initials(u.name)}</AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">{u.name}</div>
-                  <div className="text-xs text-muted-foreground truncate">{u.email}</div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    {u.employee_position
-                      ? `Cargo: ${u.employee_position}`
-                      : "Sem vínculo com funcionário"}
-                  </div>
-                </div>
-                <div className="text-xs text-muted-foreground hidden md:block">
-                  {u.last_login_at ? `Último acesso: ${fmtDate(u.last_login_at)}` : "Nunca acessou"}
-                </div>
-                {u.is_admin && (
-                  <Badge variant="outline" className="border-primary/30 text-primary">
-                    <Shield className="h-3 w-3 mr-1" /> Admin
-                  </Badge>
-                )}
-                {u.auth_user_id && session?.user.id === u.auth_user_id ? (
-                  u.active ? (
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="border-border text-muted-foreground">
-                        Você
-                      </Badge>
-                      <Switch checked disabled />
+          {isLoading ? (
+            <div className="p-8 text-sm text-muted-foreground">Carregando usuários...</div>
+          ) : (
+            <div className="divide-y divide-border">
+              {users.map((u) => (
+                <div key={u.id} className="flex items-center gap-4 px-6 py-4">
+                  <Avatar>
+                    <AvatarFallback className="bg-muted text-xs">{initials(u.name)}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{u.name}</div>
+                    <div className="text-xs text-muted-foreground truncate">{u.email}</div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {u.employee_position
+                        ? `Cargo: ${u.employee_position}`
+                        : "Sem vínculo com funcionário"}
                     </div>
+                  </div>
+                  <div className="text-xs text-muted-foreground hidden md:block">
+                    {u.last_login_at
+                      ? `Último acesso: ${fmtDate(u.last_login_at)}`
+                      : "Nunca acessou"}
+                  </div>
+                  {u.is_admin && (
+                    <Badge variant="outline" className="border-primary/30 text-primary">
+                      <Shield className="h-3 w-3 mr-1" /> Admin
+                    </Badge>
+                  )}
+                  {u.auth_user_id && session?.user.id === u.auth_user_id ? (
+                    u.active ? (
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="border-border text-muted-foreground">
+                          Você
+                        </Badge>
+                        <Switch checked disabled />
+                      </div>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => toggleMutation.mutate({ id: u.id, active: true })}
+                        disabled={toggleMutation.isPending}
+                      >
+                        Reativar meu acesso
+                      </Button>
+                    )
                   ) : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => toggleMutation.mutate({ id: u.id, active: true })}
-                      disabled={toggleMutation.isPending}
-                    >
-                      Reativar meu acesso
-                    </Button>
-                  )
-                ) : (
-                  <Switch
-                    checked={u.active}
-                    onCheckedChange={(value) => toggleMutation.mutate({ id: u.id, active: value })}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={u.active}
+                        onCheckedChange={(value) =>
+                          toggleMutation.mutate({ id: u.id, active: value })
+                        }
+                      />
+                      {!u.auth_user_id || session?.user.id !== u.auth_user_id ? (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="text-muted-foreground hover:text-destructive"
+                          aria-label={`Excluir usuário ${u.name}`}
+                          onClick={() => setConfirmDeleteUserId(u.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      <ConfirmActionDialog
+        open={confirmDeleteUserId != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDeleteUserId(null);
+        }}
+        title="Excluir usuário?"
+        description="Isso remove o acesso ao sistema. O funcionário e o histórico de vendas/compras continuam preservados."
+        confirmLabel={deleteMutation.isPending ? "Excluindo..." : "Excluir"}
+        confirmDisabled={deleteMutation.isPending || confirmDeleteUserId == null}
+        onConfirm={() => {
+          if (confirmDeleteUserId == null) return;
+          const id = confirmDeleteUserId;
+          setConfirmDeleteUserId(null);
+          deleteMutation.mutate(id);
+        }}
+      />
+    </>
   );
 }
 
 function AccessoriesTab() {
   const [items, setItems] = useState(initialAccessories);
   const [draft, setDraft] = useState("");
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const add = () => {
     if (!draft.trim()) return;
     setItems((s) => [...s, draft.trim()]);
     setDraft("");
     toast.success("Acessório adicionado");
   };
-  const remove = (name: string) => setItems((s) => s.filter((n) => n !== name));
   return (
     <Card>
       <CardContent className="p-6 space-y-4">
@@ -316,7 +389,8 @@ function AccessoriesTab() {
             >
               {name}
               <button
-                onClick={() => remove(name)}
+                type="button"
+                onClick={() => setConfirmRemove(name)}
                 className="opacity-50 hover:opacity-100 hover:text-destructive transition"
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -324,6 +398,22 @@ function AccessoriesTab() {
             </div>
           ))}
         </div>
+        <ConfirmActionDialog
+          open={confirmRemove != null}
+          onOpenChange={(open) => {
+            if (!open) setConfirmRemove(null);
+          }}
+          title="Remover acessório?"
+          description="Este item será removido da lista de acessórios sugeridos."
+          confirmLabel={confirmRemove ? "Remover" : "Confirmar"}
+          onConfirm={() => {
+            if (!confirmRemove) return;
+            const name = confirmRemove;
+            setConfirmRemove(null);
+            setItems((current) => current.filter((item) => item !== name));
+            toast.success("Acessório removido");
+          }}
+        />
       </CardContent>
     </Card>
   );
@@ -394,15 +484,19 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function NewUserDialog() {
+function NewUserDialog({ users }: { users: SystemUserRecord[] }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"create" | "link">("create");
   const { data: employees = [] } = useQuery({
     queryKey: employeeKeys.all,
     queryFn: listEmployees,
   });
   const availableEmployees = employees.filter((employee) => !employee.user_id);
-  const [employeeId, setEmployeeId] = useState("new");
+  const availableUsers = users.filter((user) => !user.employee_id);
+  const [createEmployeeId, setCreateEmployeeId] = useState("new");
+  const [linkedUserId, setLinkedUserId] = useState("new");
+  const [linkedEmployeeId, setLinkedEmployeeId] = useState("new");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -416,23 +510,31 @@ function NewUserDialog() {
       await queryClient.invalidateQueries({ queryKey: userKeys.all });
       await queryClient.invalidateQueries({ queryKey: employeeKeys.all });
       toast.success("Usuário criado e vinculado ao acesso interno");
-      setOpen(false);
-      setEmployeeId("new");
-      setName("");
-      setEmail("");
-      setPassword("");
-      setPhone("");
-      setPosition("Funcionário");
-      setRole("seller");
-      setActive(true);
+      resetForm();
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Falha ao criar usuário.");
     },
   });
+  const linkMutation = useMutation({
+    mutationFn: linkSystemUserToEmployee,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: userKeys.all });
+      await queryClient.invalidateQueries({ queryKey: employeeKeys.all });
+      toast.success("Usuário vinculado ao funcionário");
+      resetForm();
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao vincular usuário.");
+    },
+  });
 
   useEffect(() => {
-    if (employeeId === "new") {
+    if (mode !== "create") {
+      return;
+    }
+
+    if (createEmployeeId === "new") {
       setName("");
       setEmail("");
       setPhone("");
@@ -440,7 +542,7 @@ function NewUserDialog() {
       return;
     }
 
-    const selected = employees.find((employee) => String(employee.id) === employeeId);
+    const selected = employees.find((employee) => String(employee.id) === createEmployeeId);
     if (!selected) {
       return;
     }
@@ -449,30 +551,76 @@ function NewUserDialog() {
     setEmail(selected.person.email);
     setPhone(selected.person.phone);
     setPosition(selected.position);
-  }, [employeeId, employees]);
+  }, [createEmployeeId, employees, mode]);
 
-  const selectedEmployee = employees.find((employee) => String(employee.id) === employeeId);
+  const selectedCreateEmployee = employees.find(
+    (employee) => String(employee.id) === createEmployeeId,
+  );
+  const selectedLinkEmployee = employees.find(
+    (employee) => String(employee.id) === linkedEmployeeId,
+  );
+  const selectedLinkUser = users.find((user) => String(user.id) === linkedUserId);
+
+  const resetForm = () => {
+    setOpen(false);
+    setMode("create");
+    setCreateEmployeeId("new");
+    setLinkedUserId("new");
+    setLinkedEmployeeId("new");
+    setName("");
+    setEmail("");
+    setPassword("");
+    setPhone("");
+    setPosition("Funcionário");
+    setRole("seller");
+    setActive(true);
+  };
 
   const submit = () => {
-    if (!name.trim() || !email.trim() || password.trim().length < 8) {
-      toast.error("Preencha nome, e-mail e uma senha com no mínimo 8 caracteres");
+    if (mode === "create") {
+      if (!name.trim() || !email.trim() || password.trim().length < 8) {
+        toast.error("Preencha nome, e-mail e uma senha com no mínimo 8 caracteres");
+        return;
+      }
+
+      createMutation.mutate({
+        name,
+        email,
+        password,
+        phone: phone || undefined,
+        role,
+        position,
+        active,
+        isAdmin: role === "admin",
+        employeeId: createEmployeeId === "new" ? undefined : Number(createEmployeeId),
+      });
       return;
     }
-    createMutation.mutate({
-      name,
-      email,
-      password,
-      phone: phone || undefined,
+
+    if (linkedUserId === "new" || linkedEmployeeId === "new") {
+      toast.error("Selecione um usuário e um funcionário para vincular.");
+      return;
+    }
+
+    linkMutation.mutate({
+      userId: Number(linkedUserId),
+      employeeId: Number(linkedEmployeeId),
       role,
-      position,
       active,
       isAdmin: role === "admin",
-      employeeId: employeeId === "new" ? undefined : Number(employeeId),
     });
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) {
+          resetForm();
+        }
+      }}
+    >
       <DialogTrigger asChild>
         <Button size="sm">
           <Plus className="h-4 w-4" /> Novo usuário
@@ -483,42 +631,101 @@ function NewUserDialog() {
           <DialogTitle>Novo Usuário</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <Field label="Funcionário vinculado">
-            <Select value={employeeId} onValueChange={setEmployeeId}>
+          <Field label="Modo">
+            <Select
+              value={mode}
+              onValueChange={(value) => {
+                setMode(value as "create" | "link");
+              }}
+            >
               <SelectTrigger>
-                <SelectValue placeholder="Criar novo funcionário ou vincular existente" />
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="new">Criar novo funcionário</SelectItem>
-                {availableEmployees.map((employee) => (
-                  <SelectItem key={employee.id} value={String(employee.id)}>
-                    {employee.person.name} — {employee.position}
-                  </SelectItem>
-                ))}
+                <SelectItem value="create">Criar novo acesso</SelectItem>
+                <SelectItem value="link">Vincular usuário existente</SelectItem>
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Nome completo">
-            <Input value={name} onChange={(e) => setName(e.target.value)} />
-          </Field>
-          <Field label="E-mail">
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          </Field>
-          <Field label="Senha temporária">
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Mínimo 8 caracteres"
-            />
-          </Field>
-          <Field label="Telefone">
-            <PhoneInput value={phone} onValueChange={setPhone} />
-          </Field>
-          {!selectedEmployee && (
-            <Field label="Cargo">
-              <Input value={position} onChange={(e) => setPosition(e.target.value)} />
-            </Field>
+          {mode === "create" ? (
+            <>
+              <Field label="Funcionário vinculado">
+                <Select value={createEmployeeId} onValueChange={setCreateEmployeeId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Criar novo funcionário ou vincular existente" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="new">Criar novo funcionário</SelectItem>
+                    {availableEmployees.map((employee) => (
+                      <SelectItem key={employee.id} value={String(employee.id)}>
+                        {employee.person.name} — {employee.position}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Nome completo">
+                <Input value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+              <Field label="E-mail">
+                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              </Field>
+              <Field label="Senha temporária">
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Mínimo 8 caracteres"
+                />
+              </Field>
+              <Field label="Telefone">
+                <PhoneInput value={phone} onValueChange={setPhone} />
+              </Field>
+              {!selectedCreateEmployee && (
+                <Field label="Cargo">
+                  <Input value={position} onChange={(e) => setPosition(e.target.value)} />
+                </Field>
+              )}
+            </>
+          ) : (
+            <>
+              <Field label="Usuário existente">
+                <Select value={linkedUserId} onValueChange={setLinkedUserId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um usuário" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="new">Selecionar usuário</SelectItem>
+                    {availableUsers.map((user) => (
+                      <SelectItem key={user.id} value={String(user.id)}>
+                        {user.name} {user.email ? `— ${user.email}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Funcionário">
+                <Select value={linkedEmployeeId} onValueChange={setLinkedEmployeeId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um funcionário" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="new">Selecionar funcionário</SelectItem>
+                    {availableEmployees.map((employee) => (
+                      <SelectItem key={employee.id} value={String(employee.id)}>
+                        {employee.person.name} — {employee.position}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              {selectedLinkUser && (
+                <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+                  O sistema vai vincular {selectedLinkUser.name} ao funcionário{" "}
+                  {selectedLinkEmployee ? selectedLinkEmployee.person.name : "selecionado"}.
+                </div>
+              )}
+            </>
           )}
           <Field label="Perfil de acesso">
             <Select value={role} onValueChange={setRole}>
@@ -539,8 +746,15 @@ function NewUserDialog() {
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={createMutation.isPending}>
-            <Plus className="h-4 w-4" /> {createMutation.isPending ? "Criando..." : "Criar usuário"}
+          <Button onClick={submit} disabled={createMutation.isPending || linkMutation.isPending}>
+            <Plus className="h-4 w-4" />
+            {mode === "create"
+              ? createMutation.isPending
+                ? "Criando..."
+                : "Criar usuário"
+              : linkMutation.isPending
+                ? "Vinculando..."
+                : "Vincular acesso"}
           </Button>
         </DialogFooter>
       </DialogContent>
