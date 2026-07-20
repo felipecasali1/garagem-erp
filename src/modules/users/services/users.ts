@@ -1,7 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabase } from "@/shared/supabase/client";
-import { normalizePhone } from "@/shared/lib/field-format";
 import type { PersonType } from "@/shared/types/domain";
 import type { EmployeeAccessRole } from "@/modules/employees/types";
 
@@ -29,6 +28,16 @@ type UserRow = {
   } | null;
 };
 
+type EmployeeForAccessRow = {
+  id: number;
+  person_id: number;
+  person: {
+    id: number;
+    name: string;
+    email: string | null;
+  } | null;
+};
+
 export type SystemUserRecord = {
   id: number;
   person_id: number;
@@ -50,27 +59,14 @@ export const userKeys = {
 };
 
 export type CreateSystemUserInput = {
-  email: string;
-  name: string;
   password: string;
-  phone?: string;
   role: EmployeeAccessRole;
-  position?: string;
   active?: boolean;
-  personType?: PersonType;
   isAdmin?: boolean;
-  employeeId?: number;
-};
-
-export type LinkSystemUserInput = {
-  userId: number;
   employeeId: number;
-  role: EmployeeAccessRole;
-  active?: boolean;
-  isAdmin?: boolean;
 };
 
-function normalizeText(value?: string) {
+function normalizeText(value?: string | null) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
 }
@@ -87,7 +83,9 @@ export async function listSystemUsers() {
     throw new Error(error.message);
   }
 
-  return (data satisfies UserRow[]).map((row) => ({
+  const rows = data as unknown as UserRow[];
+
+  return rows.map((row) => ({
     id: row.id,
     person_id: row.person_id,
     employee_id: row.employee_id,
@@ -107,116 +105,56 @@ export async function listSystemUsers() {
 const createSystemUserServer = createServerFn({ method: "POST" })
   .inputValidator(
     z.object({
-      email: z.string().email(),
-      name: z.string().trim().min(2),
       password: z.string().min(8),
-      phone: z.string().optional(),
       role: z.enum(["admin", "manager", "seller", "financial"]),
-      position: z.string().optional(),
       active: z.boolean().optional(),
-      personType: z.enum(["individual", "company"]).optional(),
       isAdmin: z.boolean().optional(),
-      employeeId: z.number().int().positive().optional(),
+      employeeId: z.number().int().positive(),
     }),
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/shared/supabase/server");
 
-    const email = data.email.trim();
-    const name = data.name.trim();
+    const { data: employeeData, error: employeeError } = await supabaseAdmin
+      .from("employees")
+      .select("id, person_id, person:people(id, name, email)")
+      .eq("id", data.employeeId)
+      .maybeSingle();
 
-    const createAuthUser = async () => {
-      const { data: authResult, error: authError } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        password: data.password,
-        email_confirm: true,
-        user_metadata: { name },
-      });
+    if (employeeError) {
+      throw new Error(employeeError.message);
+    }
 
-      if (authError) {
-        throw new Error(authError.message);
-      }
+    const employee = employeeData as unknown as EmployeeForAccessRow | null;
 
-      if (!authResult.user) {
-        throw new Error("Falha ao criar o usuário de autenticação.");
-      }
+    if (!employee?.person) {
+      throw new Error("Funcionário não encontrado para criar acesso.");
+    }
 
-      return authResult.user.id;
-    };
+    const email = normalizeText(employee.person.email);
+    if (!email) {
+      throw new Error("Cadastre um e-mail no RH antes de criar o acesso desse funcionário.");
+    }
 
-    if (data.employeeId) {
-      const { data: employee, error: employeeError } = await supabaseAdmin
-        .from("employees")
-        .select("id, person_id, person:people(id, name, email, phone, type)")
-        .eq("id", data.employeeId)
-        .maybeSingle();
+    const { data: existingUser, error: existingUserError } = await supabaseAdmin
+      .from("users")
+      .select("id")
+      .or(`person_id.eq.${employee.person_id},employee_id.eq.${data.employeeId}`)
+      .maybeSingle();
 
-      if (employeeError) {
-        throw new Error(employeeError.message);
-      }
+    if (existingUserError) {
+      throw new Error(existingUserError.message);
+    }
 
-      if (!employee?.person) {
-        throw new Error("Funcionário não encontrado para vincular ao usuário.");
-      }
-
-      const { data: existingUser, error: existingUserError } = await supabaseAdmin
-        .from("users")
-        .select("id")
-        .or(`person_id.eq.${employee.person_id},employee_id.eq.${data.employeeId}`)
-        .maybeSingle();
-
-      if (existingUserError) {
-        throw new Error(existingUserError.message);
-      }
-
-      if (existingUser) {
-        throw new Error("Esse funcionário já possui acesso ao sistema.");
-      }
-
-      const authUserId = await createAuthUser();
-
-      const { error: personError } = await supabaseAdmin
-        .from("people")
-        .update({
-          name,
-          email,
-          phone: normalizeText(normalizePhone(data.phone ?? "")),
-        })
-        .eq("id", employee.person_id);
-
-      if (personError) {
-        await supabaseAdmin.auth.admin.deleteUser(authUserId);
-        throw new Error(personError.message);
-      }
-
-      const { data: userId, error: insertError } = await supabaseAdmin
-        .from("users")
-        .insert({
-          auth_user_id: authUserId,
-          person_id: employee.person_id,
-          employee_id: employee.id,
-          access_role: data.role,
-          is_admin: data.isAdmin ?? data.role === "admin",
-          active: data.active ?? true,
-          email_verified_at: new Date().toISOString(),
-          invited_at: new Date().toISOString(),
-        })
-        .select("id")
-        .single();
-
-      if (insertError) {
-        await supabaseAdmin.auth.admin.deleteUser(authUserId);
-        throw new Error(insertError.message);
-      }
-
-      return userId.id;
+    if (existingUser) {
+      throw new Error("Esse funcionário já possui acesso ao sistema.");
     }
 
     const { data: authResult, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password: data.password,
       email_confirm: true,
-      user_metadata: { name },
+      user_metadata: { name: employee.person.name },
     });
 
     if (authError) {
@@ -227,22 +165,24 @@ const createSystemUserServer = createServerFn({ method: "POST" })
       throw new Error("Falha ao criar o usuário de autenticação.");
     }
 
-    const { data: userId, error: bootstrapError } = await supabaseAdmin.rpc(
-      "bootstrap_internal_user",
-      {
-        p_auth_email: email,
-        p_name: name,
-        p_position: data.position?.trim() || "Funcionário",
-        p_access_role: data.role,
-        p_is_admin: data.isAdmin ?? data.role === "admin",
-        p_person_type: data.personType ?? "individual",
-        p_phone: normalizeText(normalizePhone(data.phone ?? "")),
-      },
-    );
+    const { data: userId, error: insertError } = await supabaseAdmin
+      .from("users")
+      .insert({
+        auth_user_id: authResult.user.id,
+        person_id: employee.person_id,
+        employee_id: employee.id,
+        access_role: data.role,
+        is_admin: data.isAdmin ?? data.role === "admin",
+        active: data.active ?? true,
+        email_verified_at: new Date().toISOString(),
+        invited_at: new Date().toISOString(),
+      })
+      .select("id")
+      .single();
 
-    if (bootstrapError) {
+    if (insertError) {
       await supabaseAdmin.auth.admin.deleteUser(authResult.user.id);
-      throw new Error(bootstrapError.message);
+      throw new Error(insertError.message);
     }
 
     if (!userId) {
@@ -254,13 +194,13 @@ const createSystemUserServer = createServerFn({ method: "POST" })
       const { error: updateError } = await supabaseAdmin
         .from("users")
         .update({ active: false })
-        .eq("id", userId);
+        .eq("id", userId.id);
       if (updateError) {
         throw new Error(updateError.message);
       }
     }
 
-    return userId;
+    return userId.id;
   });
 
 const setSystemUserActiveServer = createServerFn({ method: "POST" })
@@ -283,92 +223,6 @@ const setSystemUserActiveServer = createServerFn({ method: "POST" })
 
 export async function createSystemUser(input: CreateSystemUserInput) {
   return createSystemUserServer({ data: input });
-}
-
-const linkSystemUserToEmployeeServer = createServerFn({ method: "POST" })
-  .inputValidator(
-    z.object({
-      userId: z.number().int().positive(),
-      employeeId: z.number().int().positive(),
-      role: z.enum(["admin", "manager", "seller", "financial"]),
-      active: z.boolean().optional(),
-      isAdmin: z.boolean().optional(),
-    }),
-  )
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/shared/supabase/server");
-
-    const [{ data: user, error: userError }, { data: employee, error: employeeError }] =
-      await Promise.all([
-        supabaseAdmin
-          .from("users")
-          .select("id, person_id, employee_id, access_role, active, is_admin, auth_user_id")
-          .eq("id", data.userId)
-          .maybeSingle(),
-        supabaseAdmin
-          .from("employees")
-          .select("id, person_id, person:people(id, name, email, phone, type)")
-          .eq("id", data.employeeId)
-          .maybeSingle(),
-      ]);
-
-    if (userError) {
-      throw new Error(userError.message);
-    }
-
-    if (employeeError) {
-      throw new Error(employeeError.message);
-    }
-
-    if (!user) {
-      throw new Error("Usuário não encontrado.");
-    }
-
-    if (!employee?.person) {
-      throw new Error("Funcionário não encontrado.");
-    }
-
-    if (user.employee_id && user.employee_id !== employee.id) {
-      throw new Error("Esse usuário já está vinculado a outro funcionário.");
-    }
-
-    if (user.person_id !== employee.person_id) {
-      throw new Error("O usuário e o funcionário precisam ser a mesma pessoa para vincular.");
-    }
-
-    const { data: existingLink, error: linkError } = await supabaseAdmin
-      .from("users")
-      .select("id")
-      .eq("employee_id", employee.id)
-      .maybeSingle();
-
-    if (linkError) {
-      throw new Error(linkError.message);
-    }
-
-    if (existingLink && existingLink.id !== user.id) {
-      throw new Error("Esse funcionário já possui outro acesso ao sistema.");
-    }
-
-    const { error: updateError } = await supabaseAdmin
-      .from("users")
-      .update({
-        employee_id: employee.id,
-        access_role: data.role,
-        is_admin: data.isAdmin ?? data.role === "admin",
-        active: data.active ?? user.active,
-      })
-      .eq("id", user.id);
-
-    if (updateError) {
-      throw new Error(updateError.message);
-    }
-
-    return user.id;
-  });
-
-export async function linkSystemUserToEmployee(input: LinkSystemUserInput) {
-  return linkSystemUserToEmployeeServer({ data: input });
 }
 
 export async function setSystemUserActive(id: number, active: boolean) {

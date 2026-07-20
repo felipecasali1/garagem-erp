@@ -37,7 +37,6 @@ import {
   userKeys,
   deleteSystemUser,
   createSystemUser,
-  linkSystemUserToEmployee,
   listSystemUsers,
   setSystemUserActive,
 } from "@/modules/users/services/users";
@@ -249,7 +248,7 @@ function UsersTab() {
               <h3 className="font-display font-semibold">Usuários do sistema</h3>
               <p className="text-xs text-muted-foreground">{users.length} usuários cadastrados</p>
             </div>
-            <NewUserDialog users={users} />
+            <NewUserDialog />
           </div>
           {isLoading ? (
             <div className="p-8 text-sm text-muted-foreground">Carregando usuários...</div>
@@ -484,24 +483,16 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function NewUserDialog({ users }: { users: SystemUserRecord[] }) {
+function NewUserDialog() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<"create" | "link">("create");
   const { data: employees = [] } = useQuery({
     queryKey: employeeKeys.all,
     queryFn: listEmployees,
   });
   const availableEmployees = employees.filter((employee) => !employee.user_id);
-  const availableUsers = users.filter((user) => !user.employee_id);
-  const [createEmployeeId, setCreateEmployeeId] = useState("new");
-  const [linkedUserId, setLinkedUserId] = useState("new");
-  const [linkedEmployeeId, setLinkedEmployeeId] = useState("new");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
   const [password, setPassword] = useState("");
-  const [phone, setPhone] = useState("");
-  const [position, setPosition] = useState("Funcionário");
   const [role, setRole] = useState<EmployeeAccessRole>("seller");
   const [active, setActive] = useState(true);
   const createMutation = useMutation({
@@ -509,102 +500,43 @@ function NewUserDialog({ users }: { users: SystemUserRecord[] }) {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: userKeys.all });
       await queryClient.invalidateQueries({ queryKey: employeeKeys.all });
-      toast.success("Usuário criado e vinculado ao acesso interno");
+      toast.success("Acesso criado para o funcionário");
       resetForm();
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Falha ao criar usuário.");
     },
   });
-  const linkMutation = useMutation({
-    mutationFn: linkSystemUserToEmployee,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: userKeys.all });
-      await queryClient.invalidateQueries({ queryKey: employeeKeys.all });
-      toast.success("Usuário vinculado ao funcionário");
-      resetForm();
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Falha ao vincular usuário.");
-    },
-  });
 
-  useEffect(() => {
-    if (mode !== "create") {
-      return;
-    }
-
-    if (createEmployeeId === "new") {
-      setName("");
-      setEmail("");
-      setPhone("");
-      setPosition("Funcionário");
-      return;
-    }
-
-    const selected = employees.find((employee) => String(employee.id) === createEmployeeId);
-    if (!selected) {
-      return;
-    }
-
-    setName(selected.person.name);
-    setEmail(selected.person.email);
-    setPhone(selected.person.phone);
-    setPosition(selected.position);
-  }, [createEmployeeId, employees, mode]);
-
-  const selectedCreateEmployee = employees.find(
-    (employee) => String(employee.id) === createEmployeeId,
-  );
-  const selectedLinkEmployee = employees.find(
-    (employee) => String(employee.id) === linkedEmployeeId,
-  );
-  const selectedLinkUser = users.find((user) => String(user.id) === linkedUserId);
+  const selectedEmployee = employees.find((employee) => String(employee.id) === employeeId);
 
   const resetForm = () => {
     setOpen(false);
-    setMode("create");
-    setCreateEmployeeId("new");
-    setLinkedUserId("new");
-    setLinkedEmployeeId("new");
-    setName("");
-    setEmail("");
+    setEmployeeId("");
     setPassword("");
-    setPhone("");
-    setPosition("Funcionário");
     setRole("seller");
     setActive(true);
   };
 
   const submit = () => {
-    if (mode === "create") {
-      if (!name.trim() || !email.trim() || password.trim().length < 8) {
-        toast.error("Preencha nome, e-mail e uma senha com no mínimo 8 caracteres");
-        return;
-      }
-
-      createMutation.mutate({
-        name,
-        email,
-        password,
-        phone: phone || undefined,
-        role,
-        position,
-        active,
-        isAdmin: role === "admin",
-        employeeId: createEmployeeId === "new" ? undefined : Number(createEmployeeId),
-      });
+    if (!selectedEmployee) {
+      toast.error("Selecione um funcionário cadastrado no RH.");
       return;
     }
 
-    if (linkedUserId === "new" || linkedEmployeeId === "new") {
-      toast.error("Selecione um usuário e um funcionário para vincular.");
+    if (!selectedEmployee.person.email) {
+      toast.error("Cadastre um e-mail no RH antes de criar o acesso.");
       return;
     }
 
-    linkMutation.mutate({
-      userId: Number(linkedUserId),
-      employeeId: Number(linkedEmployeeId),
+    if (password.trim().length < 8) {
+      toast.error("Informe uma senha temporária com no mínimo 8 caracteres.");
+      return;
+    }
+
+    createMutation.mutate({
+      employeeId: selectedEmployee.id,
+      password,
       role,
       active,
       isAdmin: role === "admin",
@@ -628,107 +560,47 @@ function NewUserDialog({ users }: { users: SystemUserRecord[] }) {
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Novo Usuário</DialogTitle>
+          <DialogTitle>Novo usuário</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <Field label="Modo">
-            <Select
-              value={mode}
-              onValueChange={(value) => {
-                setMode(value as "create" | "link");
-              }}
-            >
+          <Field label="Funcionário RH">
+            <Select value={employeeId} onValueChange={setEmployeeId}>
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder="Selecione um funcionário sem acesso" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="create">Criar novo acesso</SelectItem>
-                <SelectItem value="link">Vincular usuário existente</SelectItem>
+                {availableEmployees.length === 0 ? (
+                  <SelectItem value="none" disabled>
+                    Nenhum funcionário disponível
+                  </SelectItem>
+                ) : (
+                  availableEmployees.map((employee) => (
+                    <SelectItem key={employee.id} value={String(employee.id)}>
+                      {employee.person.name} — {employee.position}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
           </Field>
-          {mode === "create" ? (
-            <>
-              <Field label="Funcionário vinculado">
-                <Select value={createEmployeeId} onValueChange={setCreateEmployeeId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Criar novo funcionário ou vincular existente" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="new">Criar novo funcionário</SelectItem>
-                    {availableEmployees.map((employee) => (
-                      <SelectItem key={employee.id} value={String(employee.id)}>
-                        {employee.person.name} — {employee.position}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Nome completo">
-                <Input value={name} onChange={(e) => setName(e.target.value)} />
-              </Field>
-              <Field label="E-mail">
-                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-              </Field>
-              <Field label="Senha temporária">
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Mínimo 8 caracteres"
-                />
-              </Field>
-              <Field label="Telefone">
-                <PhoneInput value={phone} onValueChange={setPhone} />
-              </Field>
-              {!selectedCreateEmployee && (
-                <Field label="Cargo">
-                  <Input value={position} onChange={(e) => setPosition(e.target.value)} />
-                </Field>
-              )}
-            </>
-          ) : (
-            <>
-              <Field label="Usuário existente">
-                <Select value={linkedUserId} onValueChange={setLinkedUserId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione um usuário" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="new">Selecionar usuário</SelectItem>
-                    {availableUsers.map((user) => (
-                      <SelectItem key={user.id} value={String(user.id)}>
-                        {user.name} {user.email ? `— ${user.email}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Funcionário">
-                <Select value={linkedEmployeeId} onValueChange={setLinkedEmployeeId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione um funcionário" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="new">Selecionar funcionário</SelectItem>
-                    {availableEmployees.map((employee) => (
-                      <SelectItem key={employee.id} value={String(employee.id)}>
-                        {employee.person.name} — {employee.position}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              {selectedLinkUser && (
-                <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-                  O sistema vai vincular {selectedLinkUser.name} ao funcionário{" "}
-                  {selectedLinkEmployee ? selectedLinkEmployee.person.name : "selecionado"}.
-                </div>
-              )}
-            </>
+          {selectedEmployee && (
+            <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+              O acesso será criado para {selectedEmployee.person.name}
+              {selectedEmployee.person.email
+                ? ` usando ${selectedEmployee.person.email}.`
+                : ". Cadastre um e-mail no RH antes de continuar."}
+            </div>
           )}
+          <Field label="Senha temporária">
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Mínimo 8 caracteres"
+            />
+          </Field>
           <Field label="Perfil de acesso">
-            <Select value={role} onValueChange={setRole}>
+            <Select value={role} onValueChange={(value) => setRole(value as EmployeeAccessRole)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -746,15 +618,9 @@ function NewUserDialog({ users }: { users: SystemUserRecord[] }) {
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={createMutation.isPending || linkMutation.isPending}>
+          <Button onClick={submit} disabled={createMutation.isPending}>
             <Plus className="h-4 w-4" />
-            {mode === "create"
-              ? createMutation.isPending
-                ? "Criando..."
-                : "Criar usuário"
-              : linkMutation.isPending
-                ? "Vinculando..."
-                : "Vincular acesso"}
+            {createMutation.isPending ? "Criando..." : "Criar usuário"}
           </Button>
         </DialogFooter>
       </DialogContent>
