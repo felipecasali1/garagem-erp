@@ -1,16 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  Calendar,
-  Fuel,
-  Gauge,
-  Pencil,
-  Eye,
-  EyeOff,
-  Settings2,
-  Hash,
-} from "lucide-react";
+import { ArrowLeft, Calendar, Fuel, Gauge, Pencil, Eye, EyeOff, Settings2, Hash, ShoppingCart } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
@@ -23,6 +13,7 @@ import {
   setVehiclePublished,
   vehicleKeys,
 } from "@/modules/vehicles/services/vehicles";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/vehicles/$id")({
   head: () => ({ meta: [{ title: "Detalhe do Veículo | GaragemERP" }] }),
@@ -65,6 +56,11 @@ function VehicleDetail() {
       queryClient.setQueryData(vehicleKeys.detail(nextVehicle.id), nextVehicle);
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
     },
+    onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error ? mutationError.message : "Falha ao atualizar publicação.",
+      );
+    },
   });
 
   const checklistItems = useChecklist(vehicle?.id);
@@ -91,6 +87,7 @@ function VehicleDetail() {
   const actualInvested = vehicle.cost_price + checklistSummary.actualCost;
   const margin = vehicle.sale_price - estimatedInvested;
   const marginPct = estimatedInvested > 0 ? (margin / estimatedInvested) * 100 : 0;
+  const isEvaluation = vehicle.status === "evaluating";
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -113,7 +110,17 @@ function VehicleDetail() {
             <Pencil className="h-4 w-4" /> Editar
           </Link>
         </Button>
-        <Button onClick={() => publishMutation.mutate({ published: !vehicle.published })}>
+        {vehicle.status === "evaluating" && (
+          <Button variant="outline" asChild>
+            <Link to="/purchases/new" search={{ vehicleId: vehicle.id }}>
+              <ShoppingCart className="h-4 w-4" /> Registrar compra
+            </Link>
+          </Button>
+        )}
+        <Button
+          onClick={() => publishMutation.mutate({ published: !vehicle.published })}
+          disabled={!vehicle.published && vehicle.status !== "available"}
+        >
           {vehicle.published ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           {vehicle.published ? "Despublicar" : "Publicar"}
         </Button>
@@ -129,13 +136,15 @@ function VehicleDetail() {
           <CardContent className="p-6 space-y-4">
             <div>
               <div className="text-xs text-muted-foreground uppercase tracking-wide">
-                Preço de venda
+                {isEvaluation ? "Preço de venda estimado" : "Preço de venda"}
               </div>
               <div className="font-display text-3xl font-semibold">{brl(vehicle.sale_price)}</div>
             </div>
             <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border">
               <div>
-                <div className="text-xs text-muted-foreground">Custo de compra</div>
+                <div className="text-xs text-muted-foreground">
+                  {isEvaluation ? "Custo estimado de aquisição" : "Custo de compra"}
+                </div>
                 <div className="font-medium">{brl(vehicle.cost_price)}</div>
               </div>
               <div>

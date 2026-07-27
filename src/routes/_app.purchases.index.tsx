@@ -1,11 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { Eye, MoreHorizontal } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
 import { Card } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { brl, fmtDate } from "@/shared/lib/format";
-import { purchases } from "@/shared/mock-data";
+import { listPurchases, purchaseKeys } from "@/modules/purchases/services/purchases";
 import {
   Table,
   TableBody,
@@ -22,6 +23,19 @@ export const Route = createFileRoute("/_app/purchases/")({
 
 function PurchasesPage() {
   const navigate = useNavigate();
+  const { data: purchases = [], isLoading, error } = useQuery({
+    queryKey: purchaseKeys.all,
+    queryFn: listPurchases,
+  });
+
+  if (error) {
+    return (
+      <div className="max-w-[1600px] mx-auto py-10 text-sm text-destructive">
+        Falha ao carregar compras: {error instanceof Error ? error.message : "erro desconhecido"}.
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-[1600px] mx-auto">
       <PageHeader
@@ -30,7 +44,18 @@ function PurchasesPage() {
         action={{ label: "Registrar Compra", onClick: () => navigate({ to: "/purchases/new" }) }}
       />
       <Card>
-        <Table>
+        {isLoading ? (
+          <div className="p-8 text-sm text-muted-foreground">Carregando compras...</div>
+        ) : purchases.length === 0 ? (
+          <div className="p-12 text-center space-y-2">
+            <h3 className="font-display font-semibold">Nenhuma compra registrada</h3>
+            <p className="text-sm text-muted-foreground">
+              Registre a primeira compra a partir de uma avaliação de veículo.
+            </p>
+            <Button onClick={() => navigate({ to: "/purchases/new" })}>Registrar Compra</Button>
+          </div>
+        ) : (
+          <Table>
           <TableHeader>
             <TableRow>
               <TableHead>#ID</TableHead>
@@ -78,8 +103,9 @@ function PurchasesPage() {
                 </TableCell>
               </TableRow>
             ))}
-          </TableBody>
-        </Table>
+            </TableBody>
+          </Table>
+        )}
       </Card>
     </div>
   );

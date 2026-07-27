@@ -151,6 +151,7 @@ function EditVehicle() {
     e.preventDefault();
     updateMutation.mutate(draft);
   };
+  const isEvaluation = draft.status === "evaluating";
 
   return (
     <form onSubmit={submit} className="max-w-4xl mx-auto space-y-6">
@@ -333,6 +334,7 @@ function EditVehicle() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="evaluating">Em avaliação</SelectItem>
                   <SelectItem value="available">Disponível</SelectItem>
                   <SelectItem value="reserved">Reservado</SelectItem>
                   <SelectItem value="in_repair">Em reparo</SelectItem>
@@ -349,14 +351,14 @@ function EditVehicle() {
         <CardContent className="p-6 space-y-4">
           <h2 className="font-display font-semibold">Valores e publicação</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Custo de aquisição">
+            <Field label={isEvaluation ? "Custo estimado de aquisição" : "Custo de aquisição"}>
               <Input
                 type="number"
                 value={draft.cost_price || ""}
                 onChange={(e) => updateDraft({ cost_price: Number(e.target.value) || 0 })}
               />
             </Field>
-            <Field label="Preço de venda">
+            <Field label={isEvaluation ? "Preço de venda estimado" : "Preço de venda"}>
               <Input
                 type="number"
                 value={draft.sale_price || ""}
@@ -367,10 +369,13 @@ function EditVehicle() {
           <div className="flex items-center justify-between rounded-md border border-border p-4">
             <div>
               <div className="font-medium text-sm">Publicado no site</div>
-              <div className="text-xs text-muted-foreground">Visível para clientes externos</div>
+              <div className="text-xs text-muted-foreground">
+                Apenas veículos disponíveis podem ficar visíveis para clientes externos
+              </div>
             </div>
             <Switch
-              checked={draft.published}
+              checked={draft.status === "available" && draft.published}
+              disabled={draft.status !== "available"}
               onCheckedChange={(checked) => updateDraft({ published: checked })}
             />
           </div>

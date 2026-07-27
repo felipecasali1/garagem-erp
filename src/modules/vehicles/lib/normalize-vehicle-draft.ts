@@ -18,7 +18,7 @@ export function normalizeVehicleDraft(draft: VehicleDraft) {
     cost_price: draft.cost_price,
     sale_price: draft.sale_price,
     status: draft.status,
-    published: draft.published,
+    published: draft.status === "available" ? draft.published : false,
     notes: draft.notes.trim() || null,
   };
 }

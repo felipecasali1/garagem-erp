@@ -1,3 +1,4 @@
+alter type vehicle_status add value if not exists 'evaluating';
 alter type vehicle_status add value if not exists 'archived';
 
 alter table public.customers

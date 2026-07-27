@@ -83,6 +83,12 @@ async function unwrapSingle<T>(
   return data;
 }
 
+function isMissingVehicleAccessoryActiveColumn(error: { message: string } | null) {
+  return Boolean(
+    error?.message.includes("vehicle_accessories") && error.message.includes("active"),
+  );
+}
+
 function toChecklistPayload(item: VehicleDraft["checklist"][number], vehicleId: number) {
   return {
     vehicle_id: vehicleId,
@@ -196,6 +202,16 @@ export async function listVehicles() {
     .from("vehicles")
     .select("*, vehicle_accessories(active, accessories(name))")
     .order("id");
+  if (isMissingVehicleAccessoryActiveColumn(error)) {
+    const fallback = await supabase
+      .from("vehicles")
+      .select("*, vehicle_accessories(accessories(name))")
+      .order("id");
+    if (fallback.error) {
+      throw new Error(fallback.error.message);
+    }
+    return (fallback.data satisfies VehicleRow[]).map(mapVehicle);
+  }
   if (error) {
     throw new Error(error.message);
   }
@@ -203,13 +219,20 @@ export async function listVehicles() {
 }
 
 export async function getVehicleById(id: number) {
-  const data = await unwrapSingle(
-    supabase
-      .from("vehicles")
-      .select("*, vehicle_accessories(active, accessories(name))")
-      .eq("id", id)
-      .single(),
-  );
+  const result = await supabase
+    .from("vehicles")
+    .select("*, vehicle_accessories(active, accessories(name))")
+    .eq("id", id)
+    .single();
+  const data = isMissingVehicleAccessoryActiveColumn(result.error)
+    ? await unwrapSingle(
+        supabase
+          .from("vehicles")
+          .select("*, vehicle_accessories(accessories(name))")
+          .eq("id", id)
+          .single(),
+      )
+    : await unwrapSingle(Promise.resolve(result));
   return mapVehicle(data satisfies VehicleRow);
 }
 
@@ -243,6 +266,13 @@ export async function archiveVehicle(id: number) {
 }
 
 export async function setVehiclePublished(id: number, published: boolean) {
+  if (published) {
+    const vehicle = await getVehicleById(id);
+    if (vehicle.status !== "available") {
+      throw new Error("Apenas veículos disponíveis podem ser publicados.");
+    }
+  }
+
   await unwrapSingle(
     supabase.from("vehicles").update({ published }).eq("id", id).select("id").single(),
   );

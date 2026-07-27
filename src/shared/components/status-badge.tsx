@@ -9,6 +9,7 @@ import type {
 } from "@/shared/types/domain";
 
 const vehicleMap: Record<VehicleStatus, { label: string; cls: string }> = {
+  evaluating: { label: "Em avaliação", cls: "bg-purple-500/15 text-purple-500 border-purple-500/30" },
   available: { label: "Disponível", cls: "bg-success/15 text-success border-success/30" },
   reserved: { label: "Reservado", cls: "bg-warning/15 text-warning border-warning/30" },
   sold: { label: "Vendido", cls: "bg-info/15 text-info border-info/30" },

@@ -4,7 +4,14 @@ create type person_type as enum ('individual', 'company');
 create type commission_type as enum ('percentage', 'fixed');
 create type fuel_type as enum ('flex', 'gasoline', 'diesel', 'electric', 'hybrid');
 create type transmission_type as enum ('manual', 'automatic', 'cvt', 'dual_clutch', 'automatized');
-create type vehicle_status as enum ('available', 'reserved', 'sold', 'in_repair', 'archived');
+create type vehicle_status as enum (
+  'evaluating',
+  'available',
+  'reserved',
+  'sold',
+  'in_repair',
+  'archived'
+);
 create type sale_status as enum ('pending', 'completed', 'canceled');
 create type purchase_status as enum ('pending', 'completed', 'canceled');
 create type transaction_type as enum ('income', 'expense');
@@ -149,7 +156,7 @@ create table vehicles (
   cost_price numeric(14, 2) not null default 0,
   sale_price numeric(14, 2) not null default 0,
   published boolean not null default false,
-  status vehicle_status not null default 'available',
+  status vehicle_status not null default 'evaluating',
   image text,
   notes text,
   sold_at timestamptz,

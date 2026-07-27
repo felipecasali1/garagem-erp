@@ -31,7 +31,7 @@ import { createVehicle, vehicleKeys } from "@/modules/vehicles/services/vehicles
 import { brl } from "@/shared/lib/format";
 
 export const Route = createFileRoute("/_app/vehicles/new")({
-  head: () => ({ meta: [{ title: "Novo Veículo | GaragemERP" }] }),
+  head: () => ({ meta: [{ title: "Nova Avaliação | GaragemERP" }] }),
   component: NewVehicle,
 });
 
@@ -54,7 +54,7 @@ function NewVehicle() {
     cost_price: 0,
     sale_price: 0,
     published: false,
-    status: "available",
+    status: "evaluating",
     notes: "",
     accessories: [],
     checklist: [],
@@ -116,13 +116,14 @@ function NewVehicle() {
     }));
 
   const totalEstimated = vehicleDraft.checklist.reduce((s, x) => s + (x.estimated_cost || 0), 0);
+  const isEvaluation = vehicleDraft.status === "evaluating";
 
   const createMutation = useMutation({
     mutationFn: createVehicle,
     onSuccess: (vehicle) => {
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
       queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
-      toast.success("Veículo cadastrado no Supabase");
+      toast.success("Avaliação de veículo cadastrada");
       void navigate({ to: "/vehicles/$id", params: { id: String(vehicle.id) } });
     },
     onError: (error) => {
@@ -140,14 +141,15 @@ function NewVehicle() {
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" asChild type="button">
           <Link to="/vehicles">
-            <ArrowLeft className="h-4 w-4" /> Estoque
+            <ArrowLeft className="h-4 w-4" /> Veículos
           </Link>
         </Button>
         <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">
-          Adicionar Veículo
+          Nova avaliação
         </h1>
         <Button type="submit" disabled={createMutation.isPending}>
-          <Save className="h-4 w-4" /> {createMutation.isPending ? "Salvando..." : "Salvar"}
+          <Save className="h-4 w-4" />{" "}
+          {createMutation.isPending ? "Salvando..." : "Salvar avaliação"}
         </Button>
       </div>
 
@@ -291,6 +293,7 @@ function NewVehicle() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="evaluating">Em avaliação</SelectItem>
                   <SelectItem value="available">Disponível</SelectItem>
                   <SelectItem value="reserved">Reservado</SelectItem>
                   <SelectItem value="in_repair">Em reparo</SelectItem>
@@ -307,7 +310,7 @@ function NewVehicle() {
         <CardContent className="p-6 space-y-4">
           <h2 className="font-display font-semibold">Valores</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Custo de aquisição">
+            <Field label={isEvaluation ? "Custo estimado de aquisição" : "Custo de aquisição"}>
               <Input
                 type="number"
                 placeholder="0,00"
@@ -315,7 +318,7 @@ function NewVehicle() {
                 onChange={(e) => patchVehicleDraft({ cost_price: Number(e.target.value) || 0 })}
               />
             </Field>
-            <Field label="Preço de venda">
+            <Field label={isEvaluation ? "Preço de venda estimado" : "Preço de venda"}>
               <Input
                 type="number"
                 placeholder="0,00"

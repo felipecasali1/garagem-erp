@@ -19,6 +19,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { brl } from "@/shared/lib/format";
+import { toast } from "sonner";
 import {
   listVehicles,
   setVehiclePublished,
@@ -32,6 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/shared/components/ui/table";
+import type { VehicleStatus } from "@/shared/types/domain";
 
 export const Route = createFileRoute("/_app/vehicles/")({
   head: () => ({ meta: [{ title: "Veículos | GaragemERP" }] }),
@@ -46,9 +48,19 @@ const fuelLabel: Record<string, string> = {
   hybrid: "Híbrido",
 };
 
+const statusOptions: VehicleStatus[] = [
+  "evaluating",
+  "available",
+  "reserved",
+  "in_repair",
+  "sold",
+  "archived",
+];
+
 function VehiclesPage() {
   const [view, setView] = useState<"grid" | "table">("grid");
   const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | VehicleStatus>("all");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const {
@@ -66,10 +78,24 @@ function VehiclesPage() {
       queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
     },
+    onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error ? mutationError.message : "Falha ao atualizar publicação.",
+      );
+    },
   });
 
-  const filtered = vehicles.filter(
-    (v) => !q || `${v.brand} ${v.model} ${v.plate}`.toLowerCase().includes(q.toLowerCase()),
+  const filtered = vehicles
+    .filter((v) => statusFilter === "all" || v.status === statusFilter)
+    .filter(
+      (v) => !q || `${v.brand} ${v.model} ${v.plate}`.toLowerCase().includes(q.toLowerCase()),
+    );
+  const statusCounts = statusOptions.reduce(
+    (acc, status) => ({
+      ...acc,
+      [status]: vehicles.filter((vehicle) => vehicle.status === status).length,
+    }),
+    {} as Record<VehicleStatus, number>,
   );
 
   if (isLoading) {
@@ -93,7 +119,7 @@ function VehiclesPage() {
       <PageHeader
         title="Estoque de Veículos"
         description={`${filtered.length} de ${vehicles.length} veículos`}
-        action={{ label: "Adicionar Veículo", onClick: () => navigate({ to: "/vehicles/new" }) }}
+        action={{ label: "Nova avaliação", onClick: () => navigate({ to: "/vehicles/new" }) }}
       />
 
       <Card className="mb-6">
@@ -107,13 +133,33 @@ function VehiclesPage() {
               className="pl-9"
             />
           </div>
-          <div className="flex gap-2">
-            {(["available", "reserved", "in_repair", "sold", "archived"] as const).map((s) => (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setStatusFilter("all")}
+              aria-pressed={statusFilter === "all"}
+              className={`text-xs px-2.5 py-1.5 rounded-md border transition ${
+                statusFilter === "all"
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border hover:bg-muted"
+              }`}
+            >
+              Todos
+            </button>
+            {statusOptions.map((s) => (
               <button
+                type="button"
                 key={s}
-                className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-muted transition"
+                onClick={() => setStatusFilter((current) => (current === s ? "all" : s))}
+                aria-pressed={statusFilter === s}
+                className={`text-xs px-2.5 py-1.5 rounded-md border transition inline-flex items-center gap-1.5 ${
+                  statusFilter === s
+                    ? "border-primary bg-primary/10"
+                    : "border-border hover:bg-muted"
+                }`}
               >
                 <StatusBadge kind="vehicle" value={s} />
+                <span className="text-muted-foreground">{statusCounts[s]}</span>
               </button>
             ))}
           </div>
@@ -152,8 +198,15 @@ function VehiclesPage() {
                     e.stopPropagation();
                     publishMutation.mutate({ id: v.id, published: !v.published });
                   }}
+                  disabled={!v.published && v.status !== "available"}
                   className="absolute top-3 right-3 h-8 w-8 rounded-full bg-background/80 backdrop-blur flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
-                  title={v.published ? "Despublicar" : "Publicar"}
+                  title={
+                    v.published
+                      ? "Despublicar"
+                      : v.status === "available"
+                        ? "Publicar"
+                        : "Apenas disponíveis podem ser publicados"
+                  }
                 >
                   {v.published ? (
                     <Eye className="h-4 w-4" />
@@ -190,7 +243,9 @@ function VehiclesPage() {
                 </div>
                 <div className="flex items-end justify-between pt-1">
                   <div>
-                    <div className="text-xs text-muted-foreground">Preço</div>
+                    <div className="text-xs text-muted-foreground">
+                      {v.status === "evaluating" ? "Preço estimado" : "Preço"}
+                    </div>
                     <div className="font-display font-semibold text-lg">{brl(v.sale_price)}</div>
                   </div>
                   <Button size="sm" variant="outline" asChild onClick={(e) => e.stopPropagation()}>
@@ -253,6 +308,7 @@ function VehiclesPage() {
                         e.stopPropagation();
                         publishMutation.mutate({ id: v.id, published: !v.published });
                       }}
+                      disabled={!v.published && v.status !== "available"}
                       aria-label={v.published ? `Despublicar ${v.plate}` : `Publicar ${v.plate}`}
                     >
                       {v.published ? (
@@ -262,7 +318,12 @@ function VehiclesPage() {
                       )}
                     </Button>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">{brl(v.sale_price)}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="font-medium">{brl(v.sale_price)}</div>
+                    {v.status === "evaluating" && (
+                      <div className="text-xs text-muted-foreground">estimado</div>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">
                       <Button size="icon" variant="ghost" asChild aria-label={`Editar ${v.plate}`}>

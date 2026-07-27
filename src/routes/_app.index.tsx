@@ -50,6 +50,14 @@ const stats = [
     accent: "text-info bg-info/10",
   },
   {
+    label: "Em avaliação",
+    value: vehicles.filter((v) => v.status === "evaluating").length.toString(),
+    delta: "pré-compra",
+    deltaType: "up" as const,
+    icon: Wrench,
+    accent: "text-warning bg-warning/10",
+  },
+  {
     label: "Vendas este mês",
     value: "5",
     sub: brl(626700),
@@ -77,10 +85,12 @@ const stats = [
 ];
 
 const inventoryData = (
-  ["available", "reserved", "sold", "in_repair"] as const
+  ["evaluating", "available", "reserved", "sold", "in_repair"] as const
 ).map((s) => ({
   name:
-    s === "available"
+    s === "evaluating"
+      ? "Em avaliação"
+      : s === "available"
       ? "Disponível"
       : s === "reserved"
         ? "Reservado"
@@ -92,6 +102,7 @@ const inventoryData = (
 }));
 
 const inventoryColors: Record<string, string> = {
+  evaluating: "var(--warning)",
   available: "var(--success)",
   reserved: "var(--warning)",
   sold: "var(--info)",
@@ -176,7 +187,7 @@ function Dashboard() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
         {stats.map((s) => (
           <Card key={s.label} className="overflow-hidden">
             <CardContent className="p-5">

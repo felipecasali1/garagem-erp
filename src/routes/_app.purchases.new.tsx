@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { ArrowLeft, Plus, Save, Search, UserPlus } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Car, Plus, Save, Search, UserPlus } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
@@ -11,7 +12,6 @@ import {
   CepInput,
   CpfCnpjInput,
   PhoneInput,
-  PlateInput,
   UfInput,
 } from "@/shared/components/form/field-inputs";
 import {
@@ -30,32 +30,42 @@ import {
   DialogTrigger,
 } from "@/shared/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
-import type { PurchaseDraft, SupplierOption } from "@/modules/purchases/types";
-import { customers as initialCustomers } from "@/shared/mock-data";
-import { initials } from "@/shared/lib/format";
+import type { PurchaseDraft } from "@/modules/purchases/types";
+import { brl, initials } from "@/shared/lib/format";
 import { formatDocument, formatPhone } from "@/shared/lib/field-format";
-import type { Address, PersonType } from "@/shared/types/domain";
+import type { Address, PersonType, Vehicle } from "@/shared/types/domain";
 import { toast } from "sonner";
+import { listVehicles, vehicleKeys } from "@/modules/vehicles/services/vehicles";
+import { StatusBadge } from "@/shared/components/status-badge";
+import {
+  createPurchase,
+  createSupplier,
+  type CreateSupplierInput,
+  listSuppliers,
+  purchaseKeys,
+} from "@/modules/purchases/services/purchases";
 
 export const Route = createFileRoute("/_app/purchases/new")({
   head: () => ({ meta: [{ title: "Nova Compra | GaragemERP" }] }),
+  validateSearch: (search: { vehicleId?: unknown }): { vehicleId?: number } => {
+    const vehicleId = Number(search.vehicleId);
+    return Number.isFinite(vehicleId) && vehicleId > 0 ? { vehicleId } : {};
+  },
   component: NewPurchase,
 });
 
 function NewPurchase() {
   const navigate = useNavigate();
-  const [suppliers, setSuppliers] = useState<SupplierOption[]>(
-    initialCustomers.map((c) => ({
-      id: c.id,
-      name: c.person.name,
-      cpf: c.person.cpf,
-      cnpj: c.person.cnpj,
-      phone: c.person.phone,
-      email: c.person.email,
-      type: c.person.type,
-      primary_address: c.person.primary_address,
-    })),
-  );
+  const queryClient = useQueryClient();
+  const { vehicleId: initialVehicleId } = Route.useSearch();
+  const { data: vehicles = [], isLoading: loadingVehicles } = useQuery({
+    queryKey: vehicleKeys.all,
+    queryFn: listVehicles,
+  });
+  const { data: suppliers = [], isLoading: loadingSuppliers } = useQuery({
+    queryKey: purchaseKeys.suppliers,
+    queryFn: listSuppliers,
+  });
   const [draft, setDraft] = useState<PurchaseDraft>({
     supplier_id: null,
     vehicle: {
@@ -70,48 +80,96 @@ function NewPurchase() {
     notes: "",
   });
   const [search, setSearch] = useState("");
+  const [vehicleSearch, setVehicleSearch] = useState("");
+  const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(
+    initialVehicleId ?? null,
+  );
   const [createOpen, setCreateOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
 
   const patchDraft = (patch: Partial<PurchaseDraft>) =>
     setDraft((current) => ({ ...current, ...patch }));
-  const patchVehicle = (patch: Partial<PurchaseDraft["vehicle"]>) =>
-    setDraft((current) => ({
-      ...current,
-      vehicle: { ...current.vehicle, ...patch },
-    }));
 
   const filtered = useMemo(
     () =>
       suppliers.filter(
         (s) =>
-          s.name.toLowerCase().includes(search.toLowerCase()) ||
-          `${s.cpf ?? ""}${s.cnpj ?? ""}`.includes(search),
+          s.person.name.toLowerCase().includes(search.toLowerCase()) ||
+          `${s.person.cpf ?? ""}${s.person.cnpj ?? ""}`.includes(search),
       ),
     [suppliers, search],
   );
 
   const selected = suppliers.find((s) => s.id === draft.supplier_id);
+  const selectedVehicle = vehicles.find((vehicle) => vehicle.id === selectedVehicleId);
+  const evaluationVehicles = vehicles.filter((vehicle) => vehicle.status === "evaluating");
+  const filteredEvaluationVehicles = evaluationVehicles.filter(
+    (vehicle) =>
+      !vehicleSearch ||
+      `${vehicle.brand} ${vehicle.model} ${vehicle.plate}`
+        .toLowerCase()
+        .includes(vehicleSearch.toLowerCase()),
+  );
+
+  useEffect(() => {
+    if (!selectedVehicle) return;
+    patchDraft({
+      vehicle: {
+        plate: selectedVehicle.plate,
+        model_label: `${selectedVehicle.brand} ${selectedVehicle.model}`.trim(),
+        model_year: selectedVehicle.model_year,
+        current_mileage: selectedVehicle.current_mileage,
+      },
+      total_value: selectedVehicle.cost_price || draft.total_value,
+    });
+  }, [selectedVehicle?.id]);
+
+  const createMutation = useMutation({
+    mutationFn: createPurchase,
+    onSuccess: async (purchaseId) => {
+      await queryClient.invalidateQueries({ queryKey: purchaseKeys.all });
+      await queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
+      if (selectedVehicleId) {
+        await queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(selectedVehicleId) });
+      }
+      toast.success("Compra registrada");
+      await navigate({ to: "/purchases/$id", params: { id: String(purchaseId) } });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao registrar compra.");
+    },
+  });
+
+  const supplierMutation = useMutation({
+    mutationFn: createSupplier,
+    onSuccess: async (supplierId, variables) => {
+      await queryClient.invalidateQueries({ queryKey: purchaseKeys.suppliers });
+      patchDraft({ supplier_id: supplierId });
+      setCreateOpen(false);
+      toast.success(`Fornecedor "${variables.name}" criado`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao criar fornecedor.");
+    },
+  });
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedVehicle) {
+      toast.error("Selecione um veículo em avaliação para registrar a compra.");
+      return;
+    }
     if (!selected) {
       toast.error("Selecione um fornecedor");
       return;
     }
-    setSaving(true);
-    setTimeout(() => {
-      toast.success("Compra registrada");
-      navigate({ to: "/purchases" });
-    }, 500);
-  };
-
-  const handleNewSupplier = (data: Omit<SupplierOption, "id">) => {
-    const s: SupplierOption = { id: Date.now(), ...data };
-    setSuppliers((arr) => [s, ...arr]);
-    patchDraft({ supplier_id: s.id });
-    setCreateOpen(false);
-    toast.success(`Fornecedor "${s.name}" criado`);
+    createMutation.mutate({
+      supplierId: selected.id,
+      vehicleId: selectedVehicle.id,
+      totalValue: draft.total_value,
+      purchaseDate: draft.purchase_date ?? new Date().toISOString().slice(0, 10),
+      status: draft.status,
+      notes: draft.notes,
+    });
   };
 
   return (
@@ -125,8 +183,8 @@ function NewPurchase() {
         <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">
           Registrar Compra
         </h1>
-        <Button type="submit" disabled={saving}>
-          <Save className="h-4 w-4" /> {saving ? "Salvando..." : "Salvar"}
+        <Button type="submit" disabled={createMutation.isPending}>
+          <Save className="h-4 w-4" /> {createMutation.isPending ? "Salvando..." : "Salvar"}
         </Button>
       </div>
 
@@ -140,7 +198,10 @@ function NewPurchase() {
                   <UserPlus className="h-4 w-4" /> Novo fornecedor
                 </Button>
               </DialogTrigger>
-              <NewSupplierDialog onCreate={handleNewSupplier} />
+              <NewSupplierDialog
+                isSaving={supplierMutation.isPending}
+                onCreate={(supplier) => supplierMutation.mutate(supplier)}
+              />
             </Dialog>
           </div>
 
@@ -148,14 +209,17 @@ function NewPurchase() {
             <div className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
               <Avatar>
                 <AvatarFallback className="bg-muted text-xs">
-                  {initials(selected.name)}
+                  {initials(selected.person.name)}
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
-                <div className="font-medium">{selected.name}</div>
+                <div className="font-medium">{selected.person.name}</div>
                 <div className="text-xs text-muted-foreground truncate">
-                  {formatDocument(selected.cpf ?? selected.cnpj ?? "", selected.type)} ·{" "}
-                  {formatPhone(selected.phone)}
+                  {formatDocument(
+                    selected.person.cpf ?? selected.person.cnpj ?? "",
+                    selected.person.type,
+                  )}{" "}
+                  · {formatPhone(selected.person.phone)}
                 </div>
               </div>
               <Button
@@ -179,7 +243,11 @@ function NewPurchase() {
                 />
               </div>
               <div className="max-h-64 overflow-y-auto divide-y divide-border rounded-md border border-border">
-                {filtered.length === 0 ? (
+                {loadingSuppliers ? (
+                  <div className="p-6 text-center text-sm text-muted-foreground">
+                    Carregando fornecedores...
+                  </div>
+                ) : filtered.length === 0 ? (
                   <div className="p-6 text-center text-sm text-muted-foreground">
                     Nenhum fornecedor encontrado.
                     <Button type="button" variant="link" onClick={() => setCreateOpen(true)}>
@@ -196,13 +264,16 @@ function NewPurchase() {
                     >
                       <Avatar className="h-8 w-8">
                         <AvatarFallback className="text-xs bg-muted">
-                          {initials(s.name)}
+                          {initials(s.person.name)}
                         </AvatarFallback>
                       </Avatar>
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate">{s.name}</div>
+                        <div className="text-sm font-medium truncate">{s.person.name}</div>
                         <div className="text-xs text-muted-foreground truncate">
-                          {formatDocument(s.cpf ?? s.cnpj ?? "", s.type)}
+                          {formatDocument(
+                            s.person.cpf ?? s.person.cnpj ?? "",
+                            s.person.type,
+                          )}
                         </div>
                       </div>
                     </button>
@@ -216,45 +287,80 @@ function NewPurchase() {
 
       <Card>
         <CardContent className="p-6 space-y-4">
-          <h2 className="font-display font-semibold">Veículo adquirido</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Placa" required>
-              <PlateInput
-                required
-                placeholder="ABC-1D23"
-                value={draft.vehicle.plate}
-                onValueChange={(value) => patchVehicle({ plate: value })}
-              />
-            </Field>
-            <Field label="Marca / Modelo" required>
-              <Input
-                required
-                placeholder="Toyota Corolla"
-                value={draft.vehicle.model_label}
-                onChange={(e) => patchVehicle({ model_label: e.target.value })}
-              />
-            </Field>
-            <Field label="Ano modelo">
-              <Input
-                type="number"
-                value={draft.vehicle.model_year ?? ""}
-                onChange={(e) =>
-                  patchVehicle({ model_year: e.target.value ? Number(e.target.value) : null })
-                }
-              />
-            </Field>
-            <Field label="Quilometragem">
-              <Input
-                type="number"
-                value={draft.vehicle.current_mileage ?? ""}
-                onChange={(e) =>
-                  patchVehicle({
-                    current_mileage: e.target.value ? Number(e.target.value) : null,
-                  })
-                }
-              />
-            </Field>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="font-display font-semibold">Veículo da compra</h2>
+              <p className="text-xs text-muted-foreground">
+                Selecione uma avaliação existente ou cadastre uma nova avaliação antes de concluir a
+                compra.
+              </p>
+            </div>
+            <Button type="button" variant="outline" size="sm" asChild>
+              <Link to="/vehicles/new">
+                <Plus className="h-4 w-4" /> Nova avaliação
+              </Link>
+            </Button>
           </div>
+
+          {selectedVehicle ? (
+            <SelectedVehicleCard
+              vehicle={selectedVehicle}
+              onChange={() => setSelectedVehicleId(null)}
+            />
+          ) : (
+            <div className="space-y-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar avaliação por placa, marca ou modelo..."
+                  className="pl-9"
+                  value={vehicleSearch}
+                  onChange={(event) => setVehicleSearch(event.target.value)}
+                />
+              </div>
+              {loadingVehicles ? (
+                <div className="rounded-md border border-border p-6 text-sm text-muted-foreground">
+                  Carregando avaliações...
+                </div>
+              ) : filteredEvaluationVehicles.length === 0 ? (
+                <div className="rounded-md border border-border p-6 text-center text-sm text-muted-foreground">
+                  Nenhum veículo em avaliação encontrado.
+                  <Button type="button" variant="link" asChild>
+                    <Link to="/vehicles/new">Cadastrar nova avaliação</Link>
+                  </Button>
+                </div>
+              ) : (
+                <div className="max-h-72 overflow-y-auto divide-y divide-border rounded-md border border-border">
+                  {filteredEvaluationVehicles.map((vehicle) => (
+                    <button
+                      key={vehicle.id}
+                      type="button"
+                      onClick={() => setSelectedVehicleId(vehicle.id)}
+                      className="flex w-full items-center gap-3 p-3 text-left transition hover:bg-muted/40"
+                    >
+                      <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                        <Car className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium truncate">
+                          {vehicle.brand} {vehicle.model}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {vehicle.plate} · {vehicle.model_year} ·{" "}
+                          {vehicle.current_mileage.toLocaleString("pt-BR")} km
+                        </div>
+                      </div>
+                      <div className="hidden text-right text-xs text-muted-foreground md:block">
+                        <div>{brl(vehicle.cost_price)} custo est.</div>
+                        <div>{brl(vehicle.sale_price)} venda est.</div>
+                      </div>
+                      <StatusBadge kind="vehicle" value={vehicle.status} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -308,7 +414,47 @@ function NewPurchase() {
   );
 }
 
-function NewSupplierDialog({ onCreate }: { onCreate: (s: Omit<SupplierOption, "id">) => void }) {
+function SelectedVehicleCard({
+  vehicle,
+  onChange,
+}: {
+  vehicle: Vehicle;
+  onChange: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4 md:flex-row md:items-center">
+      <div className="flex h-11 w-11 items-center justify-center rounded-md bg-background text-primary">
+        <Car className="h-5 w-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="font-medium">
+            {vehicle.brand} {vehicle.model}
+          </div>
+          <StatusBadge kind="vehicle" value={vehicle.status} />
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          {vehicle.plate} · Ano {vehicle.model_year} ·{" "}
+          {vehicle.current_mileage.toLocaleString("pt-BR")} km
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          Custo estimado: {brl(vehicle.cost_price)} · Venda estimada: {brl(vehicle.sale_price)}
+        </div>
+      </div>
+      <Button type="button" variant="ghost" size="sm" onClick={onChange}>
+        Trocar
+      </Button>
+    </div>
+  );
+}
+
+function NewSupplierDialog({
+  isSaving,
+  onCreate,
+}: {
+  isSaving: boolean;
+  onCreate: (supplier: CreateSupplierInput) => void;
+}) {
   const [name, setName] = useState("");
   const [document, setDocument] = useState("");
   const [phone, setPhone] = useState("");
@@ -427,7 +573,7 @@ function NewSupplierDialog({ onCreate }: { onCreate: (s: Omit<SupplierOption, "i
             });
           }}
         >
-          <Plus className="h-4 w-4" /> Criar fornecedor
+          <Plus className="h-4 w-4" /> {isSaving ? "Criando..." : "Criar fornecedor"}
         </Button>
       </DialogFooter>
     </DialogContent>

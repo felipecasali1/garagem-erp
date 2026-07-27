@@ -1,10 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Car, Building2, Calendar, Receipt } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Separator } from "@/shared/components/ui/separator";
 import { StatusBadge } from "@/shared/components/status-badge";
-import { purchases } from "@/shared/mock-data";
+import { getPurchaseById, purchaseKeys } from "@/modules/purchases/services/purchases";
 import { brl, fmtDate } from "@/shared/lib/format";
 
 export const Route = createFileRoute("/_app/purchases/$id")({
@@ -15,9 +16,26 @@ export const Route = createFileRoute("/_app/purchases/$id")({
 function PurchaseDetail() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  const p = purchases.find((x) => String(x.id) === id);
+  const purchaseId = Number(id);
+  const {
+    data: p,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: purchaseKeys.detail(purchaseId),
+    queryFn: () => getPurchaseById(purchaseId),
+    enabled: Number.isFinite(purchaseId),
+  });
 
-  if (!p) {
+  if (isLoading) {
+    return (
+      <div className="max-w-2xl mx-auto py-16 text-sm text-muted-foreground">
+        Carregando compra...
+      </div>
+    );
+  }
+
+  if (error || !p) {
     return (
       <div className="max-w-2xl mx-auto text-center py-20">
         <h2 className="font-display text-xl mb-2">Compra não encontrada</h2>
