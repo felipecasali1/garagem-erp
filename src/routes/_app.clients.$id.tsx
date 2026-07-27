@@ -4,6 +4,7 @@ import { ArrowLeft, Mail, Phone, FileText, Calendar, MapPin, ShoppingBag } from 
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
+import { Badge } from "@/shared/components/ui/badge";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
 import { formatDocument, formatPhone, formatCep } from "@/shared/lib/field-format";
 import { customerKeys, getCustomerById } from "@/modules/customers/services/customers";
@@ -57,6 +58,7 @@ function ClientDetail() {
         <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">
           {customer.person.name}
         </h1>
+        {!customer.active && <Badge variant="outline">Arquivado</Badge>}
         <Button asChild>
           <Link to="/clients/edit/$id" params={{ id: String(customer.id) }}>
             Editar

@@ -1,6 +1,6 @@
 import { supabase } from "@/shared/supabase/client";
 import { normalizeCep, normalizeCpf, normalizePhone, normalizeUf } from "@/shared/lib/field-format";
-import { deletePersonIfUnused, getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
+import { getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
 import type { Address, Employee, PersonType } from "@/shared/types/domain";
 import type { EmployeeAccessRole, EmployeeDraft } from "@/modules/employees/types";
 
@@ -337,14 +337,4 @@ export async function setEmployeeActive(id: number, active: boolean) {
   }
 
   return getEmployeeById(id);
-}
-
-export async function deleteEmployee(id: number) {
-  const employee = await getEmployeeById(id);
-  const { error } = await supabase.from("employees").delete().eq("id", id);
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  await deletePersonIfUnused(employee.person.id);
 }

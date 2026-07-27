@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Plus, Save, Trash2, X } from "lucide-react";
+import { Archive, ArrowLeft, Plus, Save, X } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
@@ -22,7 +22,7 @@ import { DEFAULT_ACCESSORIES } from "@/shared/lib/accessories";
 import { PlateInput } from "@/shared/components/form/field-inputs";
 import type { VehicleDraft } from "@/modules/vehicles/types";
 import {
-  deleteVehicle,
+  archiveVehicle,
   getVehicleById,
   updateVehicle,
   vehicleKeys,
@@ -50,7 +50,7 @@ function EditVehicle() {
   });
   const [draft, setDraft] = useState<VehicleDraft | null>(null);
   const [customAcc, setCustomAcc] = useState("");
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [confirmArchiveOpen, setConfirmArchiveOpen] = useState(false);
   const [confirmAccessoryRemove, setConfirmAccessoryRemove] = useState<string | null>(null);
   const updateDraft = (patch: Partial<VehicleDraft>) =>
     setDraft((current) => (current ? { ...current, ...patch } : current));
@@ -115,16 +115,17 @@ function EditVehicle() {
       );
     },
   });
-  const deleteMutation = useMutation({
-    mutationFn: () => deleteVehicle(numericId),
-    onSuccess: () => {
+  const archiveMutation = useMutation({
+    mutationFn: () => archiveVehicle(numericId),
+    onSuccess: (vehicle) => {
+      queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
-      toast.success("Veículo removido");
+      toast.success("Veículo arquivado");
       void navigate({ to: "/vehicles" });
     },
     onError: (mutationError) => {
       toast.error(
-        mutationError instanceof Error ? mutationError.message : "Falha ao remover veículo.",
+        mutationError instanceof Error ? mutationError.message : "Falha ao arquivar veículo.",
       );
     },
   });
@@ -165,10 +166,10 @@ function EditVehicle() {
         <Button
           variant="outline"
           type="button"
-          onClick={() => setConfirmDeleteOpen(true)}
-          disabled={deleteMutation.isPending}
+          onClick={() => setConfirmArchiveOpen(true)}
+          disabled={archiveMutation.isPending || draft.status === "archived"}
         >
-          <Trash2 className="h-4 w-4" /> Excluir
+          <Archive className="h-4 w-4" /> Arquivar
         </Button>
         <Button type="submit" disabled={updateMutation.isPending}>
           <Save className="h-4 w-4" /> {updateMutation.isPending ? "Salvando..." : "Salvar"}
@@ -227,15 +228,15 @@ function EditVehicle() {
         </CardContent>
       </Card>
       <ConfirmActionDialog
-        open={confirmDeleteOpen}
-        onOpenChange={setConfirmDeleteOpen}
-        title="Excluir veículo?"
-        description="Esta ação não pode ser desfeita. O veículo será removido permanentemente do sistema."
-        confirmLabel={deleteMutation.isPending ? "Excluindo..." : "Excluir"}
-        confirmDisabled={deleteMutation.isPending}
+        open={confirmArchiveOpen}
+        onOpenChange={setConfirmArchiveOpen}
+        title="Arquivar veículo?"
+        description="O veículo será preservado no histórico, despublicado e marcado como arquivado."
+        confirmLabel={archiveMutation.isPending ? "Arquivando..." : "Arquivar"}
+        confirmDisabled={archiveMutation.isPending}
         onConfirm={() => {
-          setConfirmDeleteOpen(false);
-          deleteMutation.mutate();
+          setConfirmArchiveOpen(false);
+          archiveMutation.mutate();
         }}
       />
       <ConfirmActionDialog
@@ -336,6 +337,7 @@ function EditVehicle() {
                   <SelectItem value="reserved">Reservado</SelectItem>
                   <SelectItem value="in_repair">Em reparo</SelectItem>
                   <SelectItem value="sold">Vendido</SelectItem>
+                  <SelectItem value="archived">Arquivado</SelectItem>
                 </SelectContent>
               </Select>
             </Field>

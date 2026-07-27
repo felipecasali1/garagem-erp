@@ -4,7 +4,7 @@ create type person_type as enum ('individual', 'company');
 create type commission_type as enum ('percentage', 'fixed');
 create type fuel_type as enum ('flex', 'gasoline', 'diesel', 'electric', 'hybrid');
 create type transmission_type as enum ('manual', 'automatic', 'cvt', 'dual_clutch', 'automatized');
-create type vehicle_status as enum ('available', 'reserved', 'sold', 'in_repair');
+create type vehicle_status as enum ('available', 'reserved', 'sold', 'in_repair', 'archived');
 create type sale_status as enum ('pending', 'completed', 'canceled');
 create type purchase_status as enum ('pending', 'completed', 'canceled');
 create type transaction_type as enum ('income', 'expense');
@@ -116,6 +116,7 @@ create table customers (
   id bigint generated always as identity primary key,
   person_id bigint not null unique references people (id) on delete restrict,
   notes text,
+  active boolean not null default true,
   total_purchases numeric(14, 2) not null default 0,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
@@ -185,6 +186,7 @@ create table vehicle_accessories (
   id bigint generated always as identity primary key,
   vehicle_id bigint not null references vehicles (id) on delete cascade,
   accessory_id bigint not null references accessories (id) on delete cascade,
+  active boolean not null default true,
   created_at timestamptz not null default timezone('utc', now()),
   unique (vehicle_id, accessory_id)
 );

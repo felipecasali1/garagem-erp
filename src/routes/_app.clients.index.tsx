@@ -1,9 +1,10 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Eye, MoreHorizontal, Pencil, Power, PowerOff } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
 import { Card } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
+import { Badge } from "@/shared/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,8 +27,8 @@ import {
 import { toast } from "sonner";
 import {
   customerKeys,
-  deleteCustomer,
   listCustomers,
+  setCustomerActive,
 } from "@/modules/customers/services/customers";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { useState } from "react";
@@ -40,20 +41,23 @@ export const Route = createFileRoute("/_app/clients/")({
 function ClientsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [confirmStatus, setConfirmStatus] = useState<{
+    id: number;
+    active: boolean;
+  } | null>(null);
   const { data: customers = [], isLoading } = useQuery({
     queryKey: customerKeys.all,
     queryFn: listCustomers,
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: deleteCustomer,
+  const statusMutation = useMutation({
+    mutationFn: ({ id, active }: { id: number; active: boolean }) => setCustomerActive(id, active),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: customerKeys.all });
-      toast.success("Cliente removido");
+      toast.success("Status do cliente atualizado");
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Falha ao excluir cliente.");
+      toast.error(error instanceof Error ? error.message : "Falha ao atualizar cliente.");
     },
   });
 
@@ -107,6 +111,7 @@ function ClientsPage() {
                         </AvatarFallback>
                       </Avatar>
                       <span className="font-medium">{c.person.name}</span>
+                      {!c.active && <Badge variant="outline">Arquivado</Badge>}
                     </div>
                   </TableCell>
                   <TableCell className="font-mono text-xs">
@@ -162,10 +167,14 @@ function ClientsPage() {
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onSelect={() => setConfirmDelete(c.id)}
+                            onSelect={() => setConfirmStatus({ id: c.id, active: !c.active })}
                           >
-                            <Trash2 className="h-4 w-4" /> Remover
+                            {c.active ? (
+                              <PowerOff className="h-4 w-4" />
+                            ) : (
+                              <Power className="h-4 w-4" />
+                            )}
+                            {c.active ? "Arquivar" : "Reativar"}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -178,19 +187,23 @@ function ClientsPage() {
         )}
       </Card>
       <ConfirmActionDialog
-        open={confirmDelete != null}
+        open={confirmStatus != null}
         onOpenChange={(open) => {
-          if (!open) setConfirmDelete(null);
+          if (!open) setConfirmStatus(null);
         }}
-        title="Remover cliente?"
-        description="Esta ação não pode ser desfeita. O cliente será removido permanentemente do sistema."
-        confirmLabel={deleteMutation.isPending ? "Removendo..." : "Remover"}
-        confirmDisabled={deleteMutation.isPending || confirmDelete == null}
+        title={confirmStatus?.active ? "Reativar cliente?" : "Arquivar cliente?"}
+        description={
+          confirmStatus?.active
+            ? "O cliente voltará a aparecer como ativo nas operações do sistema."
+            : "O cliente será preservado no histórico, mas deixará de aparecer como ativo em novas operações."
+        }
+        confirmLabel={statusMutation.isPending ? "Atualizando..." : "Confirmar"}
+        confirmDisabled={statusMutation.isPending || confirmStatus == null}
         onConfirm={() => {
-          if (confirmDelete == null) return;
-          const id = confirmDelete;
-          setConfirmDelete(null);
-          deleteMutation.mutate(id);
+          if (confirmStatus == null) return;
+          const next = confirmStatus;
+          setConfirmStatus(null);
+          statusMutation.mutate(next);
         }}
       />
     </div>

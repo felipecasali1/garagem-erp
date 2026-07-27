@@ -2,7 +2,7 @@ export type PersonType = "individual" | "company";
 export type CommissionType = "percentage" | "fixed";
 export type FuelType = "flex" | "gasoline" | "diesel" | "electric" | "hybrid";
 export type Transmission = "manual" | "automatic" | "cvt" | "dual_clutch" | "automatized";
-export type VehicleStatus = "available" | "reserved" | "sold" | "in_repair";
+export type VehicleStatus = "available" | "reserved" | "sold" | "in_repair" | "archived";
 export type SaleStatus = "pending" | "completed" | "canceled";
 export type TransactionType = "income" | "expense";
 export type TransactionCategory =
@@ -56,6 +56,7 @@ export interface Customer {
   id: number;
   person: Person;
   notes?: string;
+  active: boolean;
   total_purchases: number;
   created_at: string;
 }

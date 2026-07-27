@@ -6,13 +6,12 @@ import { AppSidebar } from "@/shared/components/layout/app-sidebar";
 import { TopNav } from "@/shared/components/layout/top-nav";
 import { SidebarInset, SidebarProvider } from "@/shared/components/ui/sidebar";
 import { useAuth } from "@/shared/supabase/auth";
+import { canAccessPath } from "@/shared/auth/access-control";
 
 export function AppLayout() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { loading, session, isAdmin } = useAuth();
-
-  const isEmployeesArea = pathname.startsWith("/employees");
+  const { loading, session, accessRole } = useAuth();
 
   useEffect(() => {
     if (loading || session) return;
@@ -21,10 +20,10 @@ export function AppLayout() {
 
   useEffect(() => {
     if (loading || !session) return;
-    if (!isAdmin && isEmployeesArea) {
+    if (!canAccessPath(accessRole, pathname)) {
       void navigate({ to: "/", replace: true });
     }
-  }, [isAdmin, isEmployeesArea, loading, navigate, session]);
+  }, [accessRole, loading, navigate, pathname, session]);
 
   if (loading) {
     return (

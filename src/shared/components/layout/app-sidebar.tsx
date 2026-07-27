@@ -29,6 +29,7 @@ import {
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { useAuth } from "@/shared/supabase/auth";
 import { initials } from "@/shared/lib/format";
+import { canAccessPath } from "@/shared/auth/access-control";
 
 const groups = [
   {
@@ -71,26 +72,16 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { signOut, session, isAdmin } = useAuth();
+  const { signOut, session, accessRole } = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
   const email = session?.user.email ?? "colaborador@garagemerp.local";
   const displayName = email.split("@")[0]?.replace(/[._-]+/g, " ") || "Colaborador";
   const visibleGroups = groups
-    .map((group) => {
-      if (group.label === "Cadastros" && !isAdmin) {
-        return {
-          ...group,
-          items: group.items.filter((item) => item.title !== "Funcionários"),
-        };
-      }
-
-      if (group.label === "Configurações" && !isAdmin) {
-        return null;
-      }
-
-      return group;
-    })
-    .filter((group): group is (typeof groups)[number] => group !== null);
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => canAccessPath(accessRole, item.url)),
+    }))
+    .filter((group) => group.items.length > 0);
 
   async function handleSignOut() {
     try {

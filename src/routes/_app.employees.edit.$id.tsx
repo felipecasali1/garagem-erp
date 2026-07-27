@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Save } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
@@ -9,10 +9,8 @@ import { Label } from "@/shared/components/ui/label";
 import { Switch } from "@/shared/components/ui/switch";
 import { DatePicker } from "@/shared/components/ui/date-picker";
 import { toast } from "sonner";
-import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { CepInput, CpfCnpjInput, PhoneInput, UfInput } from "@/shared/components/form/field-inputs";
 import {
-  deleteEmployee,
   employeeKeys,
   getEmployeeById,
   updateEmployee,
@@ -33,7 +31,6 @@ function EditEmployee() {
     queryFn: () => getEmployeeById(employeeId),
   });
   const [draft, setDraft] = useState<EmployeeDraft | null>(null);
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   useEffect(() => {
     if (!employee) return;
@@ -68,16 +65,6 @@ function EditEmployee() {
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Falha ao atualizar funcionário.");
-    },
-  });
-  const deleteMutation = useMutation({
-    mutationFn: () => deleteEmployee(employeeId),
-    onSuccess: async () => {
-      toast.success("Funcionário removido");
-      await navigate({ to: "/employees" });
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Falha ao excluir funcionário.");
     },
   });
 
@@ -119,9 +106,6 @@ function EditEmployee() {
         <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">
           Editar Funcionário
         </h1>
-        <Button variant="outline" type="button" onClick={() => setConfirmDeleteOpen(true)}>
-          <Trash2 className="h-4 w-4" /> Excluir
-        </Button>
         <Button type="submit" disabled={updateMutation.isPending}>
           <Save className="h-4 w-4" /> {updateMutation.isPending ? "Salvando..." : "Salvar"}
         </Button>
@@ -287,18 +271,6 @@ function EditEmployee() {
           </div>
         </CardContent>
       </Card>
-      <ConfirmActionDialog
-        open={confirmDeleteOpen}
-        onOpenChange={setConfirmDeleteOpen}
-        title="Excluir funcionário?"
-        description="Esta ação não pode ser desfeita. O funcionário será removido permanentemente do sistema."
-        confirmLabel={deleteMutation.isPending ? "Excluindo..." : "Excluir"}
-        confirmDisabled={deleteMutation.isPending}
-        onConfirm={() => {
-          setConfirmDeleteOpen(false);
-          deleteMutation.mutate();
-        }}
-      />
     </form>
   );
 }

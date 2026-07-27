@@ -1,9 +1,9 @@
 export { useChecklist } from "@/modules/checklist/hooks/use-checklist";
 export { summarizeChecklist } from "@/modules/checklist/lib/summarize-checklist";
 export {
+  cancelChecklistItem,
   checklistKeys,
   createChecklistItem,
-  deleteChecklistItem,
   summarize,
   updateChecklistItem,
 } from "@/modules/checklist/services/checklist";

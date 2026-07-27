@@ -140,11 +140,16 @@ export async function updateChecklistItem(id: string, patch: Partial<ChecklistIt
   return mapChecklistItem(data satisfies ChecklistRow);
 }
 
-export async function deleteChecklistItem(id: string) {
-  const { error } = await supabase.from("vehicle_checklist_items").delete().eq("id", id);
-  if (error) {
-    throw new Error(error.message);
-  }
+export async function cancelChecklistItem(id: string) {
+  const data = await unwrapSingle(
+    supabase
+      .from("vehicle_checklist_items")
+      .update({ status: "cancelled" })
+      .eq("id", id)
+      .select("*")
+      .single(),
+  );
+  return mapChecklistItem(data satisfies ChecklistRow);
 }
 
 export function summarize(list: ChecklistItem[]): ChecklistSummary {

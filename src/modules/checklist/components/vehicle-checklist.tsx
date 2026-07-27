@@ -8,7 +8,6 @@ import {
   XCircle,
   Plus,
   Pencil,
-  Trash2,
   ChevronDown,
   ChevronUp,
   Filter,
@@ -50,8 +49,8 @@ import { cn } from "@/shared/lib/utils";
 import { brl, fmtDate } from "@/shared/lib/format";
 import {
   CATEGORY_LABEL,
+  cancelChecklistItem,
   checklistKeys,
-  deleteChecklistItem,
   PRIORITY_META,
   STATUS_META,
   updateChecklistItem,
@@ -85,7 +84,7 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ChecklistItem | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<ChecklistItem | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState<ChecklistItem | null>(null);
   const invalidateChecklist = async () => {
     await queryClient.invalidateQueries({ queryKey: checklistKeys.all });
     await queryClient.invalidateQueries({ queryKey: checklistKeys.byVehicle(vehicleId) });
@@ -104,15 +103,15 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
       toast.error(error instanceof Error ? error.message : "Falha ao atualizar o status.");
     },
   });
-  const deleteMutation = useMutation({
-    mutationFn: deleteChecklistItem,
+  const cancelMutation = useMutation({
+    mutationFn: cancelChecklistItem,
     onSuccess: async () => {
       await invalidateChecklist();
-      toast.success("Item removido");
-      setConfirmDelete(null);
+      toast.success("Item cancelado");
+      setConfirmCancel(null);
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Falha ao remover item.");
+      toast.error(error instanceof Error ? error.message : "Falha ao cancelar item.");
     },
   });
 
@@ -148,8 +147,8 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
   };
 
   const remove = () => {
-    if (!confirmDelete) return;
-    deleteMutation.mutate(confirmDelete.id);
+    if (!confirmCancel) return;
+    cancelMutation.mutate(confirmCancel.id);
   };
 
   return (
@@ -410,10 +409,10 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
                             ))}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onClick={() => setConfirmDelete(item)}
+                            disabled={item.status === "cancelled"}
+                            onClick={() => setConfirmCancel(item)}
                           >
-                            <Trash2 className="h-3.5 w-3.5" /> Excluir
+                            <XCircle className="h-3.5 w-3.5" /> Cancelar
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -449,18 +448,20 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
         item={editing}
       />
 
-      <AlertDialog open={!!confirmDelete} onOpenChange={(v) => !v && setConfirmDelete(null)}>
+      <AlertDialog open={!!confirmCancel} onOpenChange={(v) => !v && setConfirmCancel(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir item?</AlertDialogTitle>
+            <AlertDialogTitle>Cancelar item?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. O item "{confirmDelete?.title}" será removido do
-              checklist.
+              O item "{confirmCancel?.title}" será preservado no histórico como cancelado e deixará
+              de contar como trabalho ativo.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={remove}>Excluir</AlertDialogAction>
+            <AlertDialogAction onClick={remove} disabled={cancelMutation.isPending}>
+              {cancelMutation.isPending ? "Cancelando..." : "Confirmar"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

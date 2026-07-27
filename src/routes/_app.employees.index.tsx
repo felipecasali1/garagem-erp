@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, MoreHorizontal, Pencil, Trash2, Power, PowerOff } from "lucide-react";
+import { Eye, MoreHorizontal, Pencil, Power, PowerOff } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Badge } from "@/shared/components/ui/badge";
@@ -11,7 +11,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/shared/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
@@ -28,7 +27,6 @@ import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
 import {
   employeeKeys,
-  deleteEmployee,
   listEmployees,
   setEmployeeActive,
 } from "@/modules/employees/services/employees";
@@ -42,7 +40,6 @@ export const Route = createFileRoute("/_app/employees/")({
 function EmployeesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [confirmToggle, setConfirmToggle] = useState<{
     id: number;
     nextActive: boolean;
@@ -65,17 +62,6 @@ function EmployeesPage() {
       toast.error(error instanceof Error ? error.message : "Falha ao atualizar status.");
     },
   });
-  const deleteMutation = useMutation({
-    mutationFn: deleteEmployee,
-    onSuccess: async () => {
-      await invalidate();
-      toast.success("Funcionário removido");
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Falha ao excluir funcionário.");
-    },
-  });
-
   return (
     <div className="max-w-[1600px] mx-auto">
       <PageHeader
@@ -120,7 +106,6 @@ function EmployeesPage() {
                     onToggleActive={() =>
                       setConfirmToggle({ id: employee.id, nextActive: !employee.active })
                     }
-                    onDelete={() => setConfirmDelete(employee.id)}
                   />
                 ))}
               </TableBody>
@@ -128,22 +113,6 @@ function EmployeesPage() {
           )}
         </CardContent>
       </Card>
-      <ConfirmActionDialog
-        open={confirmDelete != null}
-        onOpenChange={(open) => {
-          if (!open) setConfirmDelete(null);
-        }}
-        title="Excluir funcionário?"
-        description="Esta ação não pode ser desfeita. O funcionário será removido permanentemente do sistema."
-        confirmLabel={deleteMutation.isPending ? "Excluindo..." : "Excluir"}
-        confirmDisabled={deleteMutation.isPending || confirmDelete == null}
-        onConfirm={() => {
-          if (confirmDelete == null) return;
-          const id = confirmDelete;
-          setConfirmDelete(null);
-          deleteMutation.mutate(id);
-        }}
-      />
       <ConfirmActionDialog
         open={confirmToggle != null}
         onOpenChange={(open) => {
@@ -172,12 +141,10 @@ function EmployeeRow({
   employee,
   navigate,
   onToggleActive,
-  onDelete,
 }: {
   employee: EmployeeRecord;
   navigate: ReturnType<typeof useNavigate>;
   onToggleActive: () => void;
-  onDelete: () => void;
 }) {
   return (
     <TableRow
@@ -256,13 +223,6 @@ function EmployeeRow({
               <DropdownMenuItem onSelect={onToggleActive}>
                 {employee.active ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4" />}
                 {employee.active ? "Desativar" : "Ativar"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-destructive focus:text-destructive"
-                onSelect={onDelete}
-              >
-                <Trash2 className="h-4 w-4" /> Excluir
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

@@ -233,7 +233,7 @@ function UsersTab() {
     mutationFn: deleteSystemUser,
     onSuccess: async () => {
       await invalidate();
-      toast.success("Usuário removido");
+      toast.success("Acesso removido");
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Falha ao excluir usuário.");
@@ -311,7 +311,7 @@ function UsersTab() {
                           size="icon"
                           variant="ghost"
                           className="text-muted-foreground hover:text-destructive"
-                          aria-label={`Excluir usuário ${u.name}`}
+                          aria-label={`Remover acesso de ${u.name}`}
                           onClick={() => setConfirmDeleteUserId(u.id)}
                         >
                           <Trash2 className="h-4 w-4" />
@@ -330,9 +330,9 @@ function UsersTab() {
         onOpenChange={(open) => {
           if (!open) setConfirmDeleteUserId(null);
         }}
-        title="Excluir usuário?"
+        title="Remover acesso?"
         description="Isso remove o acesso ao sistema. O funcionário e o histórico de vendas/compras continuam preservados."
-        confirmLabel={deleteMutation.isPending ? "Excluindo..." : "Excluir"}
+        confirmLabel={deleteMutation.isPending ? "Removendo..." : "Remover acesso"}
         confirmDisabled={deleteMutation.isPending || confirmDeleteUserId == null}
         onConfirm={() => {
           if (confirmDeleteUserId == null) return;
@@ -520,12 +520,12 @@ function NewUserDialog() {
 
   const submit = () => {
     if (!selectedEmployee) {
-      toast.error("Selecione um funcionário cadastrado no RH.");
+      toast.error("Selecione um funcionário cadastrado.");
       return;
     }
 
     if (!selectedEmployee.person.email) {
-      toast.error("Cadastre um e-mail no RH antes de criar o acesso.");
+      toast.error("Cadastre um e-mail antes de criar o acesso.");
       return;
     }
 
@@ -555,15 +555,15 @@ function NewUserDialog() {
     >
       <DialogTrigger asChild>
         <Button size="sm">
-          <Plus className="h-4 w-4" /> Novo usuário
+          <Plus className="h-4 w-4" /> Criar acesso
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Novo usuário</DialogTitle>
+          <DialogTitle>Criar acesso</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <Field label="Funcionário RH">
+          <Field label="Funcionário">
             <Select value={employeeId} onValueChange={setEmployeeId}>
               <SelectTrigger>
                 <SelectValue placeholder="Selecione um funcionário sem acesso" />
@@ -588,7 +588,7 @@ function NewUserDialog() {
               O acesso será criado para {selectedEmployee.person.name}
               {selectedEmployee.person.email
                 ? ` usando ${selectedEmployee.person.email}.`
-                : ". Cadastre um e-mail no RH antes de continuar."}
+                : ". Cadastre um e-mail antes de continuar."}
             </div>
           )}
           <Field label="Senha temporária">
@@ -620,7 +620,7 @@ function NewUserDialog() {
         <DialogFooter>
           <Button onClick={submit} disabled={createMutation.isPending}>
             <Plus className="h-4 w-4" />
-            {createMutation.isPending ? "Criando..." : "Criar usuário"}
+            {createMutation.isPending ? "Criando..." : "Criar acesso"}
           </Button>
         </DialogFooter>
       </DialogContent>

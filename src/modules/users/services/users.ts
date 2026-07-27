@@ -133,7 +133,7 @@ const createSystemUserServer = createServerFn({ method: "POST" })
 
     const email = normalizeText(employee.person.email);
     if (!email) {
-      throw new Error("Cadastre um e-mail no RH antes de criar o acesso desse funcionário.");
+      throw new Error("Cadastre um e-mail antes de criar o acesso desse funcionário.");
     }
 
     const { data: existingUser, error: existingUserError } = await supabaseAdmin

@@ -295,6 +295,7 @@ function NewVehicle() {
                   <SelectItem value="reserved">Reservado</SelectItem>
                   <SelectItem value="in_repair">Em reparo</SelectItem>
                   <SelectItem value="sold">Vendido</SelectItem>
+                  <SelectItem value="archived">Arquivado</SelectItem>
                 </SelectContent>
               </Select>
             </Field>

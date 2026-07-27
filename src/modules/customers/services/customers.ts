@@ -5,7 +5,7 @@ import {
   normalizePhone,
   normalizeUf,
 } from "@/shared/lib/field-format";
-import { deletePersonIfUnused, getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
+import { getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
 import type { Address, Customer, PersonType } from "@/shared/types/domain";
 import type { CustomerDraft } from "@/modules/customers/types";
 
@@ -37,6 +37,7 @@ type CustomerRow = {
   id: number;
   person_id: number;
   notes: string | null;
+  active: boolean;
   total_purchases: number;
   created_at: string;
   person: PersonRow | null;
@@ -80,6 +81,7 @@ function mapCustomer(row: CustomerRow, address?: AddressRow): Customer {
       primary_address: mapAddress(address),
     },
     notes: row.notes ?? undefined,
+    active: row.active,
     total_purchases: Number(row.total_purchases),
     created_at: row.created_at,
   };
@@ -110,7 +112,7 @@ async function fetchCustomerRows(id?: number) {
   let query = supabase
     .from("customers")
     .select(
-      "id, person_id, notes, total_purchases, created_at, person:people(id, name, type, cpf, cnpj, phone, email, notes)",
+      "id, person_id, notes, active, total_purchases, created_at, person:people(id, name, type, cpf, cnpj, phone, email, notes)",
     )
     .order("created_at", { ascending: false });
 
@@ -258,12 +260,11 @@ export async function updateCustomer(id: number, draft: CustomerDraft) {
   return getCustomerById(id);
 }
 
-export async function deleteCustomer(id: number) {
-  const customer = await getCustomerById(id);
-  const { error } = await supabase.from("customers").delete().eq("id", id);
+export async function setCustomerActive(id: number, active: boolean) {
+  const { error } = await supabase.from("customers").update({ active }).eq("id", id);
   if (error) {
     throw new Error(error.message);
   }
 
-  await deletePersonIfUnused(customer.person.id);
+  return getCustomerById(id);
 }

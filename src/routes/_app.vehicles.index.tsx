@@ -108,7 +108,7 @@ function VehiclesPage() {
             />
           </div>
           <div className="flex gap-2">
-            {(["available", "reserved", "in_repair", "sold"] as const).map((s) => (
+            {(["available", "reserved", "in_repair", "sold", "archived"] as const).map((s) => (
               <button
                 key={s}
                 className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-muted transition"
