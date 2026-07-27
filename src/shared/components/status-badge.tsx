@@ -13,7 +13,7 @@ const vehicleMap: Record<VehicleStatus, { label: string; cls: string }> = {
   available: { label: "Disponível", cls: "bg-success/15 text-success border-success/30" },
   reserved: { label: "Reservado", cls: "bg-warning/15 text-warning border-warning/30" },
   sold: { label: "Vendido", cls: "bg-info/15 text-info border-info/30" },
-  in_repair: { label: "Em reparo", cls: "bg-orange-500/15 text-orange-500 border-orange-500/30" },
+  in_repair: { label: "Em preparação", cls: "bg-orange-500/15 text-orange-500 border-orange-500/30" },
   archived: { label: "Arquivado", cls: "bg-muted text-muted-foreground border-border" },
 };
 

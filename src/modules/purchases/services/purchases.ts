@@ -1,11 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabase } from "@/shared/supabase/client";
-import { normalizeCep, normalizeDocument, normalizePhone, normalizeUf } from "@/shared/lib/field-format";
-import { getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
-import type { Address, Person, PersonType, Purchase, PurchaseStatus, Vehicle } from "@/shared/types/domain";
-
-type SupplierType = "individual" | "company" | "dealership" | "auction" | "trade_in";
+import type { Person, PersonType, Purchase, PurchaseStatus, Vehicle } from "@/shared/types/domain";
+import type { SupplierType } from "@/modules/suppliers/services/suppliers";
 
 type PersonRow = {
   id: number;
@@ -38,29 +35,13 @@ type PurchaseRow = {
   id: number;
   supplier_id: number;
   vehicle_id: number;
+  financial_transaction_id: number | null;
   total_value: number;
   purchase_date: string;
   status: PurchaseStatus;
   notes: string | null;
   supplier: SupplierRow | null;
   vehicle: VehicleRow | null;
-};
-
-export type SupplierRecord = {
-  id: number;
-  person_id: number;
-  supplier_type: SupplierType;
-  active: boolean;
-  person: Person;
-};
-
-export type CreateSupplierInput = {
-  name: string;
-  type: PersonType;
-  document?: string;
-  phone?: string;
-  email?: string;
-  primary_address?: Address;
 };
 
 export type CreatePurchaseInput = {
@@ -75,7 +56,6 @@ export type CreatePurchaseInput = {
 export const purchaseKeys = {
   all: ["purchases"] as const,
   detail: (id: number) => ["purchases", id] as const,
-  suppliers: ["suppliers"] as const,
 };
 
 function normalizeText(value?: string | null) {
@@ -92,20 +72,6 @@ function mapPerson(row: PersonRow): Person {
     phone: row.phone ?? "",
     email: row.email ?? "",
     type: row.type,
-  };
-}
-
-function mapSupplier(row: SupplierRow): SupplierRecord {
-  if (!row.person) {
-    throw new Error("Fornecedor sem registro de pessoa.");
-  }
-
-  return {
-    id: row.id,
-    person_id: row.person_id,
-    supplier_type: row.supplier_type,
-    active: row.active,
-    person: mapPerson(row.person),
   };
 }
 
@@ -141,8 +107,10 @@ function mapPurchase(row: PurchaseRow): Purchase {
 
   return {
     id: row.id,
+    supplier_id: row.supplier_id,
     supplier: mapPerson(row.supplier.person),
     vehicle: mapVehicle(row.vehicle),
+    financial_transaction_id: row.financial_transaction_id ?? undefined,
     total_value: Number(row.total_value),
     purchase_date: row.purchase_date,
     status: row.status,
@@ -150,24 +118,10 @@ function mapPurchase(row: PurchaseRow): Purchase {
   };
 }
 
-export async function listSuppliers() {
-  const { data, error } = await supabase
-    .from("suppliers")
-    .select("id, person_id, supplier_type, active, notes, person:people(id, name, type, cpf, cnpj, phone, email)")
-    .eq("active", true)
-    .order("id");
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return ((data ?? []) as unknown as SupplierRow[]).map(mapSupplier);
-}
-
 export async function listPurchases() {
   const { data, error } = await supabase
     .from("purchases")
-    .select("id, supplier_id, vehicle_id, total_value, purchase_date, status, notes, supplier:suppliers(id, person_id, supplier_type, active, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles(*)")
+    .select("id, supplier_id, vehicle_id, financial_transaction_id, total_value, purchase_date, status, notes, supplier:suppliers(id, person_id, supplier_type, active, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles(*)")
     .order("purchase_date", { ascending: false });
 
   if (error) {
@@ -180,7 +134,7 @@ export async function listPurchases() {
 export async function getPurchaseById(id: number) {
   const { data, error } = await supabase
     .from("purchases")
-    .select("id, supplier_id, vehicle_id, total_value, purchase_date, status, notes, supplier:suppliers(id, person_id, supplier_type, active, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles(*)")
+    .select("id, supplier_id, vehicle_id, financial_transaction_id, total_value, purchase_date, status, notes, supplier:suppliers(id, person_id, supplier_type, active, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles(*)")
     .eq("id", id)
     .maybeSingle();
 
@@ -193,73 +147,6 @@ export async function getPurchaseById(id: number) {
   }
 
   return mapPurchase(data as unknown as PurchaseRow);
-}
-
-export async function createSupplier(input: CreateSupplierInput) {
-  const personId = await getOrCreatePersonIdByDocument({
-    name: input.name.trim(),
-    type: input.type,
-    document: input.document ? normalizeDocument(input.document, input.type) : "",
-    phone: input.phone ?? "",
-    email: input.email ?? "",
-  });
-
-  const { data: existingSupplier, error: existingSupplierError } = await supabase
-    .from("suppliers")
-    .select("id")
-    .eq("person_id", personId)
-    .maybeSingle();
-  if (existingSupplierError) {
-    throw new Error(existingSupplierError.message);
-  }
-  if (existingSupplier) {
-    return existingSupplier.id as number;
-  }
-
-  const { data: supplier, error: supplierError } = await supabase
-    .from("suppliers")
-    .insert({
-      person_id: personId,
-      supplier_type: input.type === "company" ? "company" : "individual",
-      active: true,
-    })
-    .select("id")
-    .single();
-  if (supplierError) {
-    throw new Error(supplierError.message);
-  }
-
-  if (input.primary_address && Object.values(input.primary_address).some(Boolean)) {
-    const addressPayload = {
-      person_id: personId,
-      street: normalizeText(input.primary_address.street),
-      number: normalizeText(input.primary_address.number),
-      complement: normalizeText(input.primary_address.complement),
-      neighborhood: normalizeText(input.primary_address.neighborhood),
-      city: normalizeText(input.primary_address.city),
-      state: normalizeText(normalizeUf(input.primary_address.state)),
-      zip_code: normalizeText(normalizeCep(input.primary_address.zip_code)),
-      is_primary: true,
-    };
-    const { data: existingAddress, error: existingAddressError } = await supabase
-      .from("addresses")
-      .select("id")
-      .eq("person_id", personId)
-      .eq("is_primary", true)
-      .maybeSingle();
-    if (existingAddressError) {
-      throw new Error(existingAddressError.message);
-    }
-
-    const { error: addressError } = existingAddress
-      ? await supabase.from("addresses").update(addressPayload).eq("id", existingAddress.id)
-      : await supabase.from("addresses").insert(addressPayload);
-    if (addressError) {
-      throw new Error(addressError.message);
-    }
-  }
-
-  return supplier.id as number;
 }
 
 const createPurchaseServer = createServerFn({ method: "POST" })
@@ -308,56 +195,15 @@ const createPurchaseServer = createServerFn({ method: "POST" })
     }
 
     if (data.status === "completed") {
-      const { data: checklistItems, error: checklistError } = await supabaseAdmin
-        .from("vehicle_checklist_items")
-        .select("id")
-        .eq("vehicle_id", data.vehicleId)
-        .not("status", "in", "(completed,cancelled)")
-        .limit(1);
-      if (checklistError) {
-        throw new Error(checklistError.message);
-      }
-
-      const nextVehicleStatus = (checklistItems ?? []).length > 0 ? "in_repair" : "available";
-
-      const { error: vehicleUpdateError } = await supabaseAdmin
-        .from("vehicles")
-        .update({
-          cost_price: data.totalValue,
-          status: nextVehicleStatus,
-          published: false,
-        })
-        .eq("id", data.vehicleId);
-      if (vehicleUpdateError) {
-        throw new Error(vehicleUpdateError.message);
-      }
-
-      const { data: transaction, error: transactionError } = await supabaseAdmin
-        .from("financial_transactions")
-        .insert({
-          type: "expense",
-          category: "vehicle_purchase",
-          status: "paid",
-          amount: data.totalValue,
-          transaction_date: data.purchaseDate,
-          paid_at: new Date().toISOString(),
-          description: `Compra #${purchase.id} - ${vehicle.brand} ${vehicle.model}`,
-          related: vehicle.plate,
-          purchase_id: purchase.id,
-        })
-        .select("id")
-        .single();
-      if (transactionError) {
-        throw new Error(transactionError.message);
-      }
-
-      const { error: purchaseUpdateError } = await supabaseAdmin
-        .from("purchases")
-        .update({ financial_transaction_id: transaction.id })
-        .eq("id", purchase.id);
-      if (purchaseUpdateError) {
-        throw new Error(purchaseUpdateError.message);
-      }
+      await applyCompletedPurchase({
+        supabaseAdmin,
+        purchaseId: purchase.id as number,
+        vehicle,
+        vehicleId: data.vehicleId,
+        totalValue: data.totalValue,
+        purchaseDate: data.purchaseDate,
+        financialTransactionId: null,
+      });
     }
 
     return purchase.id as number;
@@ -365,4 +211,188 @@ const createPurchaseServer = createServerFn({ method: "POST" })
 
 export async function createPurchase(input: CreatePurchaseInput) {
   return createPurchaseServer({ data: input });
+}
+
+type PurchaseActionInput = {
+  purchaseId: number;
+};
+
+type SupabaseAdminClient = Awaited<
+  typeof import("@/shared/supabase/server")
+>["supabaseAdmin"];
+
+async function applyCompletedPurchase({
+  supabaseAdmin,
+  purchaseId,
+  vehicle,
+  vehicleId,
+  totalValue,
+  purchaseDate,
+  financialTransactionId,
+}: {
+  supabaseAdmin: SupabaseAdminClient;
+  purchaseId: number;
+  vehicle: { brand: string; model: string; plate: string | null };
+  vehicleId: number;
+  totalValue: number;
+  purchaseDate: string;
+  financialTransactionId: number | null;
+}) {
+  const { data: checklistItems, error: checklistError } = await supabaseAdmin
+    .from("vehicle_checklist_items")
+    .select("id")
+    .eq("vehicle_id", vehicleId)
+    .not("status", "in", "(completed,cancelled)")
+    .limit(1);
+  if (checklistError) {
+    throw new Error(checklistError.message);
+  }
+
+  const nextVehicleStatus = (checklistItems ?? []).length > 0 ? "in_repair" : "available";
+
+  const { error: vehicleUpdateError } = await supabaseAdmin
+    .from("vehicles")
+    .update({
+      cost_price: totalValue,
+      status: nextVehicleStatus,
+      published: false,
+    })
+    .eq("id", vehicleId);
+  if (vehicleUpdateError) {
+    throw new Error(vehicleUpdateError.message);
+  }
+
+  let nextFinancialTransactionId = financialTransactionId;
+  if (!nextFinancialTransactionId) {
+    const { data: transaction, error: transactionError } = await supabaseAdmin
+      .from("financial_transactions")
+      .insert({
+        type: "expense",
+        category: "vehicle_purchase",
+        status: "paid",
+        amount: totalValue,
+        transaction_date: purchaseDate,
+        paid_at: new Date().toISOString(),
+        description: `Compra #${purchaseId} - ${vehicle.brand} ${vehicle.model}`,
+        related: vehicle.plate,
+        purchase_id: purchaseId,
+      })
+      .select("id")
+      .single();
+    if (transactionError) {
+      throw new Error(transactionError.message);
+    }
+    nextFinancialTransactionId = transaction.id as number;
+  }
+
+  const { error: purchaseUpdateError } = await supabaseAdmin
+    .from("purchases")
+    .update({
+      status: "completed",
+      financial_transaction_id: nextFinancialTransactionId,
+    })
+    .eq("id", purchaseId);
+  if (purchaseUpdateError) {
+    throw new Error(purchaseUpdateError.message);
+  }
+}
+
+const completePurchaseServer = createServerFn({ method: "POST" })
+  .inputValidator(
+    z.object({
+      purchaseId: z.number().int().positive(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/shared/supabase/server");
+
+    const { data: purchase, error: purchaseError } = await supabaseAdmin
+      .from("purchases")
+      .select("id, vehicle_id, total_value, purchase_date, status, financial_transaction_id")
+      .eq("id", data.purchaseId)
+      .maybeSingle();
+    if (purchaseError) {
+      throw new Error(purchaseError.message);
+    }
+    if (!purchase) {
+      throw new Error("Compra não encontrada.");
+    }
+    if (purchase.status !== "pending") {
+      throw new Error("Apenas compras pendentes podem ser concluídas.");
+    }
+
+    const { data: vehicle, error: vehicleError } = await supabaseAdmin
+      .from("vehicles")
+      .select("id, brand, model, plate")
+      .eq("id", purchase.vehicle_id)
+      .maybeSingle();
+    if (vehicleError) {
+      throw new Error(vehicleError.message);
+    }
+    if (!vehicle) {
+      throw new Error("Veículo da compra não encontrado.");
+    }
+
+    await applyCompletedPurchase({
+      supabaseAdmin,
+      purchaseId: purchase.id as number,
+      vehicle,
+      vehicleId: purchase.vehicle_id as number,
+      totalValue: Number(purchase.total_value),
+      purchaseDate: String(purchase.purchase_date),
+      financialTransactionId: (purchase.financial_transaction_id as number | null) ?? null,
+    });
+
+    return purchase.id as number;
+  });
+
+const cancelPurchaseServer = createServerFn({ method: "POST" })
+  .inputValidator(
+    z.object({
+      purchaseId: z.number().int().positive(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/shared/supabase/server");
+
+    const { data: purchase, error: purchaseError } = await supabaseAdmin
+      .from("purchases")
+      .select("id, vehicle_id, status")
+      .eq("id", data.purchaseId)
+      .maybeSingle();
+    if (purchaseError) {
+      throw new Error(purchaseError.message);
+    }
+    if (!purchase) {
+      throw new Error("Compra não encontrada.");
+    }
+    if (purchase.status !== "pending") {
+      throw new Error("Apenas compras pendentes podem ser canceladas.");
+    }
+
+    const { error: purchaseUpdateError } = await supabaseAdmin
+      .from("purchases")
+      .update({ status: "canceled" })
+      .eq("id", purchase.id);
+    if (purchaseUpdateError) {
+      throw new Error(purchaseUpdateError.message);
+    }
+
+    const { error: vehicleUpdateError } = await supabaseAdmin
+      .from("vehicles")
+      .update({ status: "evaluating", published: false })
+      .eq("id", purchase.vehicle_id);
+    if (vehicleUpdateError) {
+      throw new Error(vehicleUpdateError.message);
+    }
+
+    return purchase.id as number;
+  });
+
+export async function completePurchase(input: PurchaseActionInput) {
+  return completePurchaseServer({ data: input });
+}
+
+export async function cancelPurchase(input: PurchaseActionInput) {
+  return cancelPurchaseServer({ data: input });
 }

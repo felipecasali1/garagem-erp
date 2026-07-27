@@ -13,6 +13,7 @@ const labels: Record<string, string> = {
   "": "Dashboard",
   employees: "Funcionários",
   clients: "Clientes",
+  suppliers: "Fornecedores",
   vehicles: "Veículos",
   sales: "Vendas",
   purchases: "Compras",

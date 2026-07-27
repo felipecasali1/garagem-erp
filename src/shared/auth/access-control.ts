@@ -9,6 +9,7 @@ const pathRoles: Array<{ path: string; roles: AccessRole[] }> = [
   { path: "/purchases", roles: ["admin", "manager"] },
   { path: "/sales", roles: ["admin", "manager", "seller"] },
   { path: "/clients", roles: ["admin", "manager", "seller", "financial"] },
+  { path: "/suppliers", roles: ["admin", "manager", "seller", "financial"] },
   { path: "/vehicles", roles: ["admin", "manager", "seller"] },
   { path: "/", roles: ["admin", "manager", "seller", "financial"] },
 ];

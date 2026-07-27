@@ -6,6 +6,7 @@ import {
   UserCircle2,
   Car,
   ShoppingCart,
+  Truck,
   Banknote,
   PieChart,
   Receipt,
@@ -41,6 +42,7 @@ const groups = [
     items: [
       { title: "Funcionários", url: "/employees", icon: Users },
       { title: "Clientes", url: "/clients", icon: UserCircle2 },
+      { title: "Fornecedores", url: "/suppliers", icon: Truck },
     ],
   },
   {

@@ -39,11 +39,14 @@ import { listVehicles, vehicleKeys } from "@/modules/vehicles/services/vehicles"
 import { StatusBadge } from "@/shared/components/status-badge";
 import {
   createPurchase,
-  createSupplier,
-  type CreateSupplierInput,
-  listSuppliers,
   purchaseKeys,
 } from "@/modules/purchases/services/purchases";
+import {
+  createSupplier,
+  type CreateSupplierInput,
+  listActiveSuppliers,
+  supplierKeys,
+} from "@/modules/suppliers/services/suppliers";
 
 export const Route = createFileRoute("/_app/purchases/new")({
   head: () => ({ meta: [{ title: "Nova Compra | GaragemERP" }] }),
@@ -63,8 +66,8 @@ function NewPurchase() {
     queryFn: listVehicles,
   });
   const { data: suppliers = [], isLoading: loadingSuppliers } = useQuery({
-    queryKey: purchaseKeys.suppliers,
-    queryFn: listSuppliers,
+    queryKey: supplierKeys.all,
+    queryFn: listActiveSuppliers,
   });
   const [draft, setDraft] = useState<PurchaseDraft>({
     supplier_id: null,
@@ -142,7 +145,7 @@ function NewPurchase() {
   const supplierMutation = useMutation({
     mutationFn: createSupplier,
     onSuccess: async (supplierId, variables) => {
-      await queryClient.invalidateQueries({ queryKey: purchaseKeys.suppliers });
+      await queryClient.invalidateQueries({ queryKey: supplierKeys.all });
       patchDraft({ supplier_id: supplierId });
       setCreateOpen(false);
       toast.success(`Fornecedor "${variables.name}" criado`);
@@ -564,8 +567,7 @@ function NewSupplierDialog({
             }
             onCreate({
               name,
-              cpf: type === "individual" ? document || undefined : undefined,
-              cnpj: type === "company" ? document || undefined : undefined,
+              document,
               phone,
               email,
               type,

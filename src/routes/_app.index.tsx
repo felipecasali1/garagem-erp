@@ -96,7 +96,7 @@ const inventoryData = (
         ? "Reservado"
         : s === "sold"
           ? "Vendido"
-          : "Em reparo",
+          : "Em preparação",
   value: vehicles.filter((v) => v.status === s).length,
   key: s,
 }));

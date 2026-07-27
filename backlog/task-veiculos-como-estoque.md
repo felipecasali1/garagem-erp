@@ -42,7 +42,7 @@ Portanto, não precisamos criar dois tipos de veículo. O mesmo registro de veí
 
 - Quais campos são obrigatórios no cadastro básico pré-compra?
 - Veículo em avaliação aparece na mesma listagem de estoque ou em filtro separado?
-- Criar status separado para "em preparação" ou continuar usando `in_repair`?
+- Exibir o status interno `in_repair` como "Em preparação", porque o veículo pode estar em vistoria, limpeza, fotos ou regularização, e não necessariamente em reparo.
 - Veículo arquivado deve aparecer por padrão na listagem ou apenas quando filtrado?
 
 ### Critérios de aceite

@@ -13,6 +13,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app.index'
 import { Route as AppVehiclesRouteImport } from './routes/_app.vehicles'
+import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
 import { Route as AppPurchasesRouteImport } from './routes/_app.purchases'
@@ -20,6 +21,7 @@ import { Route as AppFinancialRouteImport } from './routes/_app.financial'
 import { Route as AppEmployeesRouteImport } from './routes/_app.employees'
 import { Route as AppClientsRouteImport } from './routes/_app.clients'
 import { Route as AppVehiclesIndexRouteImport } from './routes/_app.vehicles.index'
+import { Route as AppSuppliersIndexRouteImport } from './routes/_app.suppliers.index'
 import { Route as AppSalesIndexRouteImport } from './routes/_app.sales.index'
 import { Route as AppPurchasesIndexRouteImport } from './routes/_app.purchases.index'
 import { Route as AppFinancialIndexRouteImport } from './routes/_app.financial.index'
@@ -27,6 +29,8 @@ import { Route as AppEmployeesIndexRouteImport } from './routes/_app.employees.i
 import { Route as AppClientsIndexRouteImport } from './routes/_app.clients.index'
 import { Route as AppVehiclesNewRouteImport } from './routes/_app.vehicles.new'
 import { Route as AppVehiclesIdRouteImport } from './routes/_app.vehicles.$id'
+import { Route as AppSuppliersNewRouteImport } from './routes/_app.suppliers.new'
+import { Route as AppSuppliersIdRouteImport } from './routes/_app.suppliers.$id'
 import { Route as AppSalesNewRouteImport } from './routes/_app.sales.new'
 import { Route as AppSalesIdRouteImport } from './routes/_app.sales.$id'
 import { Route as AppPurchasesNewRouteImport } from './routes/_app.purchases.new'
@@ -39,6 +43,7 @@ import { Route as AppClientsNewRouteImport } from './routes/_app.clients.new'
 import { Route as AppClientsIdRouteImport } from './routes/_app.clients.$id'
 import { Route as AppFinancialTransactionsIndexRouteImport } from './routes/_app.financial.transactions.index'
 import { Route as AppVehiclesEditIdRouteImport } from './routes/_app.vehicles.edit.$id'
+import { Route as AppSuppliersEditIdRouteImport } from './routes/_app.suppliers.edit.$id'
 import { Route as AppFinancialTransactionsIdRouteImport } from './routes/_app.financial.transactions.$id'
 import { Route as AppEmployeesEditIdRouteImport } from './routes/_app.employees.edit.$id'
 import { Route as AppClientsEditIdRouteImport } from './routes/_app.clients.edit.$id'
@@ -60,6 +65,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppVehiclesRoute = AppVehiclesRouteImport.update({
   id: '/vehicles',
   path: '/vehicles',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSuppliersRoute = AppSuppliersRouteImport.update({
+  id: '/suppliers',
+  path: '/suppliers',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
@@ -97,6 +107,11 @@ const AppVehiclesIndexRoute = AppVehiclesIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppVehiclesRoute,
 } as any)
+const AppSuppliersIndexRoute = AppSuppliersIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppSuppliersRoute,
+} as any)
 const AppSalesIndexRoute = AppSalesIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -131,6 +146,16 @@ const AppVehiclesIdRoute = AppVehiclesIdRouteImport.update({
   id: '/$id',
   path: '/$id',
   getParentRoute: () => AppVehiclesRoute,
+} as any)
+const AppSuppliersNewRoute = AppSuppliersNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => AppSuppliersRoute,
+} as any)
+const AppSuppliersIdRoute = AppSuppliersIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => AppSuppliersRoute,
 } as any)
 const AppSalesNewRoute = AppSalesNewRouteImport.update({
   id: '/new',
@@ -194,6 +219,11 @@ const AppVehiclesEditIdRoute = AppVehiclesEditIdRouteImport.update({
   path: '/edit/$id',
   getParentRoute: () => AppVehiclesRoute,
 } as any)
+const AppSuppliersEditIdRoute = AppSuppliersEditIdRouteImport.update({
+  id: '/edit/$id',
+  path: '/edit/$id',
+  getParentRoute: () => AppSuppliersRoute,
+} as any)
 const AppFinancialTransactionsIdRoute =
   AppFinancialTransactionsIdRouteImport.update({
     id: '/$id',
@@ -220,6 +250,7 @@ export interface FileRoutesByFullPath {
   '/purchases': typeof AppPurchasesRouteWithChildren
   '/sales': typeof AppSalesRouteWithChildren
   '/settings': typeof AppSettingsRoute
+  '/suppliers': typeof AppSuppliersRouteWithChildren
   '/vehicles': typeof AppVehiclesRouteWithChildren
   '/clients/$id': typeof AppClientsIdRoute
   '/clients/new': typeof AppClientsNewRoute
@@ -231,6 +262,8 @@ export interface FileRoutesByFullPath {
   '/purchases/new': typeof AppPurchasesNewRoute
   '/sales/$id': typeof AppSalesIdRoute
   '/sales/new': typeof AppSalesNewRoute
+  '/suppliers/$id': typeof AppSuppliersIdRoute
+  '/suppliers/new': typeof AppSuppliersNewRoute
   '/vehicles/$id': typeof AppVehiclesIdRoute
   '/vehicles/new': typeof AppVehiclesNewRoute
   '/clients/': typeof AppClientsIndexRoute
@@ -238,10 +271,12 @@ export interface FileRoutesByFullPath {
   '/financial/': typeof AppFinancialIndexRoute
   '/purchases/': typeof AppPurchasesIndexRoute
   '/sales/': typeof AppSalesIndexRoute
+  '/suppliers/': typeof AppSuppliersIndexRoute
   '/vehicles/': typeof AppVehiclesIndexRoute
   '/clients/edit/$id': typeof AppClientsEditIdRoute
   '/employees/edit/$id': typeof AppEmployeesEditIdRoute
   '/financial/transactions/$id': typeof AppFinancialTransactionsIdRoute
+  '/suppliers/edit/$id': typeof AppSuppliersEditIdRoute
   '/vehicles/edit/$id': typeof AppVehiclesEditIdRoute
   '/financial/transactions/': typeof AppFinancialTransactionsIndexRoute
 }
@@ -258,6 +293,8 @@ export interface FileRoutesByTo {
   '/purchases/new': typeof AppPurchasesNewRoute
   '/sales/$id': typeof AppSalesIdRoute
   '/sales/new': typeof AppSalesNewRoute
+  '/suppliers/$id': typeof AppSuppliersIdRoute
+  '/suppliers/new': typeof AppSuppliersNewRoute
   '/vehicles/$id': typeof AppVehiclesIdRoute
   '/vehicles/new': typeof AppVehiclesNewRoute
   '/clients': typeof AppClientsIndexRoute
@@ -265,10 +302,12 @@ export interface FileRoutesByTo {
   '/financial': typeof AppFinancialIndexRoute
   '/purchases': typeof AppPurchasesIndexRoute
   '/sales': typeof AppSalesIndexRoute
+  '/suppliers': typeof AppSuppliersIndexRoute
   '/vehicles': typeof AppVehiclesIndexRoute
   '/clients/edit/$id': typeof AppClientsEditIdRoute
   '/employees/edit/$id': typeof AppEmployeesEditIdRoute
   '/financial/transactions/$id': typeof AppFinancialTransactionsIdRoute
+  '/suppliers/edit/$id': typeof AppSuppliersEditIdRoute
   '/vehicles/edit/$id': typeof AppVehiclesEditIdRoute
   '/financial/transactions': typeof AppFinancialTransactionsIndexRoute
 }
@@ -282,6 +321,7 @@ export interface FileRoutesById {
   '/_app/purchases': typeof AppPurchasesRouteWithChildren
   '/_app/sales': typeof AppSalesRouteWithChildren
   '/_app/settings': typeof AppSettingsRoute
+  '/_app/suppliers': typeof AppSuppliersRouteWithChildren
   '/_app/vehicles': typeof AppVehiclesRouteWithChildren
   '/_app/': typeof AppIndexRoute
   '/_app/clients/$id': typeof AppClientsIdRoute
@@ -294,6 +334,8 @@ export interface FileRoutesById {
   '/_app/purchases/new': typeof AppPurchasesNewRoute
   '/_app/sales/$id': typeof AppSalesIdRoute
   '/_app/sales/new': typeof AppSalesNewRoute
+  '/_app/suppliers/$id': typeof AppSuppliersIdRoute
+  '/_app/suppliers/new': typeof AppSuppliersNewRoute
   '/_app/vehicles/$id': typeof AppVehiclesIdRoute
   '/_app/vehicles/new': typeof AppVehiclesNewRoute
   '/_app/clients/': typeof AppClientsIndexRoute
@@ -301,10 +343,12 @@ export interface FileRoutesById {
   '/_app/financial/': typeof AppFinancialIndexRoute
   '/_app/purchases/': typeof AppPurchasesIndexRoute
   '/_app/sales/': typeof AppSalesIndexRoute
+  '/_app/suppliers/': typeof AppSuppliersIndexRoute
   '/_app/vehicles/': typeof AppVehiclesIndexRoute
   '/_app/clients/edit/$id': typeof AppClientsEditIdRoute
   '/_app/employees/edit/$id': typeof AppEmployeesEditIdRoute
   '/_app/financial/transactions/$id': typeof AppFinancialTransactionsIdRoute
+  '/_app/suppliers/edit/$id': typeof AppSuppliersEditIdRoute
   '/_app/vehicles/edit/$id': typeof AppVehiclesEditIdRoute
   '/_app/financial/transactions/': typeof AppFinancialTransactionsIndexRoute
 }
@@ -319,6 +363,7 @@ export interface FileRouteTypes {
     | '/purchases'
     | '/sales'
     | '/settings'
+    | '/suppliers'
     | '/vehicles'
     | '/clients/$id'
     | '/clients/new'
@@ -330,6 +375,8 @@ export interface FileRouteTypes {
     | '/purchases/new'
     | '/sales/$id'
     | '/sales/new'
+    | '/suppliers/$id'
+    | '/suppliers/new'
     | '/vehicles/$id'
     | '/vehicles/new'
     | '/clients/'
@@ -337,10 +384,12 @@ export interface FileRouteTypes {
     | '/financial/'
     | '/purchases/'
     | '/sales/'
+    | '/suppliers/'
     | '/vehicles/'
     | '/clients/edit/$id'
     | '/employees/edit/$id'
     | '/financial/transactions/$id'
+    | '/suppliers/edit/$id'
     | '/vehicles/edit/$id'
     | '/financial/transactions/'
   fileRoutesByTo: FileRoutesByTo
@@ -357,6 +406,8 @@ export interface FileRouteTypes {
     | '/purchases/new'
     | '/sales/$id'
     | '/sales/new'
+    | '/suppliers/$id'
+    | '/suppliers/new'
     | '/vehicles/$id'
     | '/vehicles/new'
     | '/clients'
@@ -364,10 +415,12 @@ export interface FileRouteTypes {
     | '/financial'
     | '/purchases'
     | '/sales'
+    | '/suppliers'
     | '/vehicles'
     | '/clients/edit/$id'
     | '/employees/edit/$id'
     | '/financial/transactions/$id'
+    | '/suppliers/edit/$id'
     | '/vehicles/edit/$id'
     | '/financial/transactions'
   id:
@@ -380,6 +433,7 @@ export interface FileRouteTypes {
     | '/_app/purchases'
     | '/_app/sales'
     | '/_app/settings'
+    | '/_app/suppliers'
     | '/_app/vehicles'
     | '/_app/'
     | '/_app/clients/$id'
@@ -392,6 +446,8 @@ export interface FileRouteTypes {
     | '/_app/purchases/new'
     | '/_app/sales/$id'
     | '/_app/sales/new'
+    | '/_app/suppliers/$id'
+    | '/_app/suppliers/new'
     | '/_app/vehicles/$id'
     | '/_app/vehicles/new'
     | '/_app/clients/'
@@ -399,10 +455,12 @@ export interface FileRouteTypes {
     | '/_app/financial/'
     | '/_app/purchases/'
     | '/_app/sales/'
+    | '/_app/suppliers/'
     | '/_app/vehicles/'
     | '/_app/clients/edit/$id'
     | '/_app/employees/edit/$id'
     | '/_app/financial/transactions/$id'
+    | '/_app/suppliers/edit/$id'
     | '/_app/vehicles/edit/$id'
     | '/_app/financial/transactions/'
   fileRoutesById: FileRoutesById
@@ -440,6 +498,13 @@ declare module '@tanstack/react-router' {
       path: '/vehicles'
       fullPath: '/vehicles'
       preLoaderRoute: typeof AppVehiclesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/suppliers': {
+      id: '/_app/suppliers'
+      path: '/suppliers'
+      fullPath: '/suppliers'
+      preLoaderRoute: typeof AppSuppliersRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings': {
@@ -491,6 +556,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppVehiclesIndexRouteImport
       parentRoute: typeof AppVehiclesRoute
     }
+    '/_app/suppliers/': {
+      id: '/_app/suppliers/'
+      path: '/'
+      fullPath: '/suppliers/'
+      preLoaderRoute: typeof AppSuppliersIndexRouteImport
+      parentRoute: typeof AppSuppliersRoute
+    }
     '/_app/sales/': {
       id: '/_app/sales/'
       path: '/'
@@ -539,6 +611,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/vehicles/$id'
       preLoaderRoute: typeof AppVehiclesIdRouteImport
       parentRoute: typeof AppVehiclesRoute
+    }
+    '/_app/suppliers/new': {
+      id: '/_app/suppliers/new'
+      path: '/new'
+      fullPath: '/suppliers/new'
+      preLoaderRoute: typeof AppSuppliersNewRouteImport
+      parentRoute: typeof AppSuppliersRoute
+    }
+    '/_app/suppliers/$id': {
+      id: '/_app/suppliers/$id'
+      path: '/$id'
+      fullPath: '/suppliers/$id'
+      preLoaderRoute: typeof AppSuppliersIdRouteImport
+      parentRoute: typeof AppSuppliersRoute
     }
     '/_app/sales/new': {
       id: '/_app/sales/new'
@@ -623,6 +709,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/vehicles/edit/$id'
       preLoaderRoute: typeof AppVehiclesEditIdRouteImport
       parentRoute: typeof AppVehiclesRoute
+    }
+    '/_app/suppliers/edit/$id': {
+      id: '/_app/suppliers/edit/$id'
+      path: '/edit/$id'
+      fullPath: '/suppliers/edit/$id'
+      preLoaderRoute: typeof AppSuppliersEditIdRouteImport
+      parentRoute: typeof AppSuppliersRoute
     }
     '/_app/financial/transactions/$id': {
       id: '/_app/financial/transactions/$id'
@@ -748,6 +841,24 @@ const AppSalesRouteWithChildren = AppSalesRoute._addFileChildren(
   AppSalesRouteChildren,
 )
 
+interface AppSuppliersRouteChildren {
+  AppSuppliersIdRoute: typeof AppSuppliersIdRoute
+  AppSuppliersNewRoute: typeof AppSuppliersNewRoute
+  AppSuppliersIndexRoute: typeof AppSuppliersIndexRoute
+  AppSuppliersEditIdRoute: typeof AppSuppliersEditIdRoute
+}
+
+const AppSuppliersRouteChildren: AppSuppliersRouteChildren = {
+  AppSuppliersIdRoute: AppSuppliersIdRoute,
+  AppSuppliersNewRoute: AppSuppliersNewRoute,
+  AppSuppliersIndexRoute: AppSuppliersIndexRoute,
+  AppSuppliersEditIdRoute: AppSuppliersEditIdRoute,
+}
+
+const AppSuppliersRouteWithChildren = AppSuppliersRoute._addFileChildren(
+  AppSuppliersRouteChildren,
+)
+
 interface AppVehiclesRouteChildren {
   AppVehiclesIdRoute: typeof AppVehiclesIdRoute
   AppVehiclesNewRoute: typeof AppVehiclesNewRoute
@@ -773,6 +884,7 @@ interface AppRouteChildren {
   AppPurchasesRoute: typeof AppPurchasesRouteWithChildren
   AppSalesRoute: typeof AppSalesRouteWithChildren
   AppSettingsRoute: typeof AppSettingsRoute
+  AppSuppliersRoute: typeof AppSuppliersRouteWithChildren
   AppVehiclesRoute: typeof AppVehiclesRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
 }
@@ -784,6 +896,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPurchasesRoute: AppPurchasesRouteWithChildren,
   AppSalesRoute: AppSalesRouteWithChildren,
   AppSettingsRoute: AppSettingsRoute,
+  AppSuppliersRoute: AppSuppliersRouteWithChildren,
   AppVehiclesRoute: AppVehiclesRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
 }

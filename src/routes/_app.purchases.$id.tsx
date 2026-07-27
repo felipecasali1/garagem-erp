@@ -1,12 +1,30 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Car, Building2, Calendar, Receipt } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowLeft,
+  Building2,
+  Calendar,
+  Car,
+  CheckCircle2,
+  Receipt,
+  XCircle,
+} from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Separator } from "@/shared/components/ui/separator";
 import { StatusBadge } from "@/shared/components/status-badge";
-import { getPurchaseById, purchaseKeys } from "@/modules/purchases/services/purchases";
+import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
+import {
+  cancelPurchase,
+  completePurchase,
+  getPurchaseById,
+  purchaseKeys,
+} from "@/modules/purchases/services/purchases";
+import { vehicleKeys } from "@/modules/vehicles/services/vehicles";
 import { brl, fmtDate } from "@/shared/lib/format";
+import { formatDocument, formatPhone } from "@/shared/lib/field-format";
 
 export const Route = createFileRoute("/_app/purchases/$id")({
   head: () => ({ meta: [{ title: "Compra | GaragemERP" }] }),
@@ -16,7 +34,9 @@ export const Route = createFileRoute("/_app/purchases/$id")({
 function PurchaseDetail() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const purchaseId = Number(id);
+  const [confirmAction, setConfirmAction] = useState<"complete" | "cancel" | null>(null);
   const {
     data: p,
     isLoading,
@@ -25,6 +45,39 @@ function PurchaseDetail() {
     queryKey: purchaseKeys.detail(purchaseId),
     queryFn: () => getPurchaseById(purchaseId),
     enabled: Number.isFinite(purchaseId),
+  });
+
+  const refreshPurchase = async (vehicleId?: number) => {
+    await queryClient.invalidateQueries({ queryKey: purchaseKeys.all });
+    await queryClient.invalidateQueries({ queryKey: purchaseKeys.detail(purchaseId) });
+    if (vehicleId) {
+      await queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
+      await queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
+    }
+  };
+
+  const completeMutation = useMutation({
+    mutationFn: completePurchase,
+    onSuccess: async () => {
+      await refreshPurchase(p?.vehicle.id);
+      setConfirmAction(null);
+      toast.success("Compra concluída");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao concluir compra.");
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: cancelPurchase,
+    onSuccess: async () => {
+      await refreshPurchase(p?.vehicle.id);
+      setConfirmAction(null);
+      toast.success("Compra cancelada");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao cancelar compra.");
+    },
   });
 
   if (isLoading) {
@@ -44,9 +97,12 @@ function PurchaseDetail() {
     );
   }
 
+  const supplierDocument = p.supplier.cnpj ?? p.supplier.cpf ?? "";
+  const isPending = p.status === "pending";
+
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="sm" asChild>
           <Link to="/purchases">
             <ArrowLeft className="h-4 w-4" /> Compras
@@ -59,7 +115,33 @@ function PurchaseDetail() {
           </h1>
         </div>
         <StatusBadge kind="purchase" value={p.status} />
+        {isPending && (
+          <>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmAction("cancel")}
+              disabled={completeMutation.isPending || cancelMutation.isPending}
+            >
+              <XCircle className="h-4 w-4" /> Cancelar
+            </Button>
+            <Button
+              onClick={() => setConfirmAction("complete")}
+              disabled={completeMutation.isPending || cancelMutation.isPending}
+            >
+              <CheckCircle2 className="h-4 w-4" /> Concluir compra
+            </Button>
+          </>
+        )}
       </div>
+
+      {isPending && (
+        <Card className="border-warning/30 bg-warning/5">
+          <CardContent className="p-4 text-sm text-muted-foreground">
+            Esta compra ainda está pendente. O financeiro só será lançado e o veículo só sairá de
+            avaliação quando a compra for concluída.
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -132,11 +214,24 @@ function PurchaseDetail() {
                 <Building2 className="h-4 w-4" /> Fornecedor
               </div>
               <div className="font-medium">{p.supplier.name}</div>
-              <div className="text-xs text-muted-foreground space-y-1">
-                <div>{p.supplier.cnpj ?? p.supplier.cpf}</div>
-                <div>{p.supplier.email}</div>
-                <div>{p.supplier.phone}</div>
+              <div className="space-y-2 text-sm">
+                <InfoLine
+                  label={p.supplier.type === "company" ? "CNPJ" : "CPF"}
+                  value={supplierDocument ? formatDocument(supplierDocument, p.supplier.type) : "-"}
+                />
+                <InfoLine label="E-mail" value={p.supplier.email || "-"} />
+                <InfoLine
+                  label="Telefone"
+                  value={p.supplier.phone ? formatPhone(p.supplier.phone) : "-"}
+                />
               </div>
+              {p.supplier_id && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link to="/suppliers/$id" params={{ id: String(p.supplier_id) }}>
+                    Ver fornecedor
+                  </Link>
+                </Button>
+              )}
             </CardContent>
           </Card>
 
@@ -148,8 +243,58 @@ function PurchaseDetail() {
               <div className="font-medium">{fmtDate(p.purchase_date)}</div>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardContent className="p-6 space-y-2 text-sm">
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Financeiro
+              </div>
+              <div className="font-medium">
+                {p.financial_transaction_id ? "Lançamento gerado" : "Sem lançamento financeiro"}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {p.financial_transaction_id
+                  ? `Transação #${p.financial_transaction_id}`
+                  : "Será gerado ao concluir a compra."}
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
+
+      <ConfirmActionDialog
+        open={confirmAction === "complete"}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+        }}
+        title="Concluir compra?"
+        description="O valor pago será gravado como custo real do veículo, uma despesa será lançada no financeiro e o veículo sairá de avaliação."
+        confirmLabel={completeMutation.isPending ? "Concluindo..." : "Concluir compra"}
+        confirmDisabled={completeMutation.isPending}
+        confirmVariant="default"
+        onConfirm={() => completeMutation.mutate({ purchaseId: p.id })}
+      />
+
+      <ConfirmActionDialog
+        open={confirmAction === "cancel"}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+        }}
+        title="Cancelar compra?"
+        description="A compra será marcada como cancelada e o veículo continuará em avaliação. Nada será apagado."
+        confirmLabel={cancelMutation.isPending ? "Cancelando..." : "Cancelar compra"}
+        confirmDisabled={cancelMutation.isPending}
+        onConfirm={() => cancelMutation.mutate({ purchaseId: p.id })}
+      />
+    </div>
+  );
+}
+
+function InfoLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="font-medium">{value}</div>
     </div>
   );
 }
