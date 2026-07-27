@@ -12,15 +12,26 @@ import {
 } from "@/shared/components/ui/select";
 import { Textarea } from "@/shared/components/ui/textarea";
 import { CepInput, CpfCnpjInput, PhoneInput, UfInput } from "@/shared/components/form/field-inputs";
+import type { PersonType } from "@/shared/types/domain";
 import type { SupplierDraft, SupplierType } from "@/modules/suppliers/types";
 
 const supplierTypeLabels: Record<SupplierType, string> = {
-  individual: "Pessoa física",
+  individual: "Particular",
   company: "Empresa",
   dealership: "Revenda",
   auction: "Leilão",
   trade_in: "Troca",
 };
+
+export function getSupplierTypeOptions(personType: PersonType): SupplierType[] {
+  return personType === "company"
+    ? ["company", "dealership", "auction", "trade_in"]
+    : ["individual", "trade_in"];
+}
+
+function getDefaultSupplierType(personType: PersonType): SupplierType {
+  return personType === "company" ? "company" : "individual";
+}
 
 export function createEmptySupplierDraft(): SupplierDraft {
   return {
@@ -59,6 +70,10 @@ export function SupplierForm({
   const patchDraft = (patch: Partial<SupplierDraft>) => onChange({ ...draft, ...patch });
   const patchAddress = (patch: Partial<SupplierDraft["primary_address"]>) =>
     patchDraft({ primary_address: { ...draft.primary_address, ...patch } });
+  const supplierTypeOptions = getSupplierTypeOptions(draft.type);
+  const selectedSupplierType = supplierTypeOptions.includes(draft.supplier_type)
+    ? draft.supplier_type
+    : getDefaultSupplierType(draft.type);
 
   return (
     <>
@@ -71,7 +86,7 @@ export function SupplierForm({
                 onValueChange={(value) =>
                   patchDraft({
                     type: value as SupplierDraft["type"],
-                    supplier_type: value === "company" ? "company" : "individual",
+                    supplier_type: getDefaultSupplierType(value as PersonType),
                   })
                 }
               >
@@ -84,18 +99,18 @@ export function SupplierForm({
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Perfil do fornecedor">
+            <Field label="Origem / categoria">
               <Select
-                value={draft.supplier_type}
+                value={selectedSupplierType}
                 onValueChange={(value) => patchDraft({ supplier_type: value as SupplierType })}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(supplierTypeLabels).map(([value, label]) => (
+                  {supplierTypeOptions.map((value) => (
                     <SelectItem key={value} value={value}>
-                      {label}
+                      {getSupplierTypeLabel(value)}
                     </SelectItem>
                   ))}
                 </SelectContent>

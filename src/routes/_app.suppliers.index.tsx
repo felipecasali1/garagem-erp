@@ -92,7 +92,7 @@ function SuppliersPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Fornecedor</TableHead>
-                <TableHead>Perfil</TableHead>
+                <TableHead>Origem / categoria</TableHead>
                 <TableHead>CPF/CNPJ</TableHead>
                 <TableHead>Telefone</TableHead>
                 <TableHead>Email</TableHead>

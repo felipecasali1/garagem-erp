@@ -47,6 +47,11 @@ import {
   listActiveSuppliers,
   supplierKeys,
 } from "@/modules/suppliers/services/suppliers";
+import {
+  getSupplierTypeLabel,
+  getSupplierTypeOptions,
+} from "@/modules/suppliers/components/supplier-form";
+import type { SupplierType } from "@/modules/suppliers/types";
 
 export const Route = createFileRoute("/_app/purchases/new")({
   head: () => ({ meta: [{ title: "Nova Compra | GaragemERP" }] }),
@@ -463,6 +468,7 @@ function NewSupplierDialog({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [type, setType] = useState<PersonType>("company");
+  const [supplierType, setSupplierType] = useState<SupplierType>("company");
   const [address, setAddress] = useState<Address>({
     zip_code: "",
     city: "",
@@ -472,6 +478,7 @@ function NewSupplierDialog({
     number: "",
     complement: "",
   });
+  const supplierTypeOptions = getSupplierTypeOptions(type);
   const patchAddress = (patch: Partial<Address>) =>
     setAddress((current) => ({ ...current, ...patch }));
   return (
@@ -480,14 +487,38 @@ function NewSupplierDialog({
         <DialogTitle>Novo Fornecedor</DialogTitle>
       </DialogHeader>
       <div className="space-y-4">
-        <Field label="Tipo">
-          <Select value={type} onValueChange={(value) => setType(value as PersonType)}>
+        <Field label="Tipo de pessoa">
+          <Select
+            value={type}
+            onValueChange={(value) => {
+              const nextType = value as PersonType;
+              setType(nextType);
+              setSupplierType(nextType === "company" ? "company" : "individual");
+            }}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="individual">Pessoa Física</SelectItem>
               <SelectItem value="company">Pessoa Jurídica</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Origem / categoria">
+          <Select
+            value={supplierType}
+            onValueChange={(value) => setSupplierType(value as SupplierType)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {supplierTypeOptions.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {getSupplierTypeLabel(value)}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </Field>
@@ -571,6 +602,7 @@ function NewSupplierDialog({
               phone,
               email,
               type,
+              supplier_type: supplierType,
               primary_address: Object.values(address).some(Boolean) ? address : undefined,
             });
           }}
