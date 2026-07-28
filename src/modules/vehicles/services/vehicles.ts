@@ -70,6 +70,10 @@ function toVehiclePayload(draft: VehicleDraft) {
   return normalizeVehicleDraft(draft);
 }
 
+function isSaleManagedStatus(status: Vehicle["status"]) {
+  return status === "reserved" || status === "sold";
+}
+
 async function unwrapSingle<T>(
   promise: Promise<{ data: T | null; error: { message: string } | null }>,
 ) {
@@ -237,8 +241,14 @@ export async function getVehicleById(id: number) {
 }
 
 export async function createVehicle(draft: VehicleDraft) {
+  const payload = {
+    ...toVehiclePayload(draft),
+    status: "evaluating" as const,
+    published: false,
+  };
+
   const data = await unwrapSingle(
-    supabase.from("vehicles").insert(toVehiclePayload(draft)).select("id").single(),
+    supabase.from("vehicles").insert(payload).select("id").single(),
   );
   await syncVehicleAccessories(data.id, draft.accessories);
   await createVehicleChecklist(data.id, draft.checklist);
@@ -246,14 +256,26 @@ export async function createVehicle(draft: VehicleDraft) {
 }
 
 export async function updateVehicle(id: number, draft: VehicleDraft) {
+  const currentVehicle = await getVehicleById(id);
+  const payload = {
+    ...toVehiclePayload(draft),
+    status: currentVehicle.status,
+    published: currentVehicle.status === "available" ? draft.published : false,
+  };
+
   await unwrapSingle(
-    supabase.from("vehicles").update(toVehiclePayload(draft)).eq("id", id).select("id").single(),
+    supabase.from("vehicles").update(payload).eq("id", id).select("id").single(),
   );
   await syncVehicleAccessories(id, draft.accessories);
   return getVehicleById(id);
 }
 
 export async function archiveVehicle(id: number) {
+  const currentVehicle = await getVehicleById(id);
+  if (isSaleManagedStatus(currentVehicle.status)) {
+    throw new Error("Veículos reservados ou vendidos não devem ser arquivados manualmente.");
+  }
+
   await unwrapSingle(
     supabase
       .from("vehicles")
@@ -276,5 +298,37 @@ export async function setVehiclePublished(id: number, published: boolean) {
   await unwrapSingle(
     supabase.from("vehicles").update({ published }).eq("id", id).select("id").single(),
   );
+  return getVehicleById(id);
+}
+
+export async function finishVehiclePreparation(id: number) {
+  const vehicle = await getVehicleById(id);
+  if (vehicle.status !== "in_repair") {
+    throw new Error("Apenas veículos em preparação podem ser finalizados.");
+  }
+
+  const { data: pendingItems, error: checklistError } = await supabase
+    .from("vehicle_checklist_items")
+    .select("id")
+    .eq("vehicle_id", id)
+    .not("status", "in", "(completed,cancelled)")
+    .limit(1);
+  if (checklistError) {
+    throw new Error(checklistError.message);
+  }
+
+  if ((pendingItems ?? []).length > 0) {
+    throw new Error("Conclua ou cancele os itens pendentes antes de finalizar a preparação.");
+  }
+
+  await unwrapSingle(
+    supabase
+      .from("vehicles")
+      .update({ status: "available", published: false })
+      .eq("id", id)
+      .select("id")
+      .single(),
+  );
+
   return getVehicleById(id);
 }

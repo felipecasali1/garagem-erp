@@ -1,12 +1,27 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Car, User, Briefcase, Calendar, Receipt, Percent } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowLeft,
+  Briefcase,
+  Calendar,
+  Car,
+  CheckCircle2,
+  Receipt,
+  User,
+  XCircle,
+} from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { Separator } from "@/shared/components/ui/separator";
 import { StatusBadge } from "@/shared/components/status-badge";
-import { sales } from "@/shared/mock-data";
+import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
+import { cancelSale, completeSale, getSaleById, saleKeys } from "@/modules/sales/services/sales";
+import { vehicleKeys } from "@/modules/vehicles/services/vehicles";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
+import { formatDocument, formatPhone } from "@/shared/lib/field-format";
 
 export const Route = createFileRoute("/_app/sales/$id")({
   head: () => ({ meta: [{ title: "Venda | GaragemERP" }] }),
@@ -16,9 +31,57 @@ export const Route = createFileRoute("/_app/sales/$id")({
 function SaleDetail() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  const sale = sales.find((s) => String(s.id) === id);
+  const queryClient = useQueryClient();
+  const saleId = Number(id);
+  const [confirmAction, setConfirmAction] = useState<"complete" | "cancel" | null>(null);
+  const { data: sale, isLoading, error } = useQuery({
+    queryKey: saleKeys.detail(saleId),
+    queryFn: () => getSaleById(saleId),
+    enabled: Number.isFinite(saleId),
+  });
 
-  if (!sale) {
+  const refreshSale = async (vehicleId?: number) => {
+    await queryClient.invalidateQueries({ queryKey: saleKeys.all });
+    await queryClient.invalidateQueries({ queryKey: saleKeys.detail(saleId) });
+    if (vehicleId) {
+      await queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
+      await queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
+    }
+  };
+
+  const completeMutation = useMutation({
+    mutationFn: completeSale,
+    onSuccess: async () => {
+      await refreshSale(sale?.vehicle.id);
+      setConfirmAction(null);
+      toast.success("Venda concluída");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao concluir venda.");
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: cancelSale,
+    onSuccess: async () => {
+      await refreshSale(sale?.vehicle.id);
+      setConfirmAction(null);
+      toast.success("Venda cancelada");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao cancelar venda.");
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="max-w-2xl mx-auto py-16 text-sm text-muted-foreground">
+        Carregando venda...
+      </div>
+    );
+  }
+
+  if (error || !sale) {
     return (
       <div className="max-w-2xl mx-auto text-center py-20">
         <h2 className="font-display text-xl mb-2">Venda não encontrada</h2>
@@ -33,10 +96,12 @@ function SaleDetail() {
       : sale.employee.commission_rate;
   const subtotal = sale.total_value + sale.discount;
   const profit = sale.total_value - sale.vehicle.cost_price;
+  const isPending = sale.status === "pending";
+  const customerDocument = sale.customer.person.cpf ?? sale.customer.person.cnpj ?? "";
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="sm" asChild>
           <Link to="/sales">
             <ArrowLeft className="h-4 w-4" /> Vendas
@@ -49,7 +114,33 @@ function SaleDetail() {
           </h1>
         </div>
         <StatusBadge kind="sale" value={sale.status} />
+        {isPending && (
+          <>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmAction("cancel")}
+              disabled={completeMutation.isPending || cancelMutation.isPending}
+            >
+              <XCircle className="h-4 w-4" /> Cancelar
+            </Button>
+            <Button
+              onClick={() => setConfirmAction("complete")}
+              disabled={completeMutation.isPending || cancelMutation.isPending}
+            >
+              <CheckCircle2 className="h-4 w-4" /> Concluir venda
+            </Button>
+          </>
+        )}
       </div>
+
+      {isPending && (
+        <Card className="border-warning/30 bg-warning/5">
+          <CardContent className="p-4 text-sm text-muted-foreground">
+            Esta venda está pendente e o veículo fica reservado para este cliente. O financeiro e a
+            comissão serão consolidados quando a venda for concluída.
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -137,14 +228,18 @@ function SaleDetail() {
                 <div>
                   <div className="font-medium text-sm">{sale.customer.person.name}</div>
                   <div className="text-xs text-muted-foreground">
-                    {sale.customer.person.cpf ?? sale.customer.person.cnpj}
+                    {customerDocument
+                      ? formatDocument(customerDocument, sale.customer.person.type)
+                      : "-"}
                   </div>
                 </div>
               </Link>
               <Separator />
               <div className="text-xs text-muted-foreground space-y-1">
-                <div>{sale.customer.person.email}</div>
-                <div>{sale.customer.person.phone}</div>
+                <div>{sale.customer.person.email || "-"}</div>
+                <div>
+                  {sale.customer.person.phone ? formatPhone(sale.customer.person.phone) : "-"}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -182,6 +277,31 @@ function SaleDetail() {
           </Card>
         </div>
       </div>
+
+      <ConfirmActionDialog
+        open={confirmAction === "complete"}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+        }}
+        title="Concluir venda?"
+        description="O veículo será marcado como vendido, sairá de publicação, a receita será lançada no financeiro e a comissão do vendedor será gerada quando aplicável."
+        confirmLabel={completeMutation.isPending ? "Concluindo..." : "Concluir venda"}
+        confirmDisabled={completeMutation.isPending}
+        confirmVariant="default"
+        onConfirm={() => completeMutation.mutate({ saleId: sale.id })}
+      />
+
+      <ConfirmActionDialog
+        open={confirmAction === "cancel"}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+        }}
+        title="Cancelar venda?"
+        description="A venda será marcada como cancelada e o veículo voltará para disponível. Nada será apagado."
+        confirmLabel={cancelMutation.isPending ? "Cancelando..." : "Cancelar venda"}
+        confirmDisabled={cancelMutation.isPending}
+        onConfirm={() => cancelMutation.mutate({ saleId: sale.id })}
+      />
     </div>
   );
 }

@@ -9,13 +9,7 @@ import { Label } from "@/shared/components/ui/label";
 import { Textarea } from "@/shared/components/ui/textarea";
 import { Badge } from "@/shared/components/ui/badge";
 import { DatePicker } from "@/shared/components/ui/date-picker";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/shared/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/components/ui/select";
 import { toast } from "sonner";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { DEFAULT_ACCESSORIES } from "@/shared/lib/accessories";
@@ -281,26 +275,6 @@ function NewVehicle() {
                 value={vehicleDraft.model_year || ""}
                 onChange={(e) => patchVehicleDraft({ model_year: Number(e.target.value) || 0 })}
               />
-            </Field>
-            <Field label="Status">
-              <Select
-                value={vehicleDraft.status}
-                onValueChange={(value) =>
-                  patchVehicleDraft({ status: value as VehicleDraft["status"] })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="evaluating">Em avaliação</SelectItem>
-                  <SelectItem value="available">Disponível</SelectItem>
-                  <SelectItem value="reserved">Reservado</SelectItem>
-                  <SelectItem value="in_repair">Em preparação</SelectItem>
-                  <SelectItem value="sold">Vendido</SelectItem>
-                  <SelectItem value="archived">Arquivado</SelectItem>
-                </SelectContent>
-              </Select>
             </Field>
           </div>
         </CardContent>

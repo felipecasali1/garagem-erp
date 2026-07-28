@@ -1,14 +1,29 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Calendar, Fuel, Gauge, Pencil, Eye, EyeOff, Settings2, Hash, ShoppingCart } from "lucide-react";
+import {
+  ArrowLeft,
+  Calendar,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  Fuel,
+  Gauge,
+  Hash,
+  Pencil,
+  Settings2,
+  ShoppingCart,
+} from "lucide-react";
+import { useState } from "react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
 import { StatusBadge } from "@/shared/components/status-badge";
+import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { brl } from "@/shared/lib/format";
 import { VehicleChecklist } from "@/modules/checklist/components/vehicle-checklist";
-import { useChecklist, summarize } from "@/modules/checklist";
+import { checklistKeys, useChecklist, summarize } from "@/modules/checklist";
 import {
+  finishVehiclePreparation,
   getVehicleById,
   setVehiclePublished,
   vehicleKeys,
@@ -40,6 +55,8 @@ function VehicleDetail() {
   const navigate = useNavigate();
   const numericId = Number(id);
   const queryClient = useQueryClient();
+  const [confirmFinishPreparation, setConfirmFinishPreparation] = useState(false);
+  const [activeTab, setActiveTab] = useState("info");
   const {
     data: vehicle,
     isLoading,
@@ -59,6 +76,23 @@ function VehicleDetail() {
     onError: (mutationError) => {
       toast.error(
         mutationError instanceof Error ? mutationError.message : "Falha ao atualizar publicação.",
+      );
+    },
+  });
+  const finishPreparationMutation = useMutation({
+    mutationFn: () => finishVehiclePreparation(numericId),
+    onSuccess: async (nextVehicle) => {
+      queryClient.setQueryData(vehicleKeys.detail(nextVehicle.id), nextVehicle);
+      await queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
+      await queryClient.invalidateQueries({ queryKey: checklistKeys.byVehicle(nextVehicle.id) });
+      setConfirmFinishPreparation(false);
+      toast.success("Preparação finalizada");
+    },
+    onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "Falha ao finalizar preparação.",
       );
     },
   });
@@ -88,6 +122,9 @@ function VehicleDetail() {
   const margin = vehicle.sale_price - estimatedInvested;
   const marginPct = estimatedInvested > 0 ? (margin / estimatedInvested) * 100 : 0;
   const isEvaluation = vehicle.status === "evaluating";
+  const isPreparing = vehicle.status === "in_repair";
+  const preparationBlockers =
+    checklistSummary.pending + checklistSummary.inProgress + checklistSummary.waitingParts;
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -117,6 +154,15 @@ function VehicleDetail() {
             </Link>
           </Button>
         )}
+        {isPreparing && preparationBlockers === 0 && (
+          <Button
+            variant="outline"
+            onClick={() => setConfirmFinishPreparation(true)}
+            disabled={finishPreparationMutation.isPending}
+          >
+            <CheckCircle2 className="h-4 w-4" /> Finalizar preparação
+          </Button>
+        )}
         <Button
           onClick={() => publishMutation.mutate({ published: !vehicle.published })}
           disabled={!vehicle.published && vehicle.status !== "available"}
@@ -125,6 +171,33 @@ function VehicleDetail() {
           {vehicle.published ? "Despublicar" : "Publicar"}
         </Button>
       </div>
+
+      {isPreparing && (
+        <Card className="border-warning/30 bg-warning/5">
+          <CardContent className="flex flex-col gap-3 p-4 text-sm md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="font-medium text-foreground">Veículo em preparação</div>
+              <div className="text-muted-foreground">
+                {preparationBlockers > 0
+                  ? `${preparationBlockers} item(ns) do checklist ainda precisam ser concluídos ou cancelados.`
+                  : "Checklist sem pendências. O veículo já pode ser liberado para disponibilidade."}
+              </div>
+            </div>
+            {preparationBlockers === 0 ? (
+              <Button
+                onClick={() => setConfirmFinishPreparation(true)}
+                disabled={finishPreparationMutation.isPending}
+              >
+                <CheckCircle2 className="h-4 w-4" /> Finalizar preparação
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={() => setActiveTab("checklist")}>
+                Ver checklist
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 overflow-hidden">
@@ -187,7 +260,7 @@ function VehicleDetail() {
         </Card>
       </div>
 
-      <Tabs defaultValue="info">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="info">Informações</TabsTrigger>
           <TabsTrigger value="checklist">Checklist ({checklistSummary.total})</TabsTrigger>
@@ -252,6 +325,18 @@ function VehicleDetail() {
           </Card>
         </TabsContent>
       </Tabs>
+      <ConfirmActionDialog
+        open={confirmFinishPreparation}
+        onOpenChange={setConfirmFinishPreparation}
+        title="Finalizar preparação?"
+        description="O veículo será marcado como disponível, mas continuará não publicado até alguém publicar manualmente."
+        confirmLabel={
+          finishPreparationMutation.isPending ? "Finalizando..." : "Finalizar preparação"
+        }
+        confirmDisabled={finishPreparationMutation.isPending}
+        confirmVariant="default"
+        onConfirm={() => finishPreparationMutation.mutate()}
+      />
     </div>
   );
 }

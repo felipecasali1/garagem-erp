@@ -8,6 +8,8 @@ Atualizar dashboard e relatórios para refletirem dados reais dos módulos persi
 
 O dashboard é útil para demonstrar o produto, mas deve evoluir para indicadores reais conforme compras, vendas, estoque e financeiro forem conectados ao Supabase.
 
+Veículos, compras e preparação já avançaram. A consolidação do dashboard deve acontecer depois do fluxo real de vendas, porque vendas definem receita, margem realizada, comissões e giro de estoque.
+
 ### Escopo
 
 - Revisar cards/KPIs do dashboard.
@@ -28,10 +30,10 @@ O dashboard é útil para demonstrar o produto, mas deve evoluir para indicadore
 
 ### Dependências
 
-- Compras reais.
-- Vendas reais.
-- Financeiro real.
-- Veículos com status consistente.
+- Compras reais: parcialmente atendido.
+- Veículos com status consistente: parcialmente atendido.
+- Vendas reais: próxima dependência principal.
+- Financeiro real: depende da integração de vendas, parcelas e comissões.
 
 ### Critérios de aceite
 

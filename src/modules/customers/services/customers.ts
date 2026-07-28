@@ -205,6 +205,10 @@ export async function listCustomers() {
   return fetchCustomerRows();
 }
 
+export async function listActiveCustomers() {
+  return (await listCustomers()).filter((customer) => customer.active);
+}
+
 export async function getCustomerById(id: number) {
   const [customer] = await fetchCustomerRows(id);
   if (!customer) {

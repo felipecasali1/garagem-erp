@@ -1,4 +1,5 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { Eye, MoreHorizontal, Search } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -6,8 +7,8 @@ import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
-import { sales } from "@/shared/mock-data";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
+import { listSales, saleKeys } from "@/modules/sales/services/sales";
 import {
   Table,
   TableBody,
@@ -24,11 +25,24 @@ export const Route = createFileRoute("/_app/sales/")({
 
 function SalesPage() {
   const navigate = useNavigate();
+  const { data: sales = [], isLoading, error } = useQuery({
+    queryKey: saleKeys.all,
+    queryFn: listSales,
+  });
+
+  if (error) {
+    return (
+      <div className="max-w-[1600px] mx-auto py-10 text-sm text-destructive">
+        Falha ao carregar vendas: {error instanceof Error ? error.message : "erro desconhecido"}.
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-[1600px] mx-auto">
       <PageHeader
         title="Vendas"
-        description={`${sales.length} vendas registradas`}
+        description={isLoading ? "Carregando vendas..." : `${sales.length} vendas registradas`}
         action={{ label: "Nova Venda", onClick: () => navigate({ to: "/sales/new" }) }}
       />
 
@@ -42,7 +56,18 @@ function SalesPage() {
       </Card>
 
       <Card>
-        <Table>
+        {isLoading ? (
+          <div className="p-8 text-sm text-muted-foreground">Carregando vendas...</div>
+        ) : sales.length === 0 ? (
+          <div className="p-12 text-center space-y-2">
+            <h3 className="font-display font-semibold">Nenhuma venda registrada</h3>
+            <p className="text-sm text-muted-foreground">
+              Registre a primeira venda a partir de um veículo disponível.
+            </p>
+            <Button onClick={() => navigate({ to: "/sales/new" })}>Nova Venda</Button>
+          </div>
+        ) : (
+          <Table>
           <TableHeader>
             <TableRow>
               <TableHead>#ID</TableHead>
@@ -93,8 +118,10 @@ function SalesPage() {
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   <div className="flex justify-end gap-1">
-                    <Button size="icon" variant="ghost" aria-label={`Ver venda ${s.id}`} onClick={() => navigate({ to: "/sales/$id", params: { id: String(s.id) } })}>
-                      <Eye className="h-4 w-4" />
+                    <Button size="icon" variant="ghost" aria-label={`Ver venda ${s.id}`} asChild>
+                      <Link to="/sales/$id" params={{ id: String(s.id) }}>
+                        <Eye className="h-4 w-4" />
+                      </Link>
                     </Button>
                     <Button
                       size="icon"
@@ -109,6 +136,7 @@ function SalesPage() {
             ))}
           </TableBody>
         </Table>
+        )}
       </Card>
     </div>
   );

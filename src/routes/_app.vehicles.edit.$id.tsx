@@ -18,6 +18,7 @@ import {
 } from "@/shared/components/ui/select";
 import { toast } from "sonner";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
+import { StatusBadge } from "@/shared/components/status-badge";
 import { DEFAULT_ACCESSORIES } from "@/shared/lib/accessories";
 import { PlateInput } from "@/shared/components/form/field-inputs";
 import type { VehicleDraft } from "@/modules/vehicles/types";
@@ -152,6 +153,7 @@ function EditVehicle() {
     updateMutation.mutate(draft);
   };
   const isEvaluation = draft.status === "evaluating";
+  const isSaleManagedStatus = draft.status === "reserved" || draft.status === "sold";
 
   return (
     <form onSubmit={submit} className="max-w-4xl mx-auto space-y-6">
@@ -168,7 +170,7 @@ function EditVehicle() {
           variant="outline"
           type="button"
           onClick={() => setConfirmArchiveOpen(true)}
-          disabled={archiveMutation.isPending || draft.status === "archived"}
+          disabled={archiveMutation.isPending || draft.status === "archived" || isSaleManagedStatus}
         >
           <Archive className="h-4 w-4" /> Arquivar
         </Button>
@@ -325,23 +327,10 @@ function EditVehicle() {
                 onChange={(e) => updateDraft({ model_year: Number(e.target.value) || 0 })}
               />
             </Field>
-            <Field label="Status">
-              <Select
-                value={draft.status}
-                onValueChange={(value) => updateDraft({ status: value as VehicleDraft["status"] })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="evaluating">Em avaliação</SelectItem>
-                  <SelectItem value="available">Disponível</SelectItem>
-                  <SelectItem value="reserved">Reservado</SelectItem>
-                  <SelectItem value="in_repair">Em preparação</SelectItem>
-                  <SelectItem value="sold">Vendido</SelectItem>
-                  <SelectItem value="archived">Arquivado</SelectItem>
-                </SelectContent>
-              </Select>
+            <Field label="Status atual">
+              <div className="flex h-10 items-center">
+                <StatusBadge kind="vehicle" value={draft.status} />
+              </div>
             </Field>
           </div>
         </CardContent>

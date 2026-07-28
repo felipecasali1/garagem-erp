@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Check, Car, UserCircle2, Receipt } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -17,7 +18,13 @@ import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { DatePicker } from "@/shared/components/ui/date-picker";
 import { StatusBadge } from "@/shared/components/status-badge";
 import type { SaleDraft } from "@/modules/sales/types";
-import { vehicles, customers, employees } from "@/shared/mock-data";
+import { createSale, saleKeys } from "@/modules/sales/services/sales";
+import { listVehicles, vehicleKeys } from "@/modules/vehicles/services/vehicles";
+import {
+  customerKeys,
+  listActiveCustomers,
+} from "@/modules/customers/services/customers";
+import { employeeKeys, listActiveEmployees } from "@/modules/employees/services/employees";
 import { brl, initials } from "@/shared/lib/format";
 import { formatDocument } from "@/shared/lib/field-format";
 import { toast } from "sonner";
@@ -34,38 +41,124 @@ const steps = [
   { key: "confirm", title: "Confirmação", icon: Check },
 ] as const;
 
+function getPaymentStatusLabel(draft: SaleDraft, total: number) {
+  if (draft.payment_method !== "financing") return "Quitado";
+  if (draft.down_payment >= total && total > 0) return "Quitado";
+  if (draft.down_payment > 0) return "Parcial";
+  return "Pendente";
+}
+
+function getPaymentMethodLabel(method: SaleDraft["payment_method"]) {
+  const labels: Record<SaleDraft["payment_method"], string> = {
+    cash: "À vista",
+    financing: "Financiamento",
+    card: "Cartão",
+    pix: "PIX",
+    trade_in: "Troca + diferença",
+  };
+  return labels[method];
+}
+
 function NewSale() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { data: vehicles = [], isLoading: loadingVehicles } = useQuery({
+    queryKey: vehicleKeys.all,
+    queryFn: listVehicles,
+  });
+  const { data: customers = [], isLoading: loadingCustomers } = useQuery({
+    queryKey: customerKeys.all,
+    queryFn: listActiveCustomers,
+  });
+  const { data: employees = [], isLoading: loadingEmployees } = useQuery({
+    queryKey: employeeKeys.active,
+    queryFn: listActiveEmployees,
+  });
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<SaleDraft>({
     vehicle_id: null,
     customer_id: null,
-    employee_id: employees[0]?.id ?? null,
+    employee_id: null,
+    status: "pending",
+    sale_date: new Date().toISOString().slice(0, 10),
     discount: 0,
     notes: "",
-    payment_method: "financing",
-    payment_status: "pending",
+    payment_method: "pix",
+    payment_status: "paid",
     down_payment: 0,
-    installments_count: 12,
+    installments_count: 1,
     payment_date: new Date().toISOString().slice(0, 10),
   });
 
   const patchDraft = (patch: Partial<SaleDraft>) =>
     setDraft((current) => ({ ...current, ...patch }));
 
+  useEffect(() => {
+    if (draft.employee_id || employees.length === 0) return;
+    patchDraft({ employee_id: employees[0].id });
+  }, [draft.employee_id, employees]);
+
+  const createMutation = useMutation({
+    mutationFn: createSale,
+    onSuccess: async (saleId) => {
+      await queryClient.invalidateQueries({ queryKey: saleKeys.all });
+      await queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
+      await queryClient.invalidateQueries({ queryKey: customerKeys.all });
+      toast.success(`Venda registrada - ${brl(total)}`);
+      await navigate({ to: "/sales/$id", params: { id: String(saleId) } });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao registrar venda.");
+    },
+  });
+
+  const availableVehicles = vehicles.filter((v) => v.status === "available");
   const vehicle = vehicles.find((v) => v.id === draft.vehicle_id);
   const customer = customers.find((c) => c.id === draft.customer_id);
   const employee = employees.find((e) => e.id === draft.employee_id);
   const total = (vehicle?.sale_price ?? 0) - draft.discount;
-  const remaining = Math.max(0, total - draft.down_payment);
-  const installmentValue = draft.installments_count > 0 ? remaining / draft.installments_count : 0;
+  const showFinancingFields = draft.payment_method === "financing";
+  const normalizedDownPayment = showFinancingFields ? Math.min(draft.down_payment, total) : total;
+  const remaining = showFinancingFields ? Math.max(0, total - normalizedDownPayment) : 0;
+  const paymentStatusLabel = getPaymentStatusLabel(draft, total);
 
   const canNext =
     (step === 0 && vehicle) || (step === 1 && customer) || (step === 2 && employee) || step === 3;
 
   const finish = () => {
-    toast.success(`Venda registrada - ${brl(total)}`);
-    navigate({ to: "/sales" });
+    if (!vehicle || !customer || !employee) {
+      toast.error("Selecione veículo, cliente e vendedor.");
+      return;
+    }
+    if (draft.discount > vehicle.sale_price) {
+      toast.error("O desconto não pode ser maior que o valor do veículo.");
+      return;
+    }
+    if (draft.payment_method === "financing" && draft.down_payment > total) {
+      toast.error("A entrada não pode ser maior que o valor final da venda.");
+      return;
+    }
+    createMutation.mutate({
+      vehicleId: vehicle.id,
+      customerId: customer.id,
+      employeeId: employee.id,
+      status: draft.status,
+      saleDate: draft.sale_date,
+      discount: draft.discount,
+      notes: draft.notes,
+      paymentMethod: draft.payment_method,
+      paymentStatus:
+        draft.payment_method !== "financing"
+          ? "paid"
+          : draft.down_payment >= total
+            ? "paid"
+            : draft.down_payment > 0
+              ? "partial"
+              : "pending",
+      downPayment: draft.payment_method === "financing" ? draft.down_payment : total,
+      installmentsCount: 1,
+      paymentDate: draft.payment_date,
+    });
   };
 
   return (
@@ -107,9 +200,16 @@ function NewSale() {
 
       {step === 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {vehicles
-            .filter((v) => v.status === "available")
-            .map((v) => {
+          {loadingVehicles ? (
+            <div className="col-span-full rounded-md border border-border p-6 text-sm text-muted-foreground">
+              Carregando veículos disponíveis...
+            </div>
+          ) : availableVehicles.length === 0 ? (
+            <div className="col-span-full rounded-md border border-border p-6 text-sm text-muted-foreground">
+              Nenhum veículo disponível para venda.
+            </div>
+          ) : (
+            availableVehicles.map((v) => {
               const sel = v.id === draft.vehicle_id;
               return (
                 <button
@@ -134,13 +234,23 @@ function NewSale() {
                   </div>
                 </button>
               );
-            })}
+            })
+          )}
         </div>
       )}
 
       {step === 1 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {customers.map((c) => {
+          {loadingCustomers ? (
+            <div className="col-span-full rounded-md border border-border p-6 text-sm text-muted-foreground">
+              Carregando clientes ativos...
+            </div>
+          ) : customers.length === 0 ? (
+            <div className="col-span-full rounded-md border border-border p-6 text-sm text-muted-foreground">
+              Nenhum cliente ativo disponível para venda.
+            </div>
+          ) : (
+            customers.map((c) => {
             const sel = c.id === draft.customer_id;
             return (
               <button
@@ -163,7 +273,8 @@ function NewSale() {
                 </div>
               </button>
             );
-          })}
+          })
+          )}
         </div>
       )}
 
@@ -181,7 +292,6 @@ function NewSale() {
                 </SelectTrigger>
                 <SelectContent>
                   {employees
-                    .filter((e) => e.active)
                     .map((e) => (
                       <SelectItem key={e.id} value={String(e.id)}>
                         {e.person.name} - {e.position}
@@ -189,8 +299,37 @@ function NewSale() {
                     ))}
                 </SelectContent>
               </Select>
+              {loadingEmployees && (
+                <div className="text-xs text-muted-foreground">Carregando vendedores...</div>
+              )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs uppercase text-muted-foreground">Status da venda</Label>
+                <Select
+                  value={draft.status}
+                  onValueChange={(value) =>
+                    patchDraft({ status: value as SaleDraft["status"] })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">Pendente / reservar veículo</SelectItem>
+                    <SelectItem value="completed">Concluída / vender veículo</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs uppercase text-muted-foreground">Data da venda</Label>
+                <DatePicker
+                  value={draft.sale_date}
+                  onChange={(value) =>
+                    patchDraft({ sale_date: value ?? new Date().toISOString().slice(0, 10) })
+                  }
+                />
+              </div>
               <div className="space-y-1.5">
                 <Label className="text-xs uppercase text-muted-foreground">Valor do veículo</Label>
                 <Input value={brl(vehicle?.sale_price ?? 0)} readOnly />
@@ -223,7 +362,12 @@ function NewSale() {
                   <Select
                     value={draft.payment_method}
                     onValueChange={(value) =>
-                      patchDraft({ payment_method: value as SaleDraft["payment_method"] })
+                      patchDraft({
+                        payment_method: value as SaleDraft["payment_method"],
+                        payment_status: value === "financing" ? "pending" : "paid",
+                        down_payment: 0,
+                        installments_count: 1,
+                      })
                     }
                   >
                     <SelectTrigger>
@@ -234,7 +378,6 @@ function NewSale() {
                       <SelectItem value="financing">Financiamento</SelectItem>
                       <SelectItem value="card">Cartão</SelectItem>
                       <SelectItem value="pix">PIX</SelectItem>
-                      <SelectItem value="trade_in">Troca + diferença</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -242,44 +385,21 @@ function NewSale() {
                   <Label className="text-xs uppercase text-muted-foreground">
                     Status do pagamento
                   </Label>
-                  <Select
-                    value={draft.payment_status}
-                    onValueChange={(value) =>
-                      patchDraft({ payment_status: value as SaleDraft["payment_status"] })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pending">Pendente</SelectItem>
-                      <SelectItem value="partial">Parcial</SelectItem>
-                      <SelectItem value="paid">Quitado</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Input value={paymentStatusLabel} readOnly />
                 </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs uppercase text-muted-foreground">Entrada (R$)</Label>
-                  <Input
-                    type="number"
-                    value={draft.down_payment || ""}
-                    onChange={(e) => patchDraft({ down_payment: Number(e.target.value) || 0 })}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs uppercase text-muted-foreground">Parcelas</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={draft.installments_count || ""}
-                    onChange={(e) =>
-                      patchDraft({ installments_count: Number(e.target.value) || 1 })
-                    }
-                  />
-                </div>
+                {showFinancingFields && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs uppercase text-muted-foreground">Entrada (R$)</Label>
+                    <Input
+                      type="number"
+                      value={draft.down_payment || ""}
+                      onChange={(e) => patchDraft({ down_payment: Number(e.target.value) || 0 })}
+                    />
+                  </div>
+                )}
                 <div className="space-y-1.5 md:col-span-2">
                   <Label className="text-xs uppercase text-muted-foreground">
-                    Data do pagamento
+                    {showFinancingFields ? "Data prevista do repasse" : "Data do pagamento"}
                   </Label>
                   <DatePicker
                     value={draft.payment_date}
@@ -291,10 +411,13 @@ function NewSale() {
 
             <div className="rounded-lg bg-muted p-4 space-y-2">
               <Row label="Valor total" value={brl(total)} />
-              <Row label="Entrada" value={brl(draft.down_payment)} />
-              <Row label="Saldo restante" value={brl(remaining)} />
-              {draft.installments_count > 1 && remaining > 0 && (
-                <Row label={`${draft.installments_count}x de`} value={brl(installmentValue)} />
+              <Row label="Forma de pagamento" value={getPaymentMethodLabel(draft.payment_method)} />
+              <Row label="Status do pagamento" value={paymentStatusLabel} />
+              {showFinancingFields && (
+                <>
+                  <Row label="Entrada" value={brl(normalizedDownPayment)} />
+                  <Row label="Saldo financiado/repasse" value={brl(remaining)} />
+                </>
               )}
               <div className="border-t border-border/60 pt-2 flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Total da venda</span>
@@ -315,6 +438,11 @@ function NewSale() {
             />
             <Row label="Cliente" value={customer?.person.name ?? "-"} />
             <Row label="Vendedor" value={employee?.person.name ?? "-"} />
+            <Row
+              label="Status"
+              value={draft.status === "completed" ? "Concluída" : "Pendente / reservado"}
+            />
+            <Row label="Pagamento" value={`${getPaymentMethodLabel(draft.payment_method)} - ${paymentStatusLabel}`} />
             <Row label="Desconto" value={brl(draft.discount)} />
             <div className="border-t border-border pt-4 flex items-center justify-between">
               <span className="font-display font-semibold">Total</span>
@@ -342,8 +470,9 @@ function NewSale() {
             Próximo <ArrowRight className="h-4 w-4" />
           </Button>
         ) : (
-          <Button onClick={finish}>
-            <Check className="h-4 w-4" /> Confirmar venda
+          <Button onClick={finish} disabled={createMutation.isPending}>
+            <Check className="h-4 w-4" />{" "}
+            {createMutation.isPending ? "Salvando..." : "Confirmar venda"}
           </Button>
         )}
       </div>
