@@ -87,6 +87,7 @@ export type CreateSaleInput = {
   employeeId: number;
   status: SaleStatus;
   saleDate: string;
+  salePrice: number;
   discount: number;
   notes?: string;
   paymentMethod: PaymentMethod;
@@ -396,6 +397,7 @@ const createSaleServer = createServerFn({ method: "POST" })
       employeeId: z.number().int().positive(),
       status: z.enum(["pending", "completed", "canceled"]),
       saleDate: z.string().min(1),
+      salePrice: z.number().positive(),
       discount: z.number().nonnegative(),
       notes: z.string().optional(),
       paymentMethod: z.enum(["cash", "financing", "card", "pix", "trade_in"]),
@@ -439,7 +441,10 @@ const createSaleServer = createServerFn({ method: "POST" })
       throw new Error("Vendedor não encontrado ou inativo.");
     }
 
-    const totalValue = Math.max(0, Number(vehicle.sale_price) - data.discount);
+    const totalValue = data.salePrice - data.discount;
+    if (totalValue <= 0) {
+      throw new Error("O valor final da venda deve ser maior que zero.");
+    }
     const paymentInput = normalizeSalePayment({
       method: data.paymentMethod,
       totalValue,

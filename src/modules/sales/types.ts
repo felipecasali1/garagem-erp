@@ -10,6 +10,7 @@ export type SaleDraft = {
   employee_id: number | null;
   status: SaleStatus;
   sale_date: string;
+  sale_price: number;
   discount: number;
   notes: string;
   payment_method: PaymentMethod;

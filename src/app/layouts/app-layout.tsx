@@ -29,9 +29,9 @@ export function AppLayout() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background px-4">
         <div className="text-center space-y-2">
-          <p className="text-lg font-medium text-foreground">Verificando sua sessão...</p>
+          <p className="text-lg font-medium text-foreground">Carregando o sistema...</p>
           <p className="text-sm text-muted-foreground">
-            Conectando ao sistema para carregar o acesso.
+            Conectando e buscando dados do sistema.
           </p>
         </div>
       </div>

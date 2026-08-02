@@ -81,6 +81,7 @@ function NewSale() {
     employee_id: null,
     status: "pending",
     sale_date: new Date().toISOString().slice(0, 10),
+    sale_price: 0,
     discount: 0,
     notes: "",
     payment_method: "pix",
@@ -116,7 +117,7 @@ function NewSale() {
   const vehicle = vehicles.find((v) => v.id === draft.vehicle_id);
   const customer = customers.find((c) => c.id === draft.customer_id);
   const employee = employees.find((e) => e.id === draft.employee_id);
-  const total = (vehicle?.sale_price ?? 0) - draft.discount;
+  const total = draft.sale_price - draft.discount;
   const showFinancingFields = draft.payment_method === "financing";
   const normalizedDownPayment = showFinancingFields ? Math.min(draft.down_payment, total) : total;
   const remaining = showFinancingFields ? Math.max(0, total - normalizedDownPayment) : 0;
@@ -130,8 +131,12 @@ function NewSale() {
       toast.error("Selecione veículo, cliente e vendedor.");
       return;
     }
-    if (draft.discount > vehicle.sale_price) {
-      toast.error("O desconto não pode ser maior que o valor do veículo.");
+    if (draft.sale_price <= 0) {
+      toast.error("Informe um valor de venda maior que zero.");
+      return;
+    }
+    if (draft.discount >= draft.sale_price) {
+      toast.error("O desconto deve ser menor que o valor de venda.");
       return;
     }
     if (draft.payment_method === "financing" && draft.down_payment > total) {
@@ -144,6 +149,7 @@ function NewSale() {
       employeeId: employee.id,
       status: draft.status,
       saleDate: draft.sale_date,
+      salePrice: draft.sale_price,
       discount: draft.discount,
       notes: draft.notes,
       paymentMethod: draft.payment_method,
@@ -214,7 +220,7 @@ function NewSale() {
               return (
                 <button
                   key={v.id}
-                  onClick={() => patchDraft({ vehicle_id: v.id })}
+                  onClick={() => patchDraft({ vehicle_id: v.id, sale_price: v.sale_price })}
                   className={`text-left rounded-xl border-2 p-4 transition ${
                     sel ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
                   }`}
@@ -331,8 +337,17 @@ function NewSale() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs uppercase text-muted-foreground">Valor do veículo</Label>
+                <Label className="text-xs uppercase text-muted-foreground">Preço anunciado</Label>
                 <Input value={brl(vehicle?.sale_price ?? 0)} readOnly />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs uppercase text-muted-foreground">Valor da venda</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={draft.sale_price || ""}
+                  onChange={(e) => patchDraft({ sale_price: Number(e.target.value) || 0 })}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs uppercase text-muted-foreground">Desconto</Label>
@@ -404,7 +419,9 @@ function NewSale() {
             </div>
 
             <div className="rounded-lg bg-muted p-4 space-y-2">
-              <Row label="Valor total" value={brl(total)} />
+              <Row label="Preço anunciado" value={brl(vehicle?.sale_price ?? 0)} />
+              <Row label="Valor da venda" value={brl(draft.sale_price)} />
+              <Row label="Desconto" value={draft.discount > 0 ? `- ${brl(draft.discount)}` : "-"} />
               <Row label="Forma de pagamento" value={getPaymentMethodLabel(draft.payment_method)} />
               {showFinancingFields && (
                 <>
@@ -444,6 +461,7 @@ function NewSale() {
                   : getPaymentMethodLabel(draft.payment_method)
               }
             />
+            <Row label="Valor da venda" value={brl(draft.sale_price)} />
             <Row label="Desconto" value={brl(draft.discount)} />
             <div className="border-t border-border pt-4 flex items-center justify-between">
               <span className="font-display font-semibold">Total</span>
