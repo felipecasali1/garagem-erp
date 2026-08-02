@@ -1,27 +1,30 @@
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { ArrowLeft, ArrowDownCircle, ArrowUpCircle, Calendar, CheckCircle2, Clock } from "lucide-react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowDownCircle,
+  ArrowLeft,
+  ArrowUpCircle,
+  Calendar,
+  CheckCircle2,
+  Clock,
+  Link2,
+} from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { StatusBadge } from "@/shared/components/status-badge";
+import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { brl, fmtDate } from "@/shared/lib/format";
-import { transactions } from "@/shared/mock-data";
-import { toast } from "sonner";
+import {
+  financialTransactionKeys,
+  getFinancialTransactionById,
+  markFinancialTransactionPaid,
+} from "@/modules/financial/services/transactions";
 
 export const Route = createFileRoute("/_app/financial/transactions/$id")({
   head: () => ({ meta: [{ title: "Transação | GaragemERP" }] }),
   component: TransactionDetail,
-  notFoundComponent: () => (
-    <div className="text-center py-16">
-      <p className="text-muted-foreground">Transação não encontrada.</p>
-      <Button asChild className="mt-4"><Link to="/financial/transactions">Voltar</Link></Button>
-    </div>
-  ),
-  errorComponent: ({ error }) => <div className="p-8 text-destructive">{error.message}</div>,
-  loader: ({ params }) => {
-    const t = transactions.find((tr) => tr.id === Number(params.id));
-    if (!t) throw notFound();
-    return { transaction: t };
-  },
 });
 
 const categoryLabel: Record<string, string> = {
@@ -34,29 +37,59 @@ const categoryLabel: Record<string, string> = {
 };
 
 function TransactionDetail() {
-  const { transaction: t } = Route.useLoaderData();
-  const isIncome = t.type === "income";
+  const { id } = Route.useParams();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const transactionId = Number(id);
+  const [confirmPaidOpen, setConfirmPaidOpen] = useState(false);
+  const {
+    data: t,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: financialTransactionKeys.detail(transactionId),
+    queryFn: () => getFinancialTransactionById(transactionId),
+    enabled: Number.isFinite(transactionId),
+  });
 
-  // Synthetic installments for demo when amount > 50k and pending
-  const installments =
-    t.status === "pending" && t.amount > 50000
-      ? Array.from({ length: 4 }, (_, i) => {
-        const amount = t.amount / 4;
-        const [y, m, d] = t.transaction_date.split("-").map(Number);
-        const dueMonth = m + i;
-        const dueDate = `${y + Math.floor((dueMonth - 1) / 12)}-${String(((dueMonth - 1) % 12) + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-        return {
-          number: i + 1,
-          amount,
-          due_date: dueDate,
-          status: i === 0 ? ("paid" as const) : ("pending" as const),
-        };
-      })
-      : [];
+  const markPaidMutation = useMutation({
+    mutationFn: markFinancialTransactionPaid,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
+      await queryClient.invalidateQueries({
+        queryKey: financialTransactionKeys.detail(transactionId),
+      });
+      setConfirmPaidOpen(false);
+      toast.success("Transação marcada como paga");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao marcar transação como paga.");
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="max-w-4xl mx-auto py-16 text-sm text-muted-foreground">
+        Carregando transação...
+      </div>
+    );
+  }
+
+  if (error || !t) {
+    return (
+      <div className="max-w-2xl mx-auto text-center py-20">
+        <h2 className="font-display text-xl mb-2">Transação não encontrada</h2>
+        <Button onClick={() => navigate({ to: "/financial/transactions" })}>Voltar</Button>
+      </div>
+    );
+  }
+
+  const isIncome = t.type === "income";
+  const canMarkPaid = t.status === "pending" || t.status === "overdue";
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="sm" asChild>
           <Link to="/financial/transactions">
             <ArrowLeft className="h-4 w-4" /> Transações
@@ -66,20 +99,42 @@ function TransactionDetail() {
           Transação #{t.id}
         </h1>
         <StatusBadge kind="transaction" value={t.status} />
+        {canMarkPaid && (
+          <Button
+            onClick={() => setConfirmPaidOpen(true)}
+            disabled={markPaidMutation.isPending}
+          >
+            <CheckCircle2 className="h-4 w-4" /> Marcar como paga
+          </Button>
+        )}
       </div>
 
       <Card>
         <CardContent className="p-6">
-          <div className="flex items-center gap-4">
-            <div className={`h-14 w-14 rounded-full flex items-center justify-center ${isIncome ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
-              {isIncome ? <ArrowUpCircle className="h-7 w-7" /> : <ArrowDownCircle className="h-7 w-7" />}
+          <div className="flex flex-col gap-4 md:flex-row md:items-center">
+            <div
+              className={`h-14 w-14 rounded-full flex items-center justify-center ${
+                isIncome ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
+              }`}
+            >
+              {isIncome ? (
+                <ArrowUpCircle className="h-7 w-7" />
+              ) : (
+                <ArrowDownCircle className="h-7 w-7" />
+              )}
             </div>
-            <div className="flex-1">
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">{categoryLabel[t.category]}</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                {categoryLabel[t.category]}
+              </div>
               <div className="font-display font-semibold text-lg">{t.description}</div>
-              <div className="text-sm text-muted-foreground">{t.related}</div>
+              <div className="text-sm text-muted-foreground">{t.related ?? "-"}</div>
             </div>
-            <div className={`text-right font-display text-3xl font-semibold ${isIncome ? "text-success" : "text-destructive"}`}>
+            <div
+              className={`font-display text-3xl font-semibold ${
+                isIncome ? "text-success" : "text-destructive"
+              }`}
+            >
               {isIncome ? "+" : "-"} {brl(t.amount)}
             </div>
           </div>
@@ -89,56 +144,54 @@ function TransactionDetail() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <InfoCard icon={Calendar} label="Data lançamento" value={fmtDate(t.transaction_date)} />
         <InfoCard icon={Clock} label="Vencimento" value={t.due_date ? fmtDate(t.due_date) : "-"} />
-        <InfoCard
-          icon={CheckCircle2}
-          label="Pago em"
-          value={t.status === "paid" ? fmtDate(t.transaction_date) : "-"}
-        />
+        <InfoCard icon={CheckCircle2} label="Pago em" value={t.paid_at ? fmtDate(t.paid_at) : "-"} />
       </div>
 
-      {installments.length > 0 && (
+      {(t.sale_id || t.purchase_id || t.employee_id || t.commission_id) && (
         <Card>
-          <CardContent className="p-0">
-            <div className="px-6 py-4 border-b border-border">
-              <h3 className="font-display font-semibold">Parcelamento</h3>
-              <p className="text-xs text-muted-foreground">{installments.length} parcelas</p>
+          <CardContent className="p-6 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Link2 className="h-4 w-4" /> Vínculos
             </div>
-            <div className="divide-y divide-border">
-              {installments.map((inst) => (
-                <div key={inst.number} className="flex items-center gap-4 px-6 py-3">
-                  <div className="font-mono text-xs text-muted-foreground w-12">
-                    {inst.number}/{installments.length}
-                  </div>
-                  <div className="flex-1 text-sm">
-                    Vence em <span className="font-medium">{fmtDate(inst.due_date)}</span>
-                  </div>
-                  <div className="font-semibold w-32 text-right">{brl(inst.amount)}</div>
-                  <StatusBadge kind="transaction" value={inst.status} />
-                  {inst.status === "pending" && (
-                    <Button size="sm" variant="outline" onClick={() => toast.success(`Parcela ${inst.number} marcada como paga`)}>
-                      Marcar paga
-                    </Button>
-                  )}
-                </div>
-              ))}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              {t.sale_id && (
+                <LinkedRecord label="Venda" to="/sales/$id" id={t.sale_id} />
+              )}
+              {t.purchase_id && (
+                <LinkedRecord label="Compra" to="/purchases/$id" id={t.purchase_id} />
+              )}
+              {t.employee_id && (
+                <LinkedRecord label="Funcionário" to="/employees/$id" id={t.employee_id} />
+              )}
+              {t.commission_id && <PlainRecord label="Comissão" id={t.commission_id} />}
             </div>
           </CardContent>
         </Card>
       )}
 
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={() => toast.info("Exportar em breve")}>Exportar</Button>
-        {t.status !== "paid" && (
-          <Button onClick={() => toast.success("Transação marcada como paga")}>
-            <CheckCircle2 className="h-4 w-4" /> Marcar como paga
-          </Button>
-        )}
-      </div>
+      <ConfirmActionDialog
+        open={confirmPaidOpen}
+        onOpenChange={setConfirmPaidOpen}
+        title="Marcar transação como paga?"
+        description="A transação será baixada com a data atual e continuará preservada no histórico financeiro."
+        confirmLabel={markPaidMutation.isPending ? "Marcando..." : "Marcar como paga"}
+        confirmDisabled={markPaidMutation.isPending}
+        confirmVariant="default"
+        onConfirm={() => markPaidMutation.mutate(t.id)}
+      />
     </div>
   );
 }
 
-function InfoCard({ icon: Icon, label, value }: { icon: typeof Calendar; label: string; value: string }) {
+function InfoCard({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof Calendar;
+  label: string;
+  value: string;
+}) {
   return (
     <Card>
       <CardContent className="p-4 flex items-center gap-3">
@@ -151,5 +204,31 @@ function InfoCard({ icon: Icon, label, value }: { icon: typeof Calendar; label: 
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function LinkedRecord({
+  label,
+  to,
+  id,
+}: {
+  label: string;
+  to: "/sales/$id" | "/purchases/$id" | "/employees/$id";
+  id: number;
+}) {
+  return (
+    <Button variant="outline" size="sm" asChild>
+      <Link to={to} params={{ id: String(id) }}>
+        {label} #{id}
+      </Link>
+    </Button>
+  );
+}
+
+function PlainRecord({ label, id }: { label: string; id: number }) {
+  return (
+    <div className="flex h-9 items-center rounded-md border border-border px-3 text-sm">
+      {label} #{id}
+    </div>
   );
 }

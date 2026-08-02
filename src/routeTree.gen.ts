@@ -36,6 +36,7 @@ import { Route as AppSalesIdRouteImport } from './routes/_app.sales.$id'
 import { Route as AppPurchasesNewRouteImport } from './routes/_app.purchases.new'
 import { Route as AppPurchasesIdRouteImport } from './routes/_app.purchases.$id'
 import { Route as AppFinancialTransactionsRouteImport } from './routes/_app.financial.transactions'
+import { Route as AppFinancialReceivablesRouteImport } from './routes/_app.financial.receivables'
 import { Route as AppFinancialBillsRouteImport } from './routes/_app.financial.bills'
 import { Route as AppEmployeesNewRouteImport } from './routes/_app.employees.new'
 import { Route as AppEmployeesIdRouteImport } from './routes/_app.employees.$id'
@@ -183,6 +184,11 @@ const AppFinancialTransactionsRoute =
     path: '/transactions',
     getParentRoute: () => AppFinancialRoute,
   } as any)
+const AppFinancialReceivablesRoute = AppFinancialReceivablesRouteImport.update({
+  id: '/receivables',
+  path: '/receivables',
+  getParentRoute: () => AppFinancialRoute,
+} as any)
 const AppFinancialBillsRoute = AppFinancialBillsRouteImport.update({
   id: '/bills',
   path: '/bills',
@@ -257,6 +263,7 @@ export interface FileRoutesByFullPath {
   '/employees/$id': typeof AppEmployeesIdRoute
   '/employees/new': typeof AppEmployeesNewRoute
   '/financial/bills': typeof AppFinancialBillsRoute
+  '/financial/receivables': typeof AppFinancialReceivablesRoute
   '/financial/transactions': typeof AppFinancialTransactionsRouteWithChildren
   '/purchases/$id': typeof AppPurchasesIdRoute
   '/purchases/new': typeof AppPurchasesNewRoute
@@ -289,6 +296,7 @@ export interface FileRoutesByTo {
   '/employees/$id': typeof AppEmployeesIdRoute
   '/employees/new': typeof AppEmployeesNewRoute
   '/financial/bills': typeof AppFinancialBillsRoute
+  '/financial/receivables': typeof AppFinancialReceivablesRoute
   '/purchases/$id': typeof AppPurchasesIdRoute
   '/purchases/new': typeof AppPurchasesNewRoute
   '/sales/$id': typeof AppSalesIdRoute
@@ -329,6 +337,7 @@ export interface FileRoutesById {
   '/_app/employees/$id': typeof AppEmployeesIdRoute
   '/_app/employees/new': typeof AppEmployeesNewRoute
   '/_app/financial/bills': typeof AppFinancialBillsRoute
+  '/_app/financial/receivables': typeof AppFinancialReceivablesRoute
   '/_app/financial/transactions': typeof AppFinancialTransactionsRouteWithChildren
   '/_app/purchases/$id': typeof AppPurchasesIdRoute
   '/_app/purchases/new': typeof AppPurchasesNewRoute
@@ -370,6 +379,7 @@ export interface FileRouteTypes {
     | '/employees/$id'
     | '/employees/new'
     | '/financial/bills'
+    | '/financial/receivables'
     | '/financial/transactions'
     | '/purchases/$id'
     | '/purchases/new'
@@ -402,6 +412,7 @@ export interface FileRouteTypes {
     | '/employees/$id'
     | '/employees/new'
     | '/financial/bills'
+    | '/financial/receivables'
     | '/purchases/$id'
     | '/purchases/new'
     | '/sales/$id'
@@ -441,6 +452,7 @@ export interface FileRouteTypes {
     | '/_app/employees/$id'
     | '/_app/employees/new'
     | '/_app/financial/bills'
+    | '/_app/financial/receivables'
     | '/_app/financial/transactions'
     | '/_app/purchases/$id'
     | '/_app/purchases/new'
@@ -661,6 +673,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppFinancialTransactionsRouteImport
       parentRoute: typeof AppFinancialRoute
     }
+    '/_app/financial/receivables': {
+      id: '/_app/financial/receivables'
+      path: '/receivables'
+      fullPath: '/financial/receivables'
+      preLoaderRoute: typeof AppFinancialReceivablesRouteImport
+      parentRoute: typeof AppFinancialRoute
+    }
     '/_app/financial/bills': {
       id: '/_app/financial/bills'
       path: '/bills'
@@ -795,12 +814,14 @@ const AppFinancialTransactionsRouteWithChildren =
 
 interface AppFinancialRouteChildren {
   AppFinancialBillsRoute: typeof AppFinancialBillsRoute
+  AppFinancialReceivablesRoute: typeof AppFinancialReceivablesRoute
   AppFinancialTransactionsRoute: typeof AppFinancialTransactionsRouteWithChildren
   AppFinancialIndexRoute: typeof AppFinancialIndexRoute
 }
 
 const AppFinancialRouteChildren: AppFinancialRouteChildren = {
   AppFinancialBillsRoute: AppFinancialBillsRoute,
+  AppFinancialReceivablesRoute: AppFinancialReceivablesRoute,
   AppFinancialTransactionsRoute: AppFinancialTransactionsRouteWithChildren,
   AppFinancialIndexRoute: AppFinancialIndexRoute,
 }

@@ -17,8 +17,8 @@ Este backlog organiza os próximos passos por fluxo de negócio. A ideia é mant
 
 ### Próxima grande etapa
 
-1. `task-vendas.md`
-2. `task-financeiro.md`
+1. `task-financeiro.md`
+2. `task-vendas.md`
 3. `task-dashboard-e-relatorios.md`
 4. `task-cadastros-base.md`
 5. `task-configuracoes.md`

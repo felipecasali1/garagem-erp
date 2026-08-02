@@ -308,6 +308,86 @@ function normalizeSalePayment({
   };
 }
 
+async function createSaleFinancialTransactions({
+  supabaseAdmin,
+  sale,
+  vehicle,
+  payment,
+}: {
+  supabaseAdmin: Awaited<typeof import("@/shared/supabase/server")>["supabaseAdmin"];
+  sale: {
+    id: number;
+    total_value: number;
+    sale_date: string;
+  };
+  vehicle: { brand: string; model: string; plate: string | null };
+  payment: {
+    payment_method: PaymentMethod;
+    payment_status: PaymentStatus;
+    down_payment: number;
+    remaining_amount: number;
+    payment_date?: string | null;
+  };
+}) {
+  const { data: existingTransaction, error: existingTransactionError } = await supabaseAdmin
+    .from("financial_transactions")
+    .select("id")
+    .eq("sale_id", sale.id)
+    .limit(1);
+  if (existingTransactionError) throw new Error(existingTransactionError.message);
+  if ((existingTransaction ?? []).length > 0) return;
+
+  const baseTransaction = {
+    type: "income" as const,
+    category: "vehicle_sale" as const,
+    transaction_date: sale.sale_date,
+    related: vehicle.plate,
+    sale_id: sale.id,
+  };
+
+  if (payment.payment_method === "financing") {
+    const transactions = [];
+
+    if (payment.down_payment > 0) {
+      transactions.push({
+        ...baseTransaction,
+        status: "paid" as const,
+        amount: payment.down_payment,
+        paid_at: new Date().toISOString(),
+        description: `Entrada venda #${sale.id} - ${vehicle.brand} ${vehicle.model}`,
+      });
+    }
+
+    if (payment.remaining_amount > 0) {
+      transactions.push({
+        ...baseTransaction,
+        status: "pending" as const,
+        amount: payment.remaining_amount,
+        due_date: payment.payment_date ?? sale.sale_date,
+        paid_at: null,
+        description: `Repasse financiamento venda #${sale.id} - ${vehicle.brand} ${vehicle.model}`,
+      });
+    }
+
+    if (transactions.length > 0) {
+      const { error: transactionError } = await supabaseAdmin
+        .from("financial_transactions")
+        .insert(transactions);
+      if (transactionError) throw new Error(transactionError.message);
+    }
+    return;
+  }
+
+  const { error: transactionError } = await supabaseAdmin.from("financial_transactions").insert({
+    ...baseTransaction,
+    status: payment.payment_status === "paid" ? "paid" : "pending",
+    amount: sale.total_value,
+    paid_at: payment.payment_status === "paid" ? new Date().toISOString() : null,
+    description: `Venda #${sale.id} - ${vehicle.brand} ${vehicle.model}`,
+  });
+  if (transactionError) throw new Error(transactionError.message);
+}
+
 const createSaleServer = createServerFn({ method: "POST" })
   .inputValidator(
     z.object({
@@ -408,21 +488,22 @@ const createSaleServer = createServerFn({ method: "POST" })
     if (vehicleUpdateError) throw new Error(vehicleUpdateError.message);
 
     if (data.status === "completed") {
-      const transactionStatus = paymentInput.paymentStatus === "paid" ? "paid" : "pending";
-      const { error: transactionError } = await supabaseAdmin
-        .from("financial_transactions")
-        .insert({
-          type: "income",
-          category: "vehicle_sale",
-          status: transactionStatus,
-          amount: totalValue,
-          transaction_date: data.saleDate,
-          paid_at: transactionStatus === "paid" ? new Date().toISOString() : null,
-          description: `Venda #${sale.id} - ${vehicle.brand} ${vehicle.model}`,
-          related: vehicle.plate,
-          sale_id: sale.id,
-        });
-      if (transactionError) throw new Error(transactionError.message);
+      await createSaleFinancialTransactions({
+        supabaseAdmin,
+        sale: {
+          id: sale.id as number,
+          total_value: totalValue,
+          sale_date: data.saleDate,
+        },
+        vehicle,
+        payment: {
+          payment_method: data.paymentMethod,
+          payment_status: paymentInput.paymentStatus,
+          down_payment: paymentInput.downPayment,
+          remaining_amount: paymentInput.remainingAmount,
+          payment_date: paymentInput.paymentDate,
+        },
+      });
 
       const commissionAmount = calculateCommission({
         totalValue,
@@ -456,7 +537,7 @@ async function applyCompletedSale({
   sale,
   vehicle,
   employee,
-  paymentStatus,
+  payment,
 }: {
   supabaseAdmin: Awaited<typeof import("@/shared/supabase/server")>["supabaseAdmin"];
   sale: {
@@ -468,7 +549,13 @@ async function applyCompletedSale({
   };
   vehicle: { id: number; brand: string; model: string; plate: string | null };
   employee: { commission_rate: number; commission_type: CommissionType };
-  paymentStatus: PaymentStatus;
+  payment: {
+    payment_method: PaymentMethod;
+    payment_status: PaymentStatus;
+    down_payment: number;
+    remaining_amount: number;
+    payment_date?: string | null;
+  };
 }) {
   const { error: vehicleUpdateError } = await supabaseAdmin
     .from("vehicles")
@@ -476,30 +563,7 @@ async function applyCompletedSale({
     .eq("id", sale.vehicle_id);
   if (vehicleUpdateError) throw new Error(vehicleUpdateError.message);
 
-  const { data: existingTransaction, error: existingTransactionError } = await supabaseAdmin
-    .from("financial_transactions")
-    .select("id")
-    .eq("sale_id", sale.id)
-    .maybeSingle();
-  if (existingTransactionError) throw new Error(existingTransactionError.message);
-
-  if (!existingTransaction) {
-    const transactionStatus = paymentStatus === "paid" ? "paid" : "pending";
-    const { error: transactionError } = await supabaseAdmin
-      .from("financial_transactions")
-      .insert({
-        type: "income",
-        category: "vehicle_sale",
-        status: transactionStatus,
-        amount: sale.total_value,
-        transaction_date: sale.sale_date,
-        paid_at: transactionStatus === "paid" ? new Date().toISOString() : null,
-        description: `Venda #${sale.id} - ${vehicle.brand} ${vehicle.model}`,
-        related: vehicle.plate,
-        sale_id: sale.id,
-      });
-    if (transactionError) throw new Error(transactionError.message);
-  }
+  await createSaleFinancialTransactions({ supabaseAdmin, sale, vehicle, payment });
 
   const commissionAmount = calculateCommission({
     totalValue: sale.total_value,
@@ -572,7 +636,7 @@ const completeSaleServer = createServerFn({ method: "POST" })
 
     const { data: payment, error: paymentError } = await supabaseAdmin
       .from("sale_payments")
-      .select("payment_status")
+      .select("payment_method, payment_status, down_payment, remaining_amount, payment_date")
       .eq("sale_id", sale.id)
       .limit(1)
       .maybeSingle();
@@ -592,7 +656,13 @@ const completeSaleServer = createServerFn({ method: "POST" })
         commission_rate: Number(employee.commission_rate),
         commission_type: employee.commission_type as CommissionType,
       },
-      paymentStatus: (payment?.payment_status as PaymentStatus | undefined) ?? "pending",
+      payment: {
+        payment_method: (payment?.payment_method as PaymentMethod | undefined) ?? "financing",
+        payment_status: (payment?.payment_status as PaymentStatus | undefined) ?? "pending",
+        down_payment: Number(payment?.down_payment ?? 0),
+        remaining_amount: Number(payment?.remaining_amount ?? sale.total_value),
+        payment_date: payment?.payment_date,
+      },
     });
 
     return sale.id as number;

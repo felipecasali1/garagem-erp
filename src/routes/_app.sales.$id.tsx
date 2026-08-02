@@ -22,11 +22,26 @@ import { cancelSale, completeSale, getSaleById, saleKeys } from "@/modules/sales
 import { vehicleKeys } from "@/modules/vehicles/services/vehicles";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
 import { formatDocument, formatPhone } from "@/shared/lib/field-format";
+import type { PaymentMethod, PaymentStatus } from "@/shared/types/domain";
 
 export const Route = createFileRoute("/_app/sales/$id")({
   head: () => ({ meta: [{ title: "Venda | GaragemERP" }] }),
   component: SaleDetail,
 });
+
+const paymentMethodLabel: Record<PaymentMethod, string> = {
+  cash: "À vista",
+  financing: "Financiamento",
+  card: "Cartão",
+  pix: "PIX",
+  trade_in: "Troca + diferença",
+};
+
+const paymentStatusLabel: Record<PaymentStatus, string> = {
+  pending: "Pendente",
+  partial: "Parcial",
+  paid: "Quitado",
+};
 
 function SaleDetail() {
   const { id } = Route.useParams();
@@ -205,6 +220,56 @@ function SaleDetail() {
                   className={profit - commission >= 0 ? "text-success" : "text-destructive"}
                 />
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center gap-2 mb-4 text-sm font-medium text-muted-foreground">
+                <Receipt className="h-4 w-4" /> Pagamento
+              </div>
+              {sale.payment ? (
+                <div className="space-y-3 text-sm">
+                  <Row
+                    label="Forma"
+                    value={paymentMethodLabel[sale.payment.payment_method]}
+                  />
+                  <Row
+                    label="Status"
+                    value={paymentStatusLabel[sale.payment.payment_status]}
+                    className={
+                      sale.payment.payment_status === "paid"
+                        ? "text-success"
+                        : sale.payment.payment_status === "partial"
+                          ? "text-warning"
+                          : "text-muted-foreground"
+                    }
+                  />
+                  <Separator />
+                  <Row label="Entrada / recebido" value={brl(sale.payment.down_payment)} />
+                  <Row
+                    label={
+                      sale.payment.payment_method === "financing"
+                        ? "Saldo financiado/repasse"
+                        : "Saldo restante"
+                    }
+                    value={brl(sale.payment.remaining_amount)}
+                  />
+                  <Row
+                    label={
+                      sale.payment.payment_method === "financing"
+                        ? "Data prevista do repasse"
+                        : "Data do pagamento"
+                    }
+                    value={sale.payment.payment_date ? fmtDate(sale.payment.payment_date) : "-"}
+                    muted
+                  />
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  Nenhuma informação de pagamento registrada para esta venda.
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

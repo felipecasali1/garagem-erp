@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -17,13 +19,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/components/ui/select";
-import { Switch } from "@/shared/components/ui/switch";
 import { DatePicker } from "@/shared/components/ui/date-picker";
-import { employees } from "@/shared/mock-data";
+import {
+  createManualFinancialTransaction,
+  financialTransactionKeys,
+  type ManualFinancialTransactionDraft,
+} from "@/modules/financial/services/transactions";
+import { employeeKeys, listActiveEmployees } from "@/modules/employees/services/employees";
 import { brl } from "@/shared/lib/format";
-import { toast } from "sonner";
 
 export type QuickActionKind = "income" | "expense" | "fixed_cost" | "salary" | null;
+
+type BasicStatus = "pending" | "paid";
+type ExpenseCategory = "commission" | "fixed_cost" | "other";
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function parseAmount(value: string) {
+  return Number(value.replace(",", "."));
+}
 
 export function FinancialActionDialog({
   kind,
@@ -41,7 +57,7 @@ export function FinancialActionDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onOpenChange(null)}>
+    <Dialog open={open} onOpenChange={(value) => !value && onOpenChange(null)}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{kind ? titles[kind] : ""}</DialogTitle>
@@ -53,6 +69,22 @@ export function FinancialActionDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function useCreateTransaction(onDone: () => void, successMessage: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: createManualFinancialTransaction,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
+      toast.success(successMessage);
+      onDone();
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao salvar lançamento.");
+    },
+  });
 }
 
 function Field({
@@ -75,172 +107,236 @@ function Field({
 }
 
 function IncomeForm({ onDone }: { onDone: () => void }) {
+  const mutation = useCreateTransaction(onDone, "Receita registrada");
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [status, setStatus] = useState<BasicStatus>("paid");
+  const [transactionDate, setTransactionDate] = useState(todayIso());
+  const [dueDate, setDueDate] = useState<string | undefined>();
+  const [related, setRelated] = useState("");
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const parsedAmount = parseAmount(amount);
+    if (!description.trim() || !transactionDate || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      toast.error("Preencha descrição, data e valor corretamente.");
+      return;
+    }
+
+    mutation.mutate({
+      type: "income",
+      category: "other",
+      status,
+      amount: parsedAmount,
+      transaction_date: transactionDate,
+      due_date: status === "pending" ? dueDate : undefined,
+      description,
+      related,
+    });
+  };
+
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        toast.success("Receita registrada");
-        onDone();
-      }}
-      className="space-y-4"
-    >
+    <form onSubmit={handleSubmit} className="space-y-4">
       <Field label="Descrição" required>
-        <Input required placeholder="Ex.: Venda à vista veículo" />
+        <Input
+          required
+          placeholder="Ex.: Reembolso, ajuste de caixa"
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+        />
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Valor (R$)" required>
-          <Input type="number" step="0.01" required placeholder="0,00" />
+          <Input
+            type="number"
+            step="0.01"
+            min="0.01"
+            required
+            placeholder="0,00"
+            value={amount}
+            onChange={(event) => setAmount(event.target.value)}
+          />
         </Field>
-        <Field label="Categoria">
-          <Select defaultValue="vehicle_sale">
+        <Field label="Status">
+          <Select value={status} onValueChange={(value) => setStatus(value as BasicStatus)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="vehicle_sale">Venda de veículo</SelectItem>
-              <SelectItem value="other">Outros</SelectItem>
+              <SelectItem value="paid">Recebida</SelectItem>
+              <SelectItem value="pending">A receber</SelectItem>
             </SelectContent>
           </Select>
         </Field>
         <Field label="Data" required>
-          <DatePicker required />
+          <DatePicker value={transactionDate} onChange={(value) => setTransactionDate(value ?? "")} required />
         </Field>
         <Field label="Vencimento">
-          <DatePicker />
+          <DatePicker
+            value={dueDate}
+            onChange={setDueDate}
+            placeholder={status === "pending" ? "Data prevista" : "Opcional"}
+          />
         </Field>
       </div>
-      <Field label="Observações">
-        <Textarea rows={2} />
+      <Field label="Referência">
+        <Textarea
+          rows={2}
+          placeholder="Origem ou observação do lançamento"
+          value={related}
+          onChange={(event) => setRelated(event.target.value)}
+        />
       </Field>
       <DialogFooter>
-        <Button type="submit">Salvar</Button>
+        <Button type="submit" disabled={mutation.isPending}>
+          {mutation.isPending ? "Salvando..." : "Salvar"}
+        </Button>
       </DialogFooter>
     </form>
   );
 }
 
 function ExpenseForm({ onDone }: { onDone: () => void }) {
-  const [installments, setInstallments] = useState(false);
+  const mutation = useCreateTransaction(onDone, "Despesa registrada");
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [category, setCategory] = useState<ExpenseCategory>("other");
+  const [status, setStatus] = useState<BasicStatus>("pending");
+  const [transactionDate, setTransactionDate] = useState(todayIso());
+  const [dueDate, setDueDate] = useState<string | undefined>();
+  const [related, setRelated] = useState("");
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const parsedAmount = parseAmount(amount);
+    if (!description.trim() || !transactionDate || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      toast.error("Preencha descrição, data e valor corretamente.");
+      return;
+    }
+
+    mutation.mutate({
+      type: "expense",
+      category,
+      status,
+      amount: parsedAmount,
+      transaction_date: transactionDate,
+      due_date: dueDate,
+      description,
+      related,
+    });
+  };
+
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        toast.success("Despesa registrada");
-        onDone();
-      }}
-      className="space-y-4"
-    >
+    <form onSubmit={handleSubmit} className="space-y-4">
       <Field label="Descrição" required>
-        <Input required />
+        <Input
+          required
+          placeholder="Ex.: Material de limpeza"
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+        />
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Valor (R$)" required>
-          <Input type="number" step="0.01" required placeholder="0,00" />
+          <Input
+            type="number"
+            step="0.01"
+            min="0.01"
+            required
+            placeholder="0,00"
+            value={amount}
+            onChange={(event) => setAmount(event.target.value)}
+          />
         </Field>
         <Field label="Categoria">
-          <Select defaultValue="other">
+          <Select value={category} onValueChange={(value) => setCategory(value as ExpenseCategory)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="fixed_cost">Custo fixo</SelectItem>
-              <SelectItem value="vehicle_purchase">Compra de veículo</SelectItem>
               <SelectItem value="commission">Comissão</SelectItem>
               <SelectItem value="other">Outros</SelectItem>
             </SelectContent>
           </Select>
         </Field>
+        <Field label="Status">
+          <Select value={status} onValueChange={(value) => setStatus(value as BasicStatus)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="pending">A pagar</SelectItem>
+              <SelectItem value="paid">Paga</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
         <Field label="Data" required>
-          <DatePicker required />
+          <DatePicker value={transactionDate} onChange={(value) => setTransactionDate(value ?? "")} required />
         </Field>
         <Field label="Vencimento">
-          <DatePicker />
+          <DatePicker value={dueDate} onChange={setDueDate} placeholder="Opcional" />
         </Field>
       </div>
-      <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
-        <span className="text-sm">Parcelar pagamento</span>
-        <Switch checked={installments} onCheckedChange={setInstallments} />
-      </div>
-      {installments && (
-        <Field label="Número de parcelas">
-          <Input type="number" min={2} max={36} placeholder="2" />
-        </Field>
-      )}
+      <Field label="Referência">
+        <Textarea
+          rows={2}
+          placeholder="Fornecedor, origem ou observação"
+          value={related}
+          onChange={(event) => setRelated(event.target.value)}
+        />
+      </Field>
       <DialogFooter>
-        <Button type="submit">Salvar</Button>
+        <Button type="submit" disabled={mutation.isPending}>
+          {mutation.isPending ? "Salvando..." : "Salvar"}
+        </Button>
       </DialogFooter>
     </form>
   );
 }
 
 function FixedCostForm({ onDone }: { onDone: () => void }) {
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        toast.success("Custo fixo registrado");
-        onDone();
-      }}
-      className="space-y-4"
-    >
-      <Field label="Descrição" required>
-        <Select defaultValue="rent">
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="rent">Aluguel</SelectItem>
-            <SelectItem value="energy">Energia</SelectItem>
-            <SelectItem value="water">Água</SelectItem>
-            <SelectItem value="internet">Internet</SelectItem>
-            <SelectItem value="other">Outros</SelectItem>
-          </SelectContent>
-        </Select>
-      </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Valor (R$)" required>
-          <Input type="number" step="0.01" required placeholder="0,00" />
-        </Field>
-        <Field label="Dia do mês" required>
-          <Input type="number" min={1} max={31} required placeholder="1" />
-        </Field>
-      </div>
-      <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
-        <span className="text-sm">Recorrência mensal</span>
-        <Switch defaultChecked />
-      </div>
-      <DialogFooter>
-        <Button type="submit">Salvar</Button>
-      </DialogFooter>
-    </form>
-  );
-}
+  const mutation = useCreateTransaction(onDone, "Custo fixo registrado");
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [status, setStatus] = useState<BasicStatus>("pending");
+  const [transactionDate, setTransactionDate] = useState(todayIso());
+  const [dueDate, setDueDate] = useState<string | undefined>();
+  const [related, setRelated] = useState("");
 
-function SalaryForm({ onDone }: { onDone: () => void }) {
-  const [employeeId, setEmployeeId] = useState(String(employees[0].id));
-  const employee = employees.find((e) => String(e.id) === employeeId);
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const parsedAmount = parseAmount(amount);
+    if (!description.trim() || !transactionDate || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      toast.error("Preencha descrição, data e valor corretamente.");
+      return;
+    }
+
+    mutation.mutate({
+      type: "expense",
+      category: "fixed_cost",
+      status,
+      amount: parsedAmount,
+      transaction_date: transactionDate,
+      due_date: dueDate,
+      description,
+      related,
+    });
+  };
+
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        toast.success(`Salário de ${employee?.person.name} pago`);
-        onDone();
-      }}
-      className="space-y-4"
-    >
-      <Field label="Funcionário" required>
-        <Select value={employeeId} onValueChange={setEmployeeId}>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <Field label="Descrição" required>
+        <Select value={description} onValueChange={setDescription}>
           <SelectTrigger>
-            <SelectValue />
+            <SelectValue placeholder="Selecione o custo" />
           </SelectTrigger>
           <SelectContent>
-            {employees
-              .filter((e) => e.active)
-              .map((e) => (
-                <SelectItem key={e.id} value={String(e.id)}>
-                  {e.person.name} - {e.position}
-                </SelectItem>
-              ))}
+            <SelectItem value="Aluguel">Aluguel</SelectItem>
+            <SelectItem value="Energia">Energia</SelectItem>
+            <SelectItem value="Água">Água</SelectItem>
+            <SelectItem value="Internet">Internet</SelectItem>
+            <SelectItem value="Outros custos fixos">Outros</SelectItem>
           </SelectContent>
         </Select>
       </Field>
@@ -249,25 +345,151 @@ function SalaryForm({ onDone }: { onDone: () => void }) {
           <Input
             type="number"
             step="0.01"
+            min="0.01"
             required
-            defaultValue={employee?.salary ?? undefined}
-            key={employeeId}
+            placeholder="0,00"
+            value={amount}
+            onChange={(event) => setAmount(event.target.value)}
+          />
+        </Field>
+        <Field label="Status">
+          <Select value={status} onValueChange={(value) => setStatus(value as BasicStatus)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="pending">A pagar</SelectItem>
+              <SelectItem value="paid">Pago</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Data" required>
+          <DatePicker value={transactionDate} onChange={(value) => setTransactionDate(value ?? "")} required />
+        </Field>
+        <Field label="Vencimento">
+          <DatePicker value={dueDate} onChange={setDueDate} placeholder="Opcional" />
+        </Field>
+      </div>
+      <Field label="Referência">
+        <Textarea
+          rows={2}
+          placeholder="Ex.: competência, fornecedor ou observação"
+          value={related}
+          onChange={(event) => setRelated(event.target.value)}
+        />
+      </Field>
+      <DialogFooter>
+        <Button type="submit" disabled={mutation.isPending}>
+          {mutation.isPending ? "Salvando..." : "Salvar"}
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+function SalaryForm({ onDone }: { onDone: () => void }) {
+  const mutation = useCreateTransaction(onDone, "Salário registrado");
+  const { data: employees = [], isLoading } = useQuery({
+    queryKey: employeeKeys.active,
+    queryFn: listActiveEmployees,
+  });
+  const [employeeId, setEmployeeId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [referenceMonth, setReferenceMonth] = useState(todayIso().slice(0, 7));
+  const [transactionDate, setTransactionDate] = useState(todayIso());
+  const [related, setRelated] = useState("");
+  const currentEmployeeId = employeeId || String(employees[0]?.id ?? "");
+  const employee = employees.find((entry) => String(entry.id) === currentEmployeeId);
+
+  useEffect(() => {
+    if (!employee || amount) return;
+    setAmount(String(employee.salary));
+  }, [amount, employee]);
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const parsedAmount = parseAmount(amount);
+    if (!employee || !transactionDate || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      toast.error("Selecione um funcionário e preencha o valor corretamente.");
+      return;
+    }
+
+    mutation.mutate({
+      type: "expense",
+      category: "salary",
+      status: "paid",
+      amount: parsedAmount,
+      transaction_date: transactionDate,
+      description: `Salário - ${employee.person.name}`,
+      related: related || `Referência ${referenceMonth}`,
+      employee_id: employee.id,
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <Field label="Funcionário" required>
+        <Select
+          value={currentEmployeeId}
+          onValueChange={(value) => {
+            setEmployeeId(value);
+            const selected = employees.find((entry) => String(entry.id) === value);
+            setAmount(selected ? String(selected.salary) : "");
+          }}
+          disabled={isLoading || employees.length === 0}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder={isLoading ? "Carregando..." : "Selecione"} />
+          </SelectTrigger>
+          <SelectContent>
+            {employees.map((entry) => (
+              <SelectItem key={entry.id} value={String(entry.id)}>
+                {entry.person.name} - {entry.position}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Valor (R$)" required>
+          <Input
+            type="number"
+            step="0.01"
+            min="0.01"
+            required
+            value={amount}
+            onChange={(event) => setAmount(event.target.value)}
             placeholder="0,00"
           />
         </Field>
         <Field label="Mês de referência" required>
-          <Input type="month" required />
+          <Input
+            type="month"
+            required
+            value={referenceMonth}
+            onChange={(event) => setReferenceMonth(event.target.value)}
+          />
+        </Field>
+        <Field label="Data de pagamento" required>
+          <DatePicker value={transactionDate} onChange={(value) => setTransactionDate(value ?? "")} required />
         </Field>
       </div>
       <div className="rounded-lg bg-muted p-3 text-sm flex justify-between">
-        <span className="text-muted-foreground">Total a pagar</span>
+        <span className="text-muted-foreground">Salário cadastrado</span>
         <span className="font-semibold">{brl(employee?.salary ?? 0)}</span>
       </div>
       <Field label="Observações">
-        <Textarea rows={2} />
+        <Textarea
+          rows={2}
+          value={related}
+          onChange={(event) => setRelated(event.target.value)}
+          placeholder="Observação opcional"
+        />
       </Field>
       <DialogFooter>
-        <Button type="submit">Confirmar pagamento</Button>
+        <Button type="submit" disabled={mutation.isPending || !employee}>
+          {mutation.isPending ? "Salvando..." : "Confirmar pagamento"}
+        </Button>
       </DialogFooter>
     </form>
   );

@@ -53,9 +53,12 @@ A venda deve partir apenas de veículos realmente disponíveis, clientes ativos 
 - Comissão deve ser rastreável e vinculada à venda, vendedor e veículo.
 - Comissão deve ser calculada sobre o valor final da venda por enquanto.
 - Forma de pagamento deve controlar quais campos aparecem e quais valores são gravados.
+- Status do pagamento deve ser calculado pelo sistema, não editado diretamente no formulário.
 - À vista, PIX e cartão devem nascer como pagamento quitado nesta primeira versão.
 - Financiamento pode nascer como pendente, parcial ou quitado conforme a entrada registrada.
 - Financiamento deve registrar entrada e saldo financiado/repasse, mas ainda não deve gerar parcelas internas.
+- Ao concluir venda financiada com entrada, o financeiro deve separar receita paga da entrada e receita pendente do repasse.
+- Ao concluir venda financiada sem entrada, o financeiro deve gerar apenas receita pendente do repasse.
 - Troca como forma de pagamento fica fora da primeira entrega até existir o fluxo do veículo recebido.
 
 ### Fase 1 - Venda simples persistida
@@ -67,7 +70,7 @@ Construir primeiro o fluxo sem troca de veículo:
 - Selecionar vendedor ativo.
 - Informar desconto, data e observações.
 - Informar forma de pagamento.
-- Calcular status do pagamento automaticamente conforme a forma escolhida.
+- Calcular status do pagamento automaticamente conforme a forma escolhida, sem exibir campo editável para o usuário.
 - Salvar venda como `pending` ou `completed`.
 - Se `pending`, marcar veículo como reservado para o cliente escolhido.
 - Se `completed`, marcar veículo como vendido e gerar financeiro/comissão.
@@ -80,17 +83,17 @@ Regras da primeira versão:
 - À vista:
   - não exibir entrada;
   - não exibir parcelas;
-  - status do pagamento: quitado;
+  - status do pagamento: quitado internamente;
   - financeiro: receita paga.
 - PIX:
   - não exibir entrada;
   - não exibir parcelas;
-  - status do pagamento: quitado;
+  - status do pagamento: quitado internamente;
   - financeiro: receita paga.
 - Cartão:
   - não exibir entrada;
   - não exibir parcelas internas;
-  - status do pagamento: quitado;
+  - status do pagamento: quitado internamente;
   - financeiro: receita paga.
 - Financiamento:
   - exibir entrada;
@@ -98,8 +101,10 @@ Regras da primeira versão:
   - status do pagamento:
     - sem entrada: pendente;
     - com entrada menor que o total: parcial;
-    - entrada igual ao total: quitado;
-  - financeiro: receita pendente enquanto houver saldo financiado/repasse.
+      - entrada igual ao total: quitado;
+  - financeiro:
+    - entrada registrada como receita paga;
+    - saldo financiado/repasse registrado como receita pendente.
 - Troca + diferença:
   - não exibir na primeira versão;
   - construir depois junto com o fluxo de recebimento do veículo da troca.
@@ -150,6 +155,7 @@ Construir depois da venda simples estar estável:
 - Pagamento da venda respeita a forma escolhida e não mostra campos desnecessários.
 - À vista, PIX e cartão gravam pagamento quitado.
 - Financiamento grava entrada e saldo restante sem gerar parcelas internas.
+- Financiamento gera lançamentos financeiros separados para entrada paga e repasse pendente.
 - Venda pendente reserva o veículo para o cliente informado.
 - Venda pendente pode ser concluída ou cancelada pela tela de detalhe.
 - Venda cancelada libera o veículo para voltar ao estoque disponível.

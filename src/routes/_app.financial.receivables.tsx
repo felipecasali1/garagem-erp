@@ -6,8 +6,9 @@ import {
   CheckCircle2,
   Clock,
   Filter,
-  Receipt,
+  HandCoins,
   Search,
+  TrendingUp,
   Wallet,
 } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
@@ -42,20 +43,17 @@ import {
   type FinancialTransactionWithLinks,
 } from "@/modules/financial/services/transactions";
 
-export const Route = createFileRoute("/_app/financial/bills")({
-  head: () => ({ meta: [{ title: "Contas a Pagar | GaragemERP" }] }),
-  component: BillsPage,
+export const Route = createFileRoute("/_app/financial/receivables")({
+  head: () => ({ meta: [{ title: "Contas a Receber | GaragemERP" }] }),
+  component: ReceivablesPage,
 });
 
 const categoryLabel: Record<string, string> = {
-  vehicle_purchase: "Compra de Veículo",
-  salary: "Salário",
-  commission: "Comissão",
-  fixed_cost: "Custo Fixo",
+  vehicle_sale: "Venda de Veículo",
   other: "Outros",
 };
 
-function BillsPage() {
+function ReceivablesPage() {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -70,23 +68,23 @@ function BillsPage() {
     queryFn: listFinancialTransactions,
   });
 
-  const payMutation = useMutation({
+  const receiveMutation = useMutation({
     mutationFn: markFinancialTransactionPaid,
     onSuccess: async (id) => {
       await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
       await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.detail(id) });
       setConfirmPaidId(null);
-      toast.success("Conta marcada como paga");
+      toast.success("Conta marcada como recebida");
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Falha ao marcar conta como paga.");
+      toast.error(error instanceof Error ? error.message : "Falha ao marcar conta como recebida.");
     },
   });
 
-  const bills = useMemo(
+  const receivables = useMemo(
     () =>
       transactions
-        .filter((transaction) => transaction.type === "expense")
+        .filter((transaction) => transaction.type === "income")
         .sort((a, b) => {
           const aDate = a.due_date ?? a.transaction_date;
           const bDate = b.due_date ?? b.transaction_date;
@@ -96,7 +94,7 @@ function BillsPage() {
   );
 
   const filtered = useMemo(() => {
-    return bills.filter((transaction) => {
+    return receivables.filter((transaction) => {
       if (statusFilter !== "all" && transaction.status !== statusFilter) return false;
       if (categoryFilter !== "all" && transaction.category !== categoryFilter) return false;
       if (
@@ -109,30 +107,30 @@ function BillsPage() {
       }
       return true;
     });
-  }, [bills, query, statusFilter, categoryFilter]);
+  }, [categoryFilter, query, receivables, statusFilter]);
 
-  const totalPending = bills
-    .filter((bill) => bill.status === "pending")
-    .reduce((sum, bill) => sum + bill.amount, 0);
-  const totalOverdue = bills
-    .filter((bill) => bill.status === "overdue")
-    .reduce((sum, bill) => sum + bill.amount, 0);
-  const totalPaid = bills
-    .filter((bill) => bill.status === "paid")
-    .reduce((sum, bill) => sum + bill.amount, 0);
+  const totalPending = receivables
+    .filter((receivable) => receivable.status === "pending")
+    .reduce((sum, receivable) => sum + receivable.amount, 0);
+  const totalOverdue = receivables
+    .filter((receivable) => receivable.status === "overdue")
+    .reduce((sum, receivable) => sum + receivable.amount, 0);
+  const totalPaid = receivables
+    .filter((receivable) => receivable.status === "paid")
+    .reduce((sum, receivable) => sum + receivable.amount, 0);
 
   const pieData = [
-    { name: "A vencer", value: totalPending, color: "var(--warning)" },
+    { name: "A receber", value: totalPending, color: "var(--warning)" },
     { name: "Vencidas", value: totalOverdue, color: "var(--destructive)" },
-    { name: "Pagas", value: totalPaid, color: "var(--success)" },
+    { name: "Recebidas", value: totalPaid, color: "var(--success)" },
   ].filter((entry) => entry.value > 0);
-  const confirmPaidBill = bills.find((bill) => bill.id === confirmPaidId);
+  const confirmPaidReceivable = receivables.find((receivable) => receivable.id === confirmPaidId);
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto">
       <PageHeader
-        title="Contas a Pagar"
-        description="Acompanhe vencimentos, status e impacto financeiro"
+        title="Contas a Receber"
+        description="Acompanhe recebimentos, repasses e receitas pendentes"
         action={
           <Button asChild variant="outline">
             <Link to="/financial">
@@ -156,21 +154,21 @@ function BillsPage() {
           value={isLoading ? "..." : brl(totalOverdue)}
           accent="text-destructive bg-destructive/10"
           icon={AlertCircle}
-          sub={`${bills.filter((bill) => bill.status === "overdue").length} contas`}
+          sub={`${receivables.filter((receivable) => receivable.status === "overdue").length} contas`}
         />
         <KpiCard
-          label="A Vencer"
+          label="A Receber"
           value={isLoading ? "..." : brl(totalPending)}
           accent="text-warning bg-warning/10"
           icon={Clock}
-          sub={`${bills.filter((bill) => bill.status === "pending").length} contas`}
+          sub={`${receivables.filter((receivable) => receivable.status === "pending").length} contas`}
         />
         <KpiCard
-          label="Pagas"
+          label="Recebidas"
           value={isLoading ? "..." : brl(totalPaid)}
           accent="text-success bg-success/10"
           icon={CheckCircle2}
-          sub={`${bills.filter((bill) => bill.status === "paid").length} contas`}
+          sub={`${receivables.filter((receivable) => receivable.status === "paid").length} contas`}
         />
       </div>
 
@@ -194,9 +192,9 @@ function BillsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos status</SelectItem>
-                  <SelectItem value="pending">A vencer</SelectItem>
+                  <SelectItem value="pending">A receber</SelectItem>
                   <SelectItem value="overdue">Vencidas</SelectItem>
-                  <SelectItem value="paid">Pagas</SelectItem>
+                  <SelectItem value="paid">Recebidas</SelectItem>
                   <SelectItem value="canceled">Canceladas</SelectItem>
                 </SelectContent>
               </Select>
@@ -236,16 +234,16 @@ function BillsPage() {
                 ) : filtered.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
-                      <Receipt className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                      <HandCoins className="h-8 w-8 mx-auto mb-2 opacity-40" />
                       Nenhuma conta encontrada com esses filtros
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((bill) => (
-                    <BillRow
-                      key={bill.id}
-                      bill={bill}
-                      onMarkPaid={() => setConfirmPaidId(bill.id)}
+                  filtered.map((receivable) => (
+                    <ReceivableRow
+                      key={receivable.id}
+                      receivable={receivable}
+                      onMarkPaid={() => setConfirmPaidId(receivable.id)}
                     />
                   ))
                 )}
@@ -257,7 +255,7 @@ function BillsPage() {
         <Card>
           <CardContent className="p-6">
             <h3 className="font-display font-semibold mb-1">Distribuição</h3>
-            <p className="text-xs text-muted-foreground mb-4">Impacto financeiro por status</p>
+            <p className="text-xs text-muted-foreground mb-4">Receitas por status</p>
             {pieData.length > 0 ? (
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
@@ -301,22 +299,22 @@ function BillsPage() {
             </div>
 
             <div className="border-t border-border pt-4 mt-6">
-              <h4 className="text-sm font-medium mb-3">Pagamentos recentes</h4>
+              <h4 className="text-sm font-medium mb-3">Recebimentos recentes</h4>
               <div className="space-y-2 text-sm">
-                {bills
-                  .filter((bill) => bill.status === "paid")
+                {receivables
+                  .filter((receivable) => receivable.status === "paid")
                   .slice(0, 4)
-                  .map((bill) => (
-                    <div key={bill.id} className="flex items-center gap-2">
+                  .map((receivable) => (
+                    <div key={receivable.id} className="flex items-center gap-2">
                       <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
                       <span className="flex-1 truncate text-muted-foreground">
-                        {bill.description}
+                        {receivable.description}
                       </span>
-                      <span className="text-xs">{brl(bill.amount)}</span>
+                      <span className="text-xs">{brl(receivable.amount)}</span>
                     </div>
                   ))}
-                {bills.filter((bill) => bill.status === "paid").length === 0 && (
-                  <div className="text-xs text-muted-foreground">Nenhum pagamento registrado</div>
+                {receivables.filter((receivable) => receivable.status === "paid").length === 0 && (
+                  <div className="text-xs text-muted-foreground">Nenhum recebimento registrado</div>
                 )}
               </div>
             </div>
@@ -329,61 +327,63 @@ function BillsPage() {
         onOpenChange={(open) => {
           if (!open) setConfirmPaidId(null);
         }}
-        title="Marcar conta como paga?"
+        title="Marcar conta como recebida?"
         description={
-          confirmPaidBill
-            ? `A conta "${confirmPaidBill.description}" será baixada com a data atual.`
+          confirmPaidReceivable
+            ? `A conta "${confirmPaidReceivable.description}" será baixada com a data atual.`
             : "A conta será baixada com a data atual."
         }
-        confirmLabel={payMutation.isPending ? "Pagando..." : "Marcar como paga"}
-        confirmDisabled={payMutation.isPending}
+        confirmLabel={receiveMutation.isPending ? "Recebendo..." : "Marcar como recebida"}
+        confirmDisabled={receiveMutation.isPending}
         confirmVariant="default"
         onConfirm={() => {
-          if (confirmPaidId != null) payMutation.mutate(confirmPaidId);
+          if (confirmPaidId != null) receiveMutation.mutate(confirmPaidId);
         }}
       />
     </div>
   );
 }
 
-function BillRow({
-  bill,
+function ReceivableRow({
+  receivable,
   onMarkPaid,
 }: {
-  bill: FinancialTransactionWithLinks;
+  receivable: FinancialTransactionWithLinks;
   onMarkPaid: () => void;
 }) {
-  const canMarkPaid = bill.status === "pending" || bill.status === "overdue";
+  const canMarkPaid = receivable.status === "pending" || receivable.status === "overdue";
 
   return (
     <TableRow>
       <TableCell>
         <Link
           to="/financial/transactions/$id"
-          params={{ id: String(bill.id) }}
+          params={{ id: String(receivable.id) }}
           className="font-medium hover:text-primary"
         >
-          {bill.description}
+          {receivable.description}
         </Link>
-        <div className="text-xs text-muted-foreground">{bill.related ?? "-"}</div>
+        <div className="text-xs text-muted-foreground">{receivable.related ?? "-"}</div>
       </TableCell>
       <TableCell>
-        <Badge variant="outline">{categoryLabel[bill.category] ?? bill.category}</Badge>
+        <Badge variant="outline">
+          {categoryLabel[receivable.category] ?? receivable.category}
+        </Badge>
       </TableCell>
       <TableCell className="text-sm text-muted-foreground">
-        {bill.due_date ? fmtDate(bill.due_date) : fmtDate(bill.transaction_date)}
+        {receivable.due_date ? fmtDate(receivable.due_date) : fmtDate(receivable.transaction_date)}
       </TableCell>
       <TableCell>
-        <StatusBadge kind="transaction" value={bill.status} />
+        <StatusBadge kind="transaction" value={receivable.status} />
       </TableCell>
-      <TableCell className="text-right font-semibold">{brl(bill.amount)}</TableCell>
+      <TableCell className="text-right font-semibold">{brl(receivable.amount)}</TableCell>
       <TableCell className="text-right">
         {canMarkPaid ? (
           <Button size="sm" variant="outline" onClick={onMarkPaid}>
-            <CheckCircle2 className="h-3.5 w-3.5" /> Pagar
+            <CheckCircle2 className="h-3.5 w-3.5" /> Receber
           </Button>
-        ) : bill.status === "paid" ? (
-          <span className="text-xs text-muted-foreground">Quitada</span>
+        ) : receivable.status === "paid" ? (
+          <span className="text-xs text-muted-foreground">Recebida</span>
         ) : (
           <span className="text-xs text-muted-foreground">-</span>
         )}
@@ -402,7 +402,7 @@ function KpiCard({
   label: string;
   value: string;
   accent: string;
-  icon: typeof Receipt;
+  icon: typeof TrendingUp;
   sub: string;
 }) {
   return (

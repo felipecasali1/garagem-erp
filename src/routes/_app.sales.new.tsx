@@ -381,12 +381,6 @@ function NewSale() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs uppercase text-muted-foreground">
-                    Status do pagamento
-                  </Label>
-                  <Input value={paymentStatusLabel} readOnly />
-                </div>
                 {showFinancingFields && (
                   <div className="space-y-1.5">
                     <Label className="text-xs uppercase text-muted-foreground">Entrada (R$)</Label>
@@ -412,9 +406,9 @@ function NewSale() {
             <div className="rounded-lg bg-muted p-4 space-y-2">
               <Row label="Valor total" value={brl(total)} />
               <Row label="Forma de pagamento" value={getPaymentMethodLabel(draft.payment_method)} />
-              <Row label="Status do pagamento" value={paymentStatusLabel} />
               {showFinancingFields && (
                 <>
+                  <Row label="Status do pagamento" value={paymentStatusLabel} />
                   <Row label="Entrada" value={brl(normalizedDownPayment)} />
                   <Row label="Saldo financiado/repasse" value={brl(remaining)} />
                 </>
@@ -442,7 +436,14 @@ function NewSale() {
               label="Status"
               value={draft.status === "completed" ? "Concluída" : "Pendente / reservado"}
             />
-            <Row label="Pagamento" value={`${getPaymentMethodLabel(draft.payment_method)} - ${paymentStatusLabel}`} />
+            <Row
+              label="Pagamento"
+              value={
+                showFinancingFields
+                  ? `${getPaymentMethodLabel(draft.payment_method)} - ${paymentStatusLabel}`
+                  : getPaymentMethodLabel(draft.payment_method)
+              }
+            />
             <Row label="Desconto" value={brl(draft.discount)} />
             <div className="border-t border-border pt-4 flex items-center justify-between">
               <span className="font-display font-semibold">Total</span>
