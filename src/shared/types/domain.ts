@@ -103,6 +103,7 @@ export interface Sale {
   trade_in_vehicle?: Vehicle;
   trade_in_value?: number;
   payment?: SalePayment;
+  commission?: Commission;
 }
 
 export interface Purchase {
@@ -128,6 +129,20 @@ export interface FinancialTransaction {
   paid_at?: string;
   description: string;
   related?: string;
+}
+
+export interface Commission {
+  id: number;
+  sale_id: number;
+  employee_id: number;
+  vehicle_id: number;
+  type: CommissionType;
+  rate: number;
+  amount: number;
+  status: CommissionStatus;
+  due_date?: string;
+  paid_at?: string;
+  notes?: string;
 }
 
 export interface Installment {

@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Save, Plus, X, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -13,6 +13,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { DEFAULT_ACCESSORIES } from "@/shared/lib/accessories";
+import {
+  accessoryKeys,
+  listActiveAccessories,
+} from "@/modules/settings/services/accessories";
 import { PlateInput } from "@/shared/components/form/field-inputs";
 import {
   CATEGORY_LABEL,
@@ -32,6 +36,14 @@ export const Route = createFileRoute("/_app/vehicles/new")({
 function NewVehicle() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { data: catalogAccessories = [] } = useQuery({
+    queryKey: accessoryKeys.active,
+    queryFn: listActiveAccessories,
+  });
+  const suggestedAccessories =
+    catalogAccessories.length > 0
+      ? catalogAccessories.map((accessory) => accessory.name)
+      : DEFAULT_ACCESSORIES;
   const [vehicleDraft, setVehicleDraft] = useState<VehicleDraft>({
     plate: "",
     chassis: "",
@@ -292,7 +304,7 @@ function NewVehicle() {
                 onChange={(e) => patchVehicleDraft({ cost_price: Number(e.target.value) || 0 })}
               />
             </Field>
-            <Field label={isEvaluation ? "Preço de venda estimado" : "Preço de venda"}>
+            <Field label="Valor estimado de venda">
               <Input
                 type="number"
                 placeholder="0,00"
@@ -325,7 +337,7 @@ function NewVehicle() {
             <Badge variant="secondary">{vehicleDraft.accessories.length} selecionado(s)</Badge>
           </div>
           <div className="flex flex-wrap gap-2">
-            {DEFAULT_ACCESSORIES.map((a) => {
+            {suggestedAccessories.map((a) => {
               const active = vehicleDraft.accessories.includes(a);
               return (
                 <button
@@ -344,10 +356,10 @@ function NewVehicle() {
               );
             })}
           </div>
-          {vehicleDraft.accessories.filter((a) => !DEFAULT_ACCESSORIES.includes(a)).length > 0 && (
+          {vehicleDraft.accessories.filter((a) => !suggestedAccessories.includes(a)).length > 0 && (
             <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
               {vehicleDraft.accessories
-                .filter((a) => !DEFAULT_ACCESSORIES.includes(a))
+                .filter((a) => !suggestedAccessories.includes(a))
                 .map((a) => (
                   <Badge key={a} variant="outline" className="gap-1">
                     {a}

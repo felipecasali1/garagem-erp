@@ -35,7 +35,7 @@ import { canAccessPath } from "@/shared/auth/access-control";
 const groups = [
   {
     label: "Principal",
-    items: [{ title: "Dashboard", url: "/", icon: LayoutDashboard }],
+    items: [{ title: "Painel", url: "/", icon: LayoutDashboard }],
   },
   {
     label: "Cadastros",

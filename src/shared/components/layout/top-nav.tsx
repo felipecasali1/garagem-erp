@@ -10,7 +10,7 @@ import { useAuth } from "@/shared/supabase/auth";
 import { initials } from "@/shared/lib/format";
 
 const labels: Record<string, string> = {
-  "": "Dashboard",
+  "": "Painel",
   employees: "Funcionários",
   clients: "Clientes",
   suppliers: "Fornecedores",
@@ -56,7 +56,7 @@ export function TopNav() {
         {segments.length === 0 && (
           <>
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
-            <span className="text-foreground font-medium">Dashboard</span>
+            <span className="text-foreground font-medium">Painel</span>
           </>
         )}
       </nav>

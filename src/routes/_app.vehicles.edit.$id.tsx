@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowLeft, Plus, Save, X } from "lucide-react";
+import { AlertTriangle, Archive, ArrowLeft, Plus, Save, X } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
@@ -20,7 +20,12 @@ import { toast } from "sonner";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { DEFAULT_ACCESSORIES } from "@/shared/lib/accessories";
+import { brl } from "@/shared/lib/format";
 import { PlateInput } from "@/shared/components/form/field-inputs";
+import {
+  accessoryKeys,
+  listActiveAccessories,
+} from "@/modules/settings/services/accessories";
 import type { VehicleDraft } from "@/modules/vehicles/types";
 import {
   archiveVehicle,
@@ -49,6 +54,14 @@ function EditVehicle() {
     queryFn: () => getVehicleById(numericId),
     enabled: Number.isFinite(numericId),
   });
+  const { data: catalogAccessories = [] } = useQuery({
+    queryKey: accessoryKeys.active,
+    queryFn: listActiveAccessories,
+  });
+  const suggestedAccessories =
+    catalogAccessories.length > 0
+      ? catalogAccessories.map((accessory) => accessory.name)
+      : DEFAULT_ACCESSORIES;
   const [draft, setDraft] = useState<VehicleDraft | null>(null);
   const [customAcc, setCustomAcc] = useState("");
   const [confirmArchiveOpen, setConfirmArchiveOpen] = useState(false);
@@ -144,6 +157,49 @@ function EditVehicle() {
       <div className="max-w-2xl mx-auto text-center py-20">
         <h2 className="font-display text-xl mb-2">Veículo não encontrado</h2>
         <Button onClick={() => navigate({ to: "/vehicles" })}>Voltar ao estoque</Button>
+      </div>
+    );
+  }
+
+  if (v.status === "sold") {
+    return (
+      <div className="max-w-3xl mx-auto space-y-6">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="ghost" size="sm" asChild type="button">
+            <Link to="/vehicles/$id" params={{ id }}>
+              <ArrowLeft className="h-4 w-4" /> Voltar
+            </Link>
+          </Button>
+          <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">
+            Veículo vendido
+          </h1>
+          <StatusBadge kind="vehicle" value={v.status} />
+        </div>
+
+        <Card className="border-warning/30 bg-warning/5">
+          <CardContent className="p-6">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-1 h-5 w-5 shrink-0 text-warning" />
+              <div className="space-y-2">
+                <h2 className="font-display text-lg font-semibold">Edição bloqueada</h2>
+                <p className="text-sm text-muted-foreground">
+                  Este veículo já foi vendido. Dados operacionais, valores, acessórios e checklist
+                  ficam preservados como histórico para não alterar margem, relatórios ou leitura
+                  financeira da venda.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="grid grid-cols-1 gap-4 p-6 text-sm md:grid-cols-2">
+            <ReadonlyField label="Veículo" value={`${v.brand} ${v.model}`} />
+            <ReadonlyField label="Placa" value={v.plate} />
+            <ReadonlyField label="Valor estimado de venda" value={String(v.sale_price)} money />
+            <ReadonlyField label="Custo de aquisição" value={String(v.cost_price)} money />
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -347,7 +403,7 @@ function EditVehicle() {
                 onChange={(e) => updateDraft({ cost_price: Number(e.target.value) || 0 })}
               />
             </Field>
-            <Field label={isEvaluation ? "Preço de venda estimado" : "Preço de venda"}>
+            <Field label="Valor estimado de venda">
               <Input
                 type="number"
                 value={draft.sale_price || ""}
@@ -391,7 +447,7 @@ function EditVehicle() {
             <Badge variant="secondary">{draft.accessories.length} selecionado(s)</Badge>
           </div>
           <div className="flex flex-wrap gap-2">
-            {DEFAULT_ACCESSORIES.map((accessory) => {
+            {suggestedAccessories.map((accessory) => {
               const active = draft.accessories.includes(accessory);
               return (
                 <button
@@ -410,11 +466,11 @@ function EditVehicle() {
               );
             })}
           </div>
-          {draft.accessories.filter((accessory) => !DEFAULT_ACCESSORIES.includes(accessory))
+          {draft.accessories.filter((accessory) => !suggestedAccessories.includes(accessory))
             .length > 0 ? (
             <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
               {draft.accessories
-                .filter((accessory) => !DEFAULT_ACCESSORIES.includes(accessory))
+                .filter((accessory) => !suggestedAccessories.includes(accessory))
                 .map((accessory) => (
                   <Badge key={accessory} variant="outline" className="gap-1">
                     {accessory}
@@ -452,6 +508,23 @@ function EditVehicle() {
         <VehicleChecklist vehicleId={v.id} />
       </div>
     </form>
+  );
+}
+
+function ReadonlyField({
+  label,
+  value,
+  money,
+}: {
+  label: string;
+  value: string;
+  money?: boolean;
+}) {
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="mt-1 font-medium">{money ? brl(Number(value)) : value}</div>
+    </div>
   );
 }
 

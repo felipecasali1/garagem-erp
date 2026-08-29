@@ -257,6 +257,10 @@ export async function createVehicle(draft: VehicleDraft) {
 
 export async function updateVehicle(id: number, draft: VehicleDraft) {
   const currentVehicle = await getVehicleById(id);
+  if (currentVehicle.status === "sold") {
+    throw new Error("Veiculo vendido nao pode ter dados operacionais alterados.");
+  }
+
   const payload = {
     ...toVehiclePayload(draft),
     status: currentVehicle.status,

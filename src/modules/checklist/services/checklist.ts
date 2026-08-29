@@ -104,6 +104,44 @@ async function unwrapSingle<T>(
   return data;
 }
 
+async function assertVehicleChecklistEditable(vehicleId: number) {
+  const { data, error } = await supabase
+    .from("vehicles")
+    .select("id, status")
+    .eq("id", vehicleId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!data) {
+    throw new Error("Veiculo nao encontrado.");
+  }
+  if (data.status === "sold") {
+    throw new Error("Checklist de veiculo vendido fica bloqueado para preservar historico.");
+  }
+}
+
+async function assertChecklistItemEditable(id: string) {
+  const { data, error } = await supabase
+    .from("vehicle_checklist_items")
+    .select("vehicle_id, vehicles(status)")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!data) {
+    throw new Error("Item de checklist nao encontrado.");
+  }
+
+  const vehicle = Array.isArray(data.vehicles) ? data.vehicles[0] : data.vehicles;
+  if (vehicle?.status === "sold") {
+    throw new Error("Checklist de veiculo vendido fica bloqueado para preservar historico.");
+  }
+}
+
 export async function listChecklist(vehicleId?: number) {
   let query = supabase.from("vehicle_checklist_items").select("*").order("created_at", {
     ascending: false,
@@ -122,6 +160,8 @@ export async function listChecklist(vehicleId?: number) {
 }
 
 export async function createChecklistItem(input: ChecklistWriteInput) {
+  await assertVehicleChecklistEditable(input.vehicle_id);
+
   const data = await unwrapSingle(
     supabase.from("vehicle_checklist_items").insert(toChecklistPayload(input)).select("*").single(),
   );
@@ -129,6 +169,8 @@ export async function createChecklistItem(input: ChecklistWriteInput) {
 }
 
 export async function updateChecklistItem(id: string, patch: Partial<ChecklistItem>) {
+  await assertChecklistItemEditable(id);
+
   const data = await unwrapSingle(
     supabase
       .from("vehicle_checklist_items")
@@ -141,6 +183,8 @@ export async function updateChecklistItem(id: string, patch: Partial<ChecklistIt
 }
 
 export async function cancelChecklistItem(id: string) {
+  await assertChecklistItemEditable(id);
+
   const data = await unwrapSingle(
     supabase
       .from("vehicle_checklist_items")

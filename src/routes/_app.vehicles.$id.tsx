@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  ArrowRight,
   Calendar,
   CheckCircle2,
   Eye,
@@ -12,6 +13,7 @@ import {
   Pencil,
   Settings2,
   ShoppingCart,
+  AlertTriangle,
 } from "lucide-react";
 import { useState } from "react";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -123,6 +125,7 @@ function VehicleDetail() {
   const marginPct = estimatedInvested > 0 ? (margin / estimatedInvested) * 100 : 0;
   const isEvaluation = vehicle.status === "evaluating";
   const isPreparing = vehicle.status === "in_repair";
+  const isSold = vehicle.status === "sold";
   const preparationBlockers =
     checklistSummary.pending + checklistSummary.inProgress + checklistSummary.waitingParts;
   return (
@@ -142,11 +145,24 @@ function VehicleDetail() {
             <StatusBadge kind="vehicle" value={vehicle.status} />
           </div>
         </div>
-        <Button variant="outline" asChild>
-          <Link to="/vehicles/edit/$id" params={{ id: String(vehicle.id) }}>
-            <Pencil className="h-4 w-4" /> Editar
-          </Link>
-        </Button>
+        {isSold ? (
+          <Button variant="outline" disabled>
+            <AlertTriangle className="h-4 w-4" /> Edição bloqueada
+          </Button>
+        ) : (
+          <Button variant="outline" asChild>
+            <Link to="/vehicles/edit/$id" params={{ id: String(vehicle.id) }}>
+              <Pencil className="h-4 w-4" /> Editar
+            </Link>
+          </Button>
+        )}
+        {vehicle.status === "available" && (
+          <Button variant="outline" asChild>
+            <Link to="/sales/new" search={{ vehicleId: vehicle.id }}>
+              <ArrowRight className="h-4 w-4" /> Vender
+            </Link>
+          </Button>
+        )}
         {vehicle.status === "evaluating" && (
           <Button variant="outline" asChild>
             <Link to="/purchases/new" search={{ vehicleId: vehicle.id }}>
@@ -199,6 +215,21 @@ function VehicleDetail() {
         </Card>
       )}
 
+      {isSold && (
+        <Card className="border-warning/30 bg-warning/5">
+          <CardContent className="flex items-start gap-3 p-4 text-sm">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+            <div>
+              <div className="font-medium text-foreground">Veículo vendido</div>
+              <div className="text-muted-foreground">
+                Dados operacionais e checklist ficam bloqueados para preservar histórico financeiro
+                e margem da venda.
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 overflow-hidden">
           <div className="aspect-[16/9] bg-gradient-to-br from-muted to-muted/40 flex items-center justify-center text-8xl opacity-20">
@@ -209,7 +240,7 @@ function VehicleDetail() {
           <CardContent className="p-6 space-y-4">
             <div>
               <div className="text-xs text-muted-foreground uppercase tracking-wide">
-                {isEvaluation ? "Preço de venda estimado" : "Preço de venda"}
+                Valor estimado de venda
               </div>
               <div className="font-display text-3xl font-semibold">{brl(vehicle.sale_price)}</div>
             </div>
@@ -268,7 +299,7 @@ function VehicleDetail() {
           <TabsTrigger value="accessories">Acessórios</TabsTrigger>
         </TabsList>
         <TabsContent value="checklist">
-          <VehicleChecklist vehicleId={vehicle.id} />
+          <VehicleChecklist vehicleId={vehicle.id} readOnly={isSold} />
         </TabsContent>
         <TabsContent value="info">
           <Card>

@@ -13,12 +13,12 @@ Veículos, compras e preparação já avançaram. A consolidação do dashboard 
 ### Escopo
 
 - Revisar cards/KPIs do dashboard.
-- Trocar dados mock por consultas reais.
-- Mostrar estoque por status.
-- Mostrar vendas do período.
+- Trocar dados mock por consultas reais. Concluído no dashboard inicial.
+- Mostrar estoque por status. Concluído no dashboard inicial.
+- Mostrar vendas do período. Concluído no dashboard inicial.
 - Mostrar margem estimada/realizada.
-- Mostrar contas vencidas.
-- Mostrar veículos em preparação.
+- Mostrar contas vencidas. Concluído no dashboard inicial.
+- Mostrar veículos em preparação. Concluído no dashboard inicial.
 - Mostrar comissões pendentes, quando o módulo estiver pronto.
 
 ### Regras de negócio
@@ -41,3 +41,10 @@ Veículos, compras e preparação já avançaram. A consolidação do dashboard 
 - Métricas deixam claro o período analisado.
 - Dados cancelados/arquivados são tratados corretamente.
 - Dashboard não exibe números fixos ou demonstrativos sem identificação.
+
+### Progresso atual
+
+- Dashboard inicial agora usa veículos, vendas, checklist e transações financeiras reais.
+- Série de receita vs despesas usa transações persistidas por mês, sem geração sintética de dias.
+- Cards principais deixam explícito que o mês atual considerado é agosto de 2026.
+- Ainda falta amadurecer margem realizada/estimada e comissões pendentes.

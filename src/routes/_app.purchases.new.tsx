@@ -360,7 +360,7 @@ function NewPurchase() {
                       </div>
                       <div className="hidden text-right text-xs text-muted-foreground md:block">
                         <div>{brl(vehicle.cost_price)} custo est.</div>
-                        <div>{brl(vehicle.sale_price)} venda est.</div>
+                        <div>{brl(vehicle.sale_price)} venda estimada</div>
                       </div>
                       <StatusBadge kind="vehicle" value={vehicle.status} />
                     </button>
@@ -446,7 +446,8 @@ function SelectedVehicleCard({
           {vehicle.current_mileage.toLocaleString("pt-BR")} km
         </div>
         <div className="mt-1 text-xs text-muted-foreground">
-          Custo estimado: {brl(vehicle.cost_price)} · Venda estimada: {brl(vehicle.sale_price)}
+          Custo estimado: {brl(vehicle.cost_price)} · Valor estimado de venda:{" "}
+          {brl(vehicle.sale_price)}
         </div>
       </div>
       <Button type="button" variant="ghost" size="sm" onClick={onChange}>

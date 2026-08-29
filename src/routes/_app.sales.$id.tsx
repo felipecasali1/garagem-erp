@@ -6,6 +6,7 @@ import {
   Calendar,
   Car,
   CheckCircle2,
+  CircleDollarSign,
   Receipt,
   User,
   XCircle,
@@ -106,13 +107,19 @@ function SaleDetail() {
   }
 
   const commission =
-    sale.employee.commission_type === "percentage"
+    sale.commission?.amount ??
+    (sale.employee.commission_type === "percentage"
       ? (sale.total_value * sale.employee.commission_rate) / 100
-      : sale.employee.commission_rate;
+      : sale.employee.commission_rate);
   const subtotal = sale.total_value + sale.discount;
   const profit = sale.total_value - sale.vehicle.cost_price;
   const isPending = sale.status === "pending";
   const customerDocument = sale.customer.person.cpf ?? sale.customer.person.cnpj ?? "";
+  const hasCommission = Boolean(sale.commission);
+  const commissionRuleLabel =
+    sale.employee.commission_type === "percentage"
+      ? `${sale.employee.commission_rate}% sobre a venda`
+      : `${brl(sale.employee.commission_rate)} fixo`;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -205,7 +212,7 @@ function SaleDetail() {
                     ? `${sale.employee.commission_rate}%`
                     : "fixa"
                     })`}
-                  value={brl(commission)}
+                  value={hasCommission ? brl(commission) : "-"}
                   muted
                 />
                 <Row
@@ -329,6 +336,37 @@ function SaleDetail() {
                   <div className="text-xs text-muted-foreground">{sale.employee.position}</div>
                 </div>
               </Link>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-6 space-y-4">
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <CircleDollarSign className="h-4 w-4" /> Comissão
+              </div>
+              {sale.commission ? (
+                <div className="space-y-3 text-sm">
+                  <Row label="Regra" value={commissionRuleLabel} />
+                  <Row label="Valor" value={brl(sale.commission.amount)} bold />
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Status</span>
+                    <StatusBadge kind="commission" value={sale.commission.status} />
+                  </div>
+                  <Row
+                    label="Vencimento"
+                    value={sale.commission.due_date ? fmtDate(sale.commission.due_date) : "-"}
+                  />
+                  <Row
+                    label="Pago em"
+                    value={sale.commission.paid_at ? fmtDate(sale.commission.paid_at) : "-"}
+                    muted
+                  />
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  Esta venda não gerou comissão para o vendedor.
+                </div>
+              )}
             </CardContent>
           </Card>
 

@@ -187,7 +187,7 @@ function PurchaseDetail() {
                 </div>
                 <Separator />
                 <div className="flex items-center justify-between text-muted-foreground">
-                  <span>Preço de venda projetado</span>
+                  <span>Valor estimado de venda</span>
                   <span>{brl(p.vehicle.sale_price)}</span>
                 </div>
                 <div className="flex items-center justify-between">

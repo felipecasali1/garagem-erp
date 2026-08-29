@@ -30,6 +30,10 @@ import { formatDocument } from "@/shared/lib/field-format";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/sales/new")({
+  validateSearch: (search: { vehicleId?: unknown }): { vehicleId?: number } => {
+    const vehicleId = Number(search.vehicleId);
+    return Number.isFinite(vehicleId) && vehicleId > 0 ? { vehicleId } : {};
+  },
   head: () => ({ meta: [{ title: "Nova Venda | GaragemERP" }] }),
   component: NewSale,
 });
@@ -61,6 +65,7 @@ function getPaymentMethodLabel(method: SaleDraft["payment_method"]) {
 
 function NewSale() {
   const navigate = useNavigate();
+  const { vehicleId: initialVehicleId } = Route.useSearch();
   const queryClient = useQueryClient();
   const { data: vehicles = [], isLoading: loadingVehicles } = useQuery({
     queryKey: vehicleKeys.all,
@@ -94,10 +99,32 @@ function NewSale() {
   const patchDraft = (patch: Partial<SaleDraft>) =>
     setDraft((current) => ({ ...current, ...patch }));
 
+  const availableVehicles = vehicles.filter((v) => v.status === "available");
+  const vehicle = vehicles.find((v) => v.id === draft.vehicle_id);
+  const customer = customers.find((c) => c.id === draft.customer_id);
+  const employee = employees.find((e) => e.id === draft.employee_id);
+  const total = draft.sale_price;
+  const showFinancingFields = draft.payment_method === "financing";
+  const normalizedDownPayment = showFinancingFields ? Math.min(draft.down_payment, total) : total;
+  const remaining = showFinancingFields ? Math.max(0, total - normalizedDownPayment) : 0;
+  const paymentStatusLabel = getPaymentStatusLabel(draft, total);
+
   useEffect(() => {
     if (draft.employee_id || employees.length === 0) return;
     patchDraft({ employee_id: employees[0].id });
   }, [draft.employee_id, employees]);
+
+  useEffect(() => {
+    if (draft.vehicle_id || !initialVehicleId) return;
+
+    const preselectedVehicle = availableVehicles.find((candidate) => candidate.id === initialVehicleId);
+    if (!preselectedVehicle) return;
+
+    patchDraft({
+      vehicle_id: preselectedVehicle.id,
+      sale_price: preselectedVehicle.sale_price,
+    });
+  }, [availableVehicles, draft.vehicle_id, initialVehicleId]);
 
   const createMutation = useMutation({
     mutationFn: createSale,
@@ -113,16 +140,6 @@ function NewSale() {
     },
   });
 
-  const availableVehicles = vehicles.filter((v) => v.status === "available");
-  const vehicle = vehicles.find((v) => v.id === draft.vehicle_id);
-  const customer = customers.find((c) => c.id === draft.customer_id);
-  const employee = employees.find((e) => e.id === draft.employee_id);
-  const total = draft.sale_price - draft.discount;
-  const showFinancingFields = draft.payment_method === "financing";
-  const normalizedDownPayment = showFinancingFields ? Math.min(draft.down_payment, total) : total;
-  const remaining = showFinancingFields ? Math.max(0, total - normalizedDownPayment) : 0;
-  const paymentStatusLabel = getPaymentStatusLabel(draft, total);
-
   const canNext =
     (step === 0 && vehicle) || (step === 1 && customer) || (step === 2 && employee) || step === 3;
 
@@ -132,11 +149,7 @@ function NewSale() {
       return;
     }
     if (draft.sale_price <= 0) {
-      toast.error("Informe um valor de venda maior que zero.");
-      return;
-    }
-    if (draft.discount >= draft.sale_price) {
-      toast.error("O desconto deve ser menor que o valor de venda.");
+      toast.error("Informe um valor final de venda maior que zero.");
       return;
     }
     if (draft.payment_method === "financing" && draft.down_payment > total) {
@@ -150,7 +163,7 @@ function NewSale() {
       status: draft.status,
       saleDate: draft.sale_date,
       salePrice: draft.sale_price,
-      discount: draft.discount,
+      discount: 0,
       notes: draft.notes,
       paymentMethod: draft.payment_method,
       paymentStatus:
@@ -337,24 +350,27 @@ function NewSale() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs uppercase text-muted-foreground">Preço anunciado</Label>
-                <Input value={brl(vehicle?.sale_price ?? 0)} readOnly />
+                <div className="rounded-lg border border-border bg-muted/40 p-3">
+                  <div className="text-xs uppercase text-muted-foreground">
+                    Valor estimado de venda
+                  </div>
+                  <div className="mt-1 font-display text-xl font-semibold">
+                    {brl(vehicle?.sale_price ?? 0)}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Use como referência para definir o valor final.
+                  </div>
+                </div>
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs uppercase text-muted-foreground">Valor da venda</Label>
+                <Label className="text-xs uppercase text-muted-foreground">
+                  Valor final da venda
+                </Label>
                 <Input
                   type="number"
                   min={0}
                   value={draft.sale_price || ""}
                   onChange={(e) => patchDraft({ sale_price: Number(e.target.value) || 0 })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs uppercase text-muted-foreground">Desconto</Label>
-                <Input
-                  type="number"
-                  value={draft.discount || ""}
-                  onChange={(e) => patchDraft({ discount: Number(e.target.value) || 0 })}
                 />
               </div>
             </div>
@@ -419,9 +435,8 @@ function NewSale() {
             </div>
 
             <div className="rounded-lg bg-muted p-4 space-y-2">
-              <Row label="Preço anunciado" value={brl(vehicle?.sale_price ?? 0)} />
-              <Row label="Valor da venda" value={brl(draft.sale_price)} />
-              <Row label="Desconto" value={draft.discount > 0 ? `- ${brl(draft.discount)}` : "-"} />
+              <Row label="Valor estimado de venda" value={brl(vehicle?.sale_price ?? 0)} />
+              <Row label="Valor final da venda" value={brl(draft.sale_price)} />
               <Row label="Forma de pagamento" value={getPaymentMethodLabel(draft.payment_method)} />
               {showFinancingFields && (
                 <>
@@ -461,8 +476,7 @@ function NewSale() {
                   : getPaymentMethodLabel(draft.payment_method)
               }
             />
-            <Row label="Valor da venda" value={brl(draft.sale_price)} />
-            <Row label="Desconto" value={brl(draft.discount)} />
+            <Row label="Valor final da venda" value={brl(draft.sale_price)} />
             <div className="border-t border-border pt-4 flex items-center justify-between">
               <span className="font-display font-semibold">Total</span>
               <span className="font-display text-2xl font-semibold text-primary">{brl(total)}</span>

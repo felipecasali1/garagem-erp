@@ -112,7 +112,7 @@ const markFinancialTransactionPaidServer = createServerFn({ method: "POST" })
 
     const { data: transaction, error: transactionError } = await supabaseAdmin
       .from("financial_transactions")
-      .select("id, status")
+      .select("id, status, commission_id")
       .eq("id", data.id)
       .maybeSingle();
     if (transactionError) throw new Error(transactionError.message);
@@ -124,14 +124,27 @@ const markFinancialTransactionPaidServer = createServerFn({ method: "POST" })
       throw new Error("Transação cancelada não pode ser marcada como paga.");
     }
 
+    const paidAt = new Date().toISOString();
+
     const { error: updateError } = await supabaseAdmin
       .from("financial_transactions")
       .update({
         status: "paid",
-        paid_at: new Date().toISOString(),
+        paid_at: paidAt,
       })
       .eq("id", data.id);
     if (updateError) throw new Error(updateError.message);
+
+    if (transaction.commission_id) {
+      const { error: commissionUpdateError } = await supabaseAdmin
+        .from("commissions")
+        .update({
+          status: "paid",
+          paid_at: paidAt,
+        })
+        .eq("id", transaction.commission_id);
+      if (commissionUpdateError) throw new Error(commissionUpdateError.message);
+    }
 
     return data.id;
   });

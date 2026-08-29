@@ -13,10 +13,10 @@ Atualmente, algumas partes parecem funcionais e outras parecem apenas demonstrat
 ### Escopo
 
 - Verificar a persistência dos dados da empresa.
-- Verificar se o upload/exibição da logo funciona.
-- Validar a aba de usuários.
-- Validar a aba de acessórios.
-- Revisar a aba geral e remover preferências que ainda não têm efeito real.
+- Verificar se o upload/exibição da logo funciona. Campo removido temporariamente até existir armazenamento configurado.
+- Validar a aba de usuários. Concluído como gerenciamento de acesso.
+- Validar a aba de acessórios. Concluído com catálogo persistido e ativação/desativação.
+- Revisar a aba geral e remover preferências que ainda não têm efeito real. Concluído: aba removida por enquanto.
 - Manter somente configurações que sejam usadas pelo sistema hoje ou que tenham implementação clara nesta task.
 
 ### 1. Aba Empresa
@@ -34,9 +34,8 @@ Verificar:
 
 Decisão esperada:
 
-- Se os campos já persistem corretamente, manter e ajustar mensagens/validações se necessário.
-- Se não persistem, implementar persistência em Supabase.
-- Se a logo não funcionar, decidir entre implementar upload/persistência ou remover temporariamente o campo para não parecer funcional sem ser.
+- Persistência implementada em `company_settings`.
+- Logo removida temporariamente para não parecer funcional sem armazenamento configurado.
 
 Observação:
 
@@ -72,8 +71,9 @@ Verificar:
 
 Decisão esperada:
 
-- Se estiver apenas em memória/mock, implementar persistência ou simplificar a aba.
-- Preferir ativar/desativar acessórios em vez de apagar fisicamente, seguindo a regra de preservação histórica.
+- Persistência implementada em `accessories`.
+- Acessórios são ativados/desativados, não apagados fisicamente.
+- Cadastro/edição de veículo passa a usar acessórios ativos do catálogo, com fallback para lista padrão caso o catálogo ainda esteja vazio.
 
 ### 4. Aba Geral
 
@@ -99,7 +99,7 @@ Sugestões de opções úteis para manter agora:
 - Exibir veículos arquivados na listagem, se o filtro/listagem for conectado a essa preferência.
 - Preferência visual do usuário atual, se já existir integração com o tema.
 
-Se nenhuma preferência geral tiver aplicação real imediata, a aba Geral deve ser removida ou substituída por um estado vazio simples informando que novas preferências serão adicionadas conforme os módulos forem concluídos.
+Como nenhuma preferência geral tinha aplicação real imediata, a aba Geral foi removida por enquanto.
 
 ### Critérios de aceite
 
@@ -113,9 +113,9 @@ Se nenhuma preferência geral tiver aplicação real imediata, a aba Geral deve 
 
 ### Ordem recomendada
 
-1. Auditar o estado atual de cada aba em `/settings`.
-2. Corrigir ou implementar persistência da aba Empresa.
-3. Validar e ajustar textos/fluxos da aba Usuários.
-4. Corrigir ou implementar persistência da aba Acessórios.
-5. Simplificar a aba Geral, removendo opções demonstrativas.
-6. Rodar build/testes e revisar manualmente a tela.
+1. Auditar o estado atual de cada aba em `/settings`. Concluído.
+2. Corrigir ou implementar persistência da aba Empresa. Concluído.
+3. Validar e ajustar textos/fluxos da aba Usuários. Concluído.
+4. Corrigir ou implementar persistência da aba Acessórios. Concluído.
+5. Simplificar a aba Geral, removendo opções demonstrativas. Concluído.
+6. Rodar build/testes e revisar manualmente a tela. Build concluído; revisão manual pendente.

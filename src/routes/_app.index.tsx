@@ -1,105 +1,46 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import {
-  Car,
-  TrendingUp,
-  TrendingDown,
-  DollarSign,
-  ArrowUpRight,
-  ArrowDownRight,
-  ShoppingBag,
-  UserPlus,
-  Wallet,
   AlertTriangle,
-  ChevronRight,
-  Wrench,
+  ArrowDownRight,
+  ArrowUpRight,
+  Car,
   CheckCircle2,
+  ChevronRight,
+  DollarSign,
+  ShoppingBag,
   Sparkles,
+  TrendingDown,
+  TrendingUp,
+  Wallet,
+  Wrench,
 } from "lucide-react";
-import { useChecklist, summarize } from "@/modules/checklist";
 import {
-  AreaChart,
   Area,
+  AreaChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  CartesianGrid,
 } from "recharts";
+import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { brl, fmtDate, initials, relTime } from "@/shared/lib/format";
-import { sales, vehicles, monthlySeries } from "@/shared/mock-data";
-import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
+import { useChecklist, summarize } from "@/modules/checklist";
+import { financialTransactionKeys, listFinancialTransactions } from "@/modules/financial/services/transactions";
+import { saleKeys, listSales } from "@/modules/sales/services/sales";
+import { listVehicles, vehicleKeys } from "@/modules/vehicles/services/vehicles";
 
 export const Route = createFileRoute("/_app/")({
-  head: () => ({ meta: [{ title: "Dashboard | GaragemERP" }] }),
+  head: () => ({ meta: [{ title: "Painel | GaragemERP" }] }),
   component: Dashboard,
 });
-
-const stats = [
-  {
-    label: "Veículos Disponíveis",
-    value: vehicles.filter((v) => v.status === "available").length.toString(),
-    delta: "+2",
-    deltaType: "up" as const,
-    icon: Car,
-    accent: "text-info bg-info/10",
-  },
-  {
-    label: "Em avaliação",
-    value: vehicles.filter((v) => v.status === "evaluating").length.toString(),
-    delta: "pré-compra",
-    deltaType: "up" as const,
-    icon: Wrench,
-    accent: "text-warning bg-warning/10",
-  },
-  {
-    label: "Vendas este mês",
-    value: "5",
-    sub: brl(626700),
-    delta: "+18%",
-    deltaType: "up" as const,
-    icon: TrendingUp,
-    accent: "text-success bg-success/10",
-  },
-  {
-    label: "Receita do Mês",
-    value: brl(389000),
-    delta: "+12%",
-    deltaType: "up" as const,
-    icon: DollarSign,
-    accent: "text-success bg-success/10",
-  },
-  {
-    label: "Despesas do Mês",
-    value: brl(252000),
-    delta: "-4%",
-    deltaType: "down" as const,
-    icon: TrendingDown,
-    accent: "text-destructive bg-destructive/10",
-  },
-];
-
-const inventoryData = (
-  ["evaluating", "available", "reserved", "sold", "in_repair"] as const
-).map((s) => ({
-  name:
-    s === "evaluating"
-      ? "Em avaliação"
-      : s === "available"
-      ? "Disponível"
-      : s === "reserved"
-        ? "Reservado"
-        : s === "sold"
-          ? "Vendido"
-          : "Em preparação",
-  value: vehicles.filter((v) => v.status === s).length,
-  key: s,
-}));
 
 const inventoryColors: Record<string, string> = {
   evaluating: "var(--warning)",
@@ -109,108 +50,287 @@ const inventoryColors: Record<string, string> = {
   in_repair: "#f97316",
 };
 
-const activity = [
-  { icon: ShoppingBag, label: "Venda registrada - Jeep Compass", time: "2025-05-05T10:30:00" },
-  { icon: Car, label: "Veículo adicionado - BYD Dolphin", time: "2025-05-04T15:12:00" },
-  { icon: Wallet, label: "Pagamento recebido - Venda #1024", time: "2025-04-28T09:00:00" },
-  { icon: UserPlus, label: "Novo cliente - Beatriz Ramos", time: "2025-01-08T14:00:00" },
-];
-
-type AlertItem = { type: "danger" | "warning"; label: string; href: string };
-const alerts: AlertItem[] = [
-  { type: "danger", label: "1 parcela vencida - Aluguel do pátio", href: "/financial/bills" },
-  { type: "warning", label: "1 veículo reservado há 30+ dias", href: "/vehicles" },
-  { type: "warning", label: "2 comissões pendentes de pagamento", href: "/financial/bills" },
-];
-
 const periods = [
-  { key: "7d", label: "7D", count: 7 },
-  { key: "30d", label: "30D", count: 30 },
-  { key: "3m", label: "3M", count: 3 },
-  { key: "6m", label: "6M", count: 6 },
-  { key: "1a", label: "1A", count: 12 },
+  { key: "3m", label: "3M", months: 3 },
+  { key: "6m", label: "6M", months: 6 },
+  { key: "1a", label: "12M", months: 12 },
 ] as const;
+
+function monthKey(date: string) {
+  return date.slice(0, 7);
+}
+
+function monthLabel(key: string) {
+  const [year, month] = key.split("-").map(Number);
+  return new Intl.DateTimeFormat("pt-BR", { month: "short" }).format(
+    new Date(year, month - 1, 1),
+  );
+}
+
+function isCurrentMonth(date: string) {
+  const now = new Date();
+  const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return monthKey(date) === currentKey;
+}
+
+function buildFinancialSeries(
+  transactions: Awaited<ReturnType<typeof listFinancialTransactions>>,
+  monthsBack: number,
+) {
+  const now = new Date();
+  const months = Array.from({ length: monthsBack }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (monthsBack - 1 - index), 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    return { key, month: monthLabel(key), receita: 0, despesas: 0 };
+  });
+  const byKey = new Map(months.map((entry) => [entry.key, entry]));
+
+  for (const transaction of transactions) {
+    if (transaction.status === "canceled") continue;
+    const entry = byKey.get(monthKey(transaction.transaction_date));
+    if (!entry) continue;
+    if (transaction.type === "income") {
+      entry.receita += transaction.amount;
+    } else {
+      entry.despesas += transaction.amount;
+    }
+  }
+
+  return months;
+}
 
 function Dashboard() {
   const navigate = useNavigate();
   const [period, setPeriod] = useState<(typeof periods)[number]["key"]>("6m");
-  const recentSales = [...sales].sort((a, b) => b.sale_date.localeCompare(a.sale_date)).slice(0, 5);
+  const { data: vehicles = [], isLoading: loadingVehicles } = useQuery({
+    queryKey: vehicleKeys.all,
+    queryFn: listVehicles,
+  });
+  const { data: sales = [], isLoading: loadingSales } = useQuery({
+    queryKey: saleKeys.all,
+    queryFn: listSales,
+  });
+  const { data: transactions = [], isLoading: loadingTransactions } = useQuery({
+    queryKey: financialTransactionKeys.all,
+    queryFn: listFinancialTransactions,
+  });
   const allChecklist = useChecklist();
+
+  const filteredVehicles = vehicles.filter((vehicle) => vehicle.status !== "archived");
+  const completedSales = sales.filter((sale) => sale.status === "completed");
+  const currentMonthCompletedSales = completedSales.filter((sale) => isCurrentMonth(sale.sale_date));
+  const currentMonthRevenue = currentMonthCompletedSales.reduce(
+    (sum, sale) => sum + sale.total_value,
+    0,
+  );
+  const currentMonthPaidExpenses = transactions
+    .filter(
+      (transaction) =>
+        transaction.type === "expense" &&
+        transaction.status === "paid" &&
+        isCurrentMonth(transaction.transaction_date),
+    )
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+  const currentMonthPaidIncome = transactions
+    .filter(
+      (transaction) =>
+        transaction.type === "income" &&
+        transaction.status === "paid" &&
+        isCurrentMonth(transaction.transaction_date),
+    )
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+
+  const inventoryData = (
+    ["evaluating", "available", "reserved", "sold", "in_repair"] as const
+  ).map((status) => ({
+    name:
+      status === "evaluating"
+        ? "Em avaliação"
+        : status === "available"
+          ? "Disponível"
+          : status === "reserved"
+            ? "Reservado"
+            : status === "sold"
+              ? "Vendido"
+              : "Em preparação",
+    value: filteredVehicles.filter((vehicle) => vehicle.status === status).length,
+    key: status,
+  }));
 
   const prep = useMemo(() => {
     const byVehicle = new Map<number, ReturnType<typeof summarize>>();
-    for (const v of vehicles) {
-      byVehicle.set(v.id, summarize(allChecklist.filter((i) => i.vehicle_id === v.id)));
+    for (const vehicle of filteredVehicles) {
+      byVehicle.set(
+        vehicle.id,
+        summarize(allChecklist.filter((item) => item.vehicle_id === vehicle.id)),
+      );
     }
-    const withPending = vehicles.filter((v) => {
-      const s = byVehicle.get(v.id)!;
-      return s.pending + s.inProgress + s.waitingParts > 0;
-    });
-    const ready = vehicles.filter((v) => {
-      const s = byVehicle.get(v.id)!;
-      return s.total > 0 && s.readyForSale && v.status !== "sold";
-    });
-    const inMaintenance = vehicles.filter(
-      (v) => v.status === "in_repair" || (byVehicle.get(v.id)?.inProgress ?? 0) > 0,
-    );
-    const totalPrepCost = allChecklist.reduce((s, i) => s + (i.actual_cost || 0), 0);
-    const urgentCount = vehicles.filter((v) => byVehicle.get(v.id)?.hasUrgent).length;
-    return { withPending, ready, inMaintenance, totalPrepCost, urgentCount };
-  }, [allChecklist]);
 
+    const withPending = filteredVehicles.filter((vehicle) => {
+      const summary = byVehicle.get(vehicle.id);
+      if (!summary) return false;
+      return summary.pending + summary.inProgress + summary.waitingParts > 0;
+    });
+    const ready = filteredVehicles.filter((vehicle) => {
+      const summary = byVehicle.get(vehicle.id);
+      if (!summary) return false;
+      return summary.total > 0 && summary.readyForSale && vehicle.status !== "sold";
+    });
+    const inMaintenance = filteredVehicles.filter(
+      (vehicle) =>
+        vehicle.status === "in_repair" || (byVehicle.get(vehicle.id)?.inProgress ?? 0) > 0,
+    );
+    const totalPrepCost = allChecklist.reduce((sum, item) => sum + (item.actual_cost || 0), 0);
+
+    return { withPending, ready, inMaintenance, totalPrepCost };
+  }, [allChecklist, filteredVehicles]);
 
   const chartData = useMemo(() => {
-    const p = periods.find((x) => x.key === period)!;
-    if (period === "7d" || period === "30d") {
-      const last = monthlySeries[monthlySeries.length - 1];
-      const days = p.count;
-      // Synthesize daily series from monthly aggregate
-      return Array.from({ length: days }, (_, i) => {
-        const factor = (i + 1) / days;
-        const noise = 0.85 + ((i * 37) % 30) / 100;
-        return {
-          month: `D${i + 1}`,
-          receita: Math.round((last.receita / days) * noise * factor + last.receita / days * 0.6),
-          despesas: Math.round((last.despesas / days) * noise * factor + last.despesas / days * 0.6),
-        };
+    const selected = periods.find((entry) => entry.key === period) ?? periods[1];
+    return buildFinancialSeries(transactions, selected.months);
+  }, [period, transactions]);
+
+  const recentSales = completedSales
+    .slice()
+    .sort((a, b) => b.sale_date.localeCompare(a.sale_date))
+    .slice(0, 5);
+
+  const recentActivity = useMemo(() => {
+    const salesActivity = sales.map((sale) => ({
+      id: `sale-${sale.id}`,
+      label: `Venda ${sale.status === "completed" ? "concluída" : sale.status === "pending" ? "reservada" : "cancelada"} - ${sale.vehicle.brand} ${sale.vehicle.model}`,
+      time: `${sale.sale_date}T12:00:00`,
+      href: `/sales/${sale.id}`,
+      icon: ShoppingBag,
+    }));
+    const financialActivity = transactions.map((transaction) => ({
+      id: `transaction-${transaction.id}`,
+      label: `${transaction.type === "income" ? "Receita" : "Despesa"} - ${transaction.description}`,
+      time: `${transaction.transaction_date}T12:00:00`,
+      href: `/financial/transactions/${transaction.id}`,
+      icon: transaction.type === "income" ? TrendingUp : Wallet,
+    }));
+
+    return [...salesActivity, ...financialActivity]
+      .sort((a, b) => b.time.localeCompare(a.time))
+      .slice(0, 6);
+  }, [sales, transactions]);
+
+  const alerts = useMemo(() => {
+    const overdueFinancial = transactions.filter((transaction) => transaction.status === "overdue");
+    const reservedVehicles = filteredVehicles.filter((vehicle) => vehicle.status === "reserved");
+    const preparingVehicles = filteredVehicles.filter((vehicle) => vehicle.status === "in_repair");
+    const items: Array<{ type: "danger" | "warning"; label: string; href: string }> = [];
+
+    if (overdueFinancial.length > 0) {
+      items.push({
+        type: "danger",
+        label: `${overdueFinancial.length} conta(s) vencida(s) no financeiro`,
+        href: "/financial/transactions",
       });
     }
-    return monthlySeries.slice(-p.count);
-  }, [period]);
+    if (reservedVehicles.length > 0) {
+      items.push({
+        type: "warning",
+        label: `${reservedVehicles.length} veículo(s) reservado(s) aguardando definição`,
+        href: "/sales",
+      });
+    }
+    if (preparingVehicles.length > 0) {
+      items.push({
+        type: "warning",
+        label: `${preparingVehicles.length} veículo(s) em preparação`,
+        href: "/vehicles",
+      });
+    }
+
+    return items;
+  }, [filteredVehicles, transactions]);
+
+  const stats = [
+    {
+      label: "Veículos disponíveis",
+      value: filteredVehicles.filter((vehicle) => vehicle.status === "available").length.toString(),
+      sub: "Estoque pronto para venda",
+      delta: `${filteredVehicles.filter((vehicle) => vehicle.status === "evaluating").length} em avaliação`,
+      deltaType: "up" as const,
+      icon: Car,
+      accent: "text-info bg-info/10",
+    },
+    {
+      label: "Vendas no mês",
+      value: currentMonthCompletedSales.length.toString(),
+      sub: brl(currentMonthRevenue),
+      delta: `${sales.filter((sale) => sale.status === "pending").length} pendente(s)`,
+      deltaType: "up" as const,
+      icon: ShoppingBag,
+      accent: "text-success bg-success/10",
+    },
+    {
+      label: "Receita recebida",
+      value: brl(currentMonthPaidIncome),
+      sub: "Pagamentos confirmados em agosto de 2026",
+      delta: `${transactions.filter((transaction) => transaction.type === "income" && transaction.status === "pending").length} a receber`,
+      deltaType: "up" as const,
+      icon: DollarSign,
+      accent: "text-success bg-success/10",
+    },
+    {
+      label: "Despesas pagas",
+      value: brl(currentMonthPaidExpenses),
+      sub: "Saídas confirmadas em agosto de 2026",
+      delta: `${transactions.filter((transaction) => transaction.type === "expense" && transaction.status === "pending").length} a pagar`,
+      deltaType: "down" as const,
+      icon: TrendingDown,
+      accent: "text-destructive bg-destructive/10",
+    },
+    {
+      label: "Resultado do mês",
+      value: brl(currentMonthPaidIncome - currentMonthPaidExpenses),
+      sub: "Entradas pagas menos saídas pagas",
+      delta: `${transactions.filter((transaction) => transaction.status === "overdue").length} vencida(s)`,
+      deltaType: "up" as const,
+      icon: TrendingUp,
+      accent: "text-warning bg-warning/10",
+    },
+  ];
+
+  const loading = loadingVehicles || loadingSales || loadingTransactions;
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto">
       <div>
         <h1 className="text-2xl font-display font-semibold tracking-tight">Visão Geral</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Acompanhe o desempenho da sua revenda em tempo real.
+          Painel consolidado com dados reais da operação em 25 de agosto de 2026.
         </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
-        {stats.map((s) => (
-          <Card key={s.label} className="overflow-hidden">
+        {stats.map((stat) => (
+          <Card key={stat.label} className="overflow-hidden">
             <CardContent className="p-5">
               <div className="flex items-start justify-between">
                 <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">{s.label}</p>
-                  <p className="text-2xl font-display font-semibold tracking-tight">{s.value}</p>
-                  {s.sub && <p className="text-xs text-muted-foreground">{s.sub}</p>}
+                  <p className="text-sm text-muted-foreground">{stat.label}</p>
+                  <p className="text-2xl font-display font-semibold tracking-tight">
+                    {loading ? "..." : stat.value}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{stat.sub}</p>
                 </div>
-                <div className={`h-10 w-10 rounded-full flex items-center justify-center ${s.accent}`}>
-                  <s.icon className="h-5 w-5" />
+                <div className={`h-10 w-10 rounded-full flex items-center justify-center ${stat.accent}`}>
+                  <stat.icon className="h-5 w-5" />
                 </div>
               </div>
               <div className="flex items-center gap-1 mt-3 text-xs">
-                {s.deltaType === "up" ? (
+                {stat.deltaType === "up" ? (
                   <ArrowUpRight className="h-3.5 w-3.5 text-success" />
                 ) : (
                   <ArrowDownRight className="h-3.5 w-3.5 text-destructive" />
                 )}
-                <span className={s.deltaType === "up" ? "text-success" : "text-destructive"}>
-                  {s.delta}
+                <span className={stat.deltaType === "up" ? "text-success" : "text-destructive"}>
+                  {loading ? "..." : stat.delta}
                 </span>
-                <span className="text-muted-foreground">vs mês anterior</span>
               </div>
             </CardContent>
           </Card>
@@ -222,28 +342,28 @@ function Dashboard() {
           icon={Wrench}
           accent="text-warning bg-warning/10"
           label="Veículos com pendências"
-          value={prep.withPending.length}
+          value={loading ? "..." : prep.withPending.length}
           to="/vehicles"
         />
         <PrepCard
           icon={Sparkles}
           accent="text-success bg-success/10"
           label="Prontos para venda"
-          value={prep.ready.length}
+          value={loading ? "..." : prep.ready.length}
           to="/vehicles"
         />
         <PrepCard
           icon={CheckCircle2}
           accent="text-info bg-info/10"
-          label="Em manutenção/preparação"
-          value={prep.inMaintenance.length}
+          label="Em preparação"
+          value={loading ? "..." : prep.inMaintenance.length}
           to="/vehicles"
         />
         <PrepCard
-          icon={DollarSign}
+          icon={Wallet}
           accent="text-orange-500 bg-orange-500/10"
           label="Custos de preparação"
-          value={brl(prep.totalPrepCost)}
+          value={loading ? "..." : brl(prep.totalPrepCost)}
           to="/vehicles"
         />
       </div>
@@ -253,17 +373,17 @@ function Dashboard() {
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <div>
               <CardTitle className="text-base">Receita vs Despesas</CardTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">Últimos 6 meses</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Transações persistidas por mês</p>
             </div>
             <div className="flex gap-1 p-1 rounded-md bg-muted text-xs">
-              {periods.map((p) => (
+              {periods.map((entry) => (
                 <button
                   type="button"
-                  key={p.key}
-                  onClick={() => setPeriod(p.key)}
-                  className={`px-2.5 py-1 rounded cursor-pointer transition-colors ${period === p.key ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  key={entry.key}
+                  onClick={() => setPeriod(entry.key)}
+                  className={`px-2.5 py-1 rounded cursor-pointer transition-colors ${period === entry.key ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                 >
-                  {p.label}
+                  {entry.label}
                 </button>
               ))}
             </div>
@@ -282,8 +402,20 @@ function Dashboard() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="month" stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `${v / 1000}k`} />
+                <XAxis
+                  dataKey="month"
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(value) => `${Number(value) / 1000}k`}
+                />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: "var(--popover)",
@@ -291,10 +423,24 @@ function Dashboard() {
                     borderRadius: 8,
                     fontSize: 12,
                   }}
-                  formatter={(v) => brl(Number(v))}
+                  formatter={(value) => brl(Number(value))}
                 />
-                <Area type="monotone" dataKey="receita" stroke="var(--success)" strokeWidth={2} fill="url(#receita)" name="Receita" />
-                <Area type="monotone" dataKey="despesas" stroke="var(--destructive)" strokeWidth={2} fill="url(#despesas)" name="Despesas" />
+                <Area
+                  type="monotone"
+                  dataKey="receita"
+                  stroke="var(--success)"
+                  strokeWidth={2}
+                  fill="url(#receita)"
+                  name="Receita"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="despesas"
+                  stroke="var(--destructive)"
+                  strokeWidth={2}
+                  fill="url(#despesas)"
+                  name="Despesas"
+                />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
@@ -303,7 +449,7 @@ function Dashboard() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Estoque por Status</CardTitle>
-            <p className="text-xs text-muted-foreground">Distribuição atual dos veículos</p>
+            <p className="text-xs text-muted-foreground">Veículos ativos, sem arquivados</p>
           </CardHeader>
           <CardContent>
             <div className="flex items-center justify-center">
@@ -317,8 +463,8 @@ function Dashboard() {
                     paddingAngle={3}
                     stroke="none"
                   >
-                    {inventoryData.map((d) => (
-                      <Cell key={d.key} fill={inventoryColors[d.key]} />
+                    {inventoryData.map((entry) => (
+                      <Cell key={entry.key} fill={inventoryColors[entry.key]} />
                     ))}
                   </Pie>
                   <Tooltip
@@ -333,14 +479,14 @@ function Dashboard() {
               </ResponsiveContainer>
             </div>
             <div className="grid grid-cols-2 gap-2 mt-3">
-              {inventoryData.map((d) => (
-                <div key={d.key} className="flex items-center gap-2 text-xs">
+              {inventoryData.map((entry) => (
+                <div key={entry.key} className="flex items-center gap-2 text-xs">
                   <span
                     className="h-2.5 w-2.5 rounded-full"
-                    style={{ background: inventoryColors[d.key] }}
+                    style={{ background: inventoryColors[entry.key] }}
                   />
-                  <span className="text-muted-foreground">{d.name}</span>
-                  <span className="ml-auto font-medium">{d.value}</span>
+                  <span className="text-muted-foreground">{entry.name}</span>
+                  <span className="ml-auto font-medium">{loading ? "..." : entry.value}</span>
                 </div>
               ))}
             </div>
@@ -357,47 +503,83 @@ function Dashboard() {
             </Link>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="divide-y divide-border">
-              {recentSales.map((s) => (
-                <div key={s.id} className="flex items-center gap-3 px-6 py-3 hover:bg-muted/40 transition-colors cursor-pointer">
-                  <Avatar className="h-9 w-9">
-                    <AvatarFallback className="text-xs bg-muted">{initials(s.customer.person.name)}</AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">{s.customer.person.name}</div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      {s.vehicle.brand} {s.vehicle.model} · <span className="plate-chip">{s.vehicle.plate}</span>
+            {loadingSales ? (
+              <div className="p-6 text-sm text-muted-foreground">Carregando vendas...</div>
+            ) : recentSales.length === 0 ? (
+              <div className="p-6 text-sm text-muted-foreground">
+                Nenhuma venda concluída registrada ainda.
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {recentSales.map((sale) => (
+                  <div
+                    key={sale.id}
+                    className="flex items-center gap-3 px-6 py-3 hover:bg-muted/40 transition-colors cursor-pointer"
+                    onClick={() => navigate({ to: "/sales/$id", params: { id: String(sale.id) } })}
+                  >
+                    <Avatar className="h-9 w-9">
+                      <AvatarFallback className="text-xs bg-muted">
+                        {initials(sale.customer.person.name)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{sale.customer.person.name}</div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        {sale.vehicle.brand} {sale.vehicle.model} ·{" "}
+                        <span className="plate-chip">{sale.vehicle.plate}</span>
+                      </div>
                     </div>
+                    <div className="text-right hidden sm:block">
+                      <div className="text-sm font-semibold">{brl(sale.total_value)}</div>
+                      <div className="text-xs text-muted-foreground">{fmtDate(sale.sale_date)}</div>
+                    </div>
+                    <StatusBadge kind="sale" value={sale.status} />
                   </div>
-                  <div className="text-right hidden sm:block">
-                    <div className="text-sm font-semibold">{brl(s.total_value - s.discount)}</div>
-                    <div className="text-xs text-muted-foreground">{fmtDate(s.sale_date)}</div>
-                  </div>
-                  <StatusBadge kind="sale" value={s.status} />
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">Atividade Recente</CardTitle>
+            <CardTitle className="text-base">Movimentações Recentes</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {activity.map((a, i) => (
-                <div key={i} className="flex gap-3">
-                  <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
-                    <a.icon className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm">{a.label}</div>
-                    <div className="text-xs text-muted-foreground">{relTime(a.time)}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            {loading ? (
+              <div className="text-sm text-muted-foreground">Carregando movimentações...</div>
+            ) : recentActivity.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                Nenhuma movimentação recente encontrada.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {recentActivity.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      if (item.id.startsWith("sale-")) {
+                        const id = item.id.replace("sale-", "");
+                        navigate({ to: "/sales/$id", params: { id } });
+                        return;
+                      }
+                      const id = item.id.replace("transaction-", "");
+                      navigate({ to: "/financial/transactions/$id", params: { id } });
+                    }}
+                    className="flex w-full gap-3 text-left"
+                  >
+                    <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
+                      <item.icon className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm">{item.label}</div>
+                      <div className="text-xs text-muted-foreground">{relTime(item.time)}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -408,20 +590,28 @@ function Dashboard() {
           <CardTitle className="text-base">Alertas Pendentes</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {alerts.map((a, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => navigate({ to: a.href })}
-              className="w-full flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-muted/40 hover:border-primary/30 transition-colors text-left cursor-pointer"
-            >
-              <span
-                className={`h-2 w-2 rounded-full ${a.type === "danger" ? "bg-destructive" : "bg-warning"}`}
-              />
-              <span className="text-sm flex-1">{a.label}</span>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            </button>
-          ))}
+          {loading ? (
+            <div className="text-sm text-muted-foreground">Carregando alertas...</div>
+          ) : alerts.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              Nenhum alerta operacional relevante no momento.
+            </div>
+          ) : (
+            alerts.map((alert, index) => (
+              <button
+                key={index}
+                type="button"
+                onClick={() => navigate({ to: alert.href })}
+                className="w-full flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-muted/40 hover:border-primary/30 transition-colors text-left cursor-pointer"
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${alert.type === "danger" ? "bg-destructive" : "bg-warning"}`}
+                />
+                <span className="text-sm flex-1">{alert.label}</span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </button>
+            ))
+          )}
         </CardContent>
       </Card>
     </div>
@@ -450,9 +640,7 @@ function PrepCard({
           </div>
           <div className="min-w-0">
             <div className="text-sm text-muted-foreground">{label}</div>
-            <div className="text-xl font-display font-semibold tracking-tight truncate">
-              {value}
-            </div>
+            <div className="text-xl font-display font-semibold tracking-tight truncate">{value}</div>
           </div>
         </CardContent>
       </Card>

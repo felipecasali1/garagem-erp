@@ -1,14 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, Users, Sparkles, Sliders, Plus, Trash2, Upload, Shield } from "lucide-react";
+import { Building2, Users, Sparkles, Plus, Trash2, Shield, Loader2 } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
 import { Button } from "@/shared/components/ui/button";
-import { Textarea } from "@/shared/components/ui/textarea";
 import { Switch } from "@/shared/components/ui/switch";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
@@ -34,20 +33,32 @@ import { toast } from "sonner";
 import { useAuth } from "@/shared/supabase/auth";
 import { employeeKeys, listEmployees } from "@/modules/employees/services/employees";
 import {
+  companySettingsKeys,
+  getCompanySettings,
+  getEmptyCompanySettings,
+  saveCompanySettings,
+  type CompanySettingsDraft,
+} from "@/modules/settings/services/company-settings";
+import {
+  accessoryKeys,
+  createAccessory,
+  listAccessories,
+  setAccessoryActive,
+} from "@/modules/settings/services/accessories";
+import {
   userKeys,
   deleteSystemUser,
   createSystemUser,
   listSystemUsers,
   setSystemUserActive,
 } from "@/modules/users/services/users";
-import type { SystemUserRecord } from "@/modules/users/services/users";
 import type { EmployeeAccessRole } from "@/modules/employees/types";
 
 export const Route = createFileRoute("/_app/settings")({
   head: () => ({ meta: [{ title: "Configurações | GaragemERP" }] }),
   validateSearch: (search: { tab?: unknown }): { tab?: SettingsTab } => {
     const tab = typeof search.tab === "string" ? search.tab : undefined;
-    if (tab === "company" || tab === "users" || tab === "accessories" || tab === "general") {
+    if (tab === "company" || tab === "users" || tab === "accessories") {
       return { tab };
     }
     return {};
@@ -55,25 +66,7 @@ export const Route = createFileRoute("/_app/settings")({
   component: SettingsPage,
 });
 
-const initialAccessories = [
-  "Ar condicionado",
-  "Direção elétrica",
-  "Vidros elétricos",
-  "Trava elétrica",
-  "Airbag",
-  "ABS",
-  "Câmera de ré",
-  "Sensor de estacionamento",
-  "Multimídia",
-  "Teto solar",
-  "Bancos em couro",
-  "Rodas de liga",
-  "GPS",
-  "Faróis de LED",
-  "Piloto automático",
-];
-
-type SettingsTab = "company" | "users" | "accessories" | "general";
+type SettingsTab = "company" | "users" | "accessories";
 
 function SettingsPage() {
   const { isAdmin } = useAuth();
@@ -88,7 +81,7 @@ function SettingsPage() {
     <div className="max-w-5xl mx-auto">
       <PageHeader
         title="Configurações"
-        description="Empresa, usuários, acessórios e preferências."
+        description="Empresa, acessos do sistema e catálogo de acessórios."
       />
       <Tabs value={tab} onValueChange={(value) => setTab(value as SettingsTab)}>
         <TabsList className="mb-4">
@@ -106,10 +99,6 @@ function SettingsPage() {
             <Sparkles className="h-4 w-4 mr-2" />
             Acessórios
           </TabsTrigger>
-          <TabsTrigger value="general">
-            <Sliders className="h-4 w-4 mr-2" />
-            Geral
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="company">
@@ -123,53 +112,116 @@ function SettingsPage() {
         <TabsContent value="accessories">
           <AccessoriesTab />
         </TabsContent>
-        <TabsContent value="general">
-          <GeneralTab />
-        </TabsContent>
       </Tabs>
     </div>
   );
 }
 
 function CompanyTab() {
+  const queryClient = useQueryClient();
+  const {
+    data: settings,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: companySettingsKeys.detail,
+    queryFn: getCompanySettings,
+  });
+  const [draft, setDraft] = useState<CompanySettingsDraft>(getEmptyCompanySettings());
+
+  useEffect(() => {
+    setDraft(settings ?? getEmptyCompanySettings());
+  }, [settings]);
+
+  const saveMutation = useMutation({
+    mutationFn: saveCompanySettings,
+    onSuccess: async (nextSettings) => {
+      queryClient.setQueryData(companySettingsKeys.detail, nextSettings);
+      toast.success("Dados da empresa salvos");
+    },
+    onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "Falha ao salvar dados da empresa.",
+      );
+    },
+  });
+
+  const patchDraft = (patch: Partial<CompanySettingsDraft>) =>
+    setDraft((current) => ({ ...current, ...patch }));
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    toast.success("Dados da empresa atualizados");
+    saveMutation.mutate(draft);
   };
+
   return (
     <form onSubmit={submit}>
       <Card>
         <CardContent className="p-6 space-y-6">
+          {error && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+              Falha ao carregar dados da empresa:{" "}
+              {error instanceof Error ? error.message : "erro desconhecido"}
+            </div>
+          )}
           <div className="flex items-center gap-4">
-            <div className="h-20 w-20 rounded-xl bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center text-primary-foreground font-display font-bold text-2xl">
-              GE
+            <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-primary text-primary-foreground font-display text-2xl font-bold">
+              {(draft.trade_name || draft.legal_name || "GE").slice(0, 2).toUpperCase()}
             </div>
             <div>
-              <Button type="button" variant="outline" size="sm">
-                <Upload className="h-4 w-4" /> Trocar logo
-              </Button>
-              <p className="text-xs text-muted-foreground mt-2">PNG ou SVG, até 2MB</p>
+              <div className="text-sm font-medium">Identidade da empresa</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Upload de logo fica desativado até existir armazenamento configurado.
+              </p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Razão social">
-              <Input defaultValue="Garagem Elite Comércio de Veículos LTDA" />
+              <Input
+                value={draft.legal_name}
+                onChange={(event) => patchDraft({ legal_name: event.target.value })}
+                disabled={isLoading}
+              />
             </Field>
             <Field label="Nome fantasia">
-              <Input defaultValue="GaragemERP" />
+              <Input
+                value={draft.trade_name}
+                onChange={(event) => patchDraft({ trade_name: event.target.value })}
+                disabled={isLoading}
+              />
             </Field>
             <Field label="CNPJ">
-              <CpfCnpjInput value="12345678000190" onValueChange={() => {}} personType="company" />
+              <CpfCnpjInput
+                value={draft.cnpj}
+                onValueChange={(value) => patchDraft({ cnpj: value })}
+                personType="company"
+                disabled={isLoading}
+              />
             </Field>
             <Field label="Inscrição estadual">
-              <Input defaultValue="123.456.789.000" />
+              <Input
+                value={draft.state_registration}
+                onChange={(event) => patchDraft({ state_registration: event.target.value })}
+                disabled={isLoading}
+              />
             </Field>
             <Field label="Telefone">
-              <PhoneInput value="1140028922" onValueChange={() => {}} />
+              <PhoneInput
+                value={draft.phone}
+                onValueChange={(value) => patchDraft({ phone: value })}
+                disabled={isLoading}
+              />
             </Field>
             <Field label="E-mail">
-              <Input type="email" defaultValue="contato@garagemerp.com.br" />
+              <Input
+                type="email"
+                value={draft.email}
+                onChange={(event) => patchDraft({ email: event.target.value })}
+                disabled={isLoading}
+              />
             </Field>
           </div>
 
@@ -177,28 +229,60 @@ function CompanyTab() {
             <h3 className="font-display font-semibold mb-3">Endereço</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label="CEP">
-                <CepInput value="04567000" onValueChange={() => {}} />
+                <CepInput
+                  value={draft.zip_code}
+                  onValueChange={(value) => patchDraft({ zip_code: value })}
+                  disabled={isLoading}
+                />
               </Field>
               <Field label="Cidade">
-                <Input defaultValue="São Paulo" />
+                <Input
+                  value={draft.city}
+                  onChange={(event) => patchDraft({ city: event.target.value })}
+                  disabled={isLoading}
+                />
               </Field>
               <Field label="UF">
-                <UfInput value="SP" onValueChange={() => {}} />
+                <UfInput
+                  value={draft.state}
+                  onValueChange={(value) => patchDraft({ state: value })}
+                  disabled={isLoading}
+                />
               </Field>
               <Field label="Rua">
-                <Input defaultValue="Av. Brigadeiro Faria Lima" />
+                <Input
+                  value={draft.street}
+                  onChange={(event) => patchDraft({ street: event.target.value })}
+                  disabled={isLoading}
+                />
               </Field>
               <Field label="Número">
-                <Input defaultValue="1500" />
+                <Input
+                  value={draft.number}
+                  onChange={(event) => patchDraft({ number: event.target.value })}
+                  disabled={isLoading}
+                />
               </Field>
               <Field label="Bairro">
-                <Input defaultValue="Itaim Bibi" />
+                <Input
+                  value={draft.neighborhood}
+                  onChange={(event) => patchDraft({ neighborhood: event.target.value })}
+                  disabled={isLoading}
+                />
               </Field>
             </div>
           </div>
 
           <div className="flex justify-end">
-            <Button type="submit">Salvar alterações</Button>
+            <Button type="submit" disabled={isLoading || saveMutation.isPending}>
+              {saveMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Salvando...
+                </>
+              ) : (
+                "Salvar alterações"
+              )}
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -346,24 +430,68 @@ function UsersTab() {
 }
 
 function AccessoriesTab() {
-  const [items, setItems] = useState(initialAccessories);
+  const queryClient = useQueryClient();
+  const {
+    data: items = [],
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: accessoryKeys.all,
+    queryFn: listAccessories,
+  });
   const [draft, setDraft] = useState("");
-  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
+  const createMutation = useMutation({
+    mutationFn: createAccessory,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: accessoryKeys.all });
+      await queryClient.invalidateQueries({ queryKey: accessoryKeys.active });
+      setDraft("");
+      toast.success("Acessório salvo");
+    },
+    onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error ? mutationError.message : "Falha ao salvar acessório.",
+      );
+    },
+  });
+  const statusMutation = useMutation({
+    mutationFn: ({ id, active }: { id: number; active: boolean }) =>
+      setAccessoryActive(id, active),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: accessoryKeys.all });
+      await queryClient.invalidateQueries({ queryKey: accessoryKeys.active });
+      setConfirmDeactivateId(null);
+      toast.success("Acessório atualizado");
+    },
+    onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error ? mutationError.message : "Falha ao atualizar acessório.",
+      );
+    },
+  });
   const add = () => {
     if (!draft.trim()) return;
-    setItems((s) => [...s, draft.trim()]);
-    setDraft("");
-    toast.success("Acessório adicionado");
+    createMutation.mutate(draft);
   };
+  const confirmDeactivate = items.find((item) => item.id === confirmDeactivateId);
+
   return (
     <Card>
       <CardContent className="p-6 space-y-4">
         <div>
           <h3 className="font-display font-semibold">Catálogo de acessórios</h3>
           <p className="text-xs text-muted-foreground">
-            Acessórios disponíveis para associação aos veículos.
+            Acessórios disponíveis para associação aos veículos. Itens desativados não aparecem em
+            novos cadastros, mas vínculos antigos permanecem preservados.
           </p>
         </div>
+        {error && (
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            Falha ao carregar acessórios:{" "}
+            {error instanceof Error ? error.message : "erro desconhecido"}
+          </div>
+        )}
         <div className="flex gap-2">
           <Input
             placeholder="Ex.: Sensor de chuva"
@@ -375,102 +503,76 @@ function AccessoriesTab() {
                 add();
               }
             }}
+            disabled={createMutation.isPending}
           />
-          <Button onClick={add}>
-            <Plus className="h-4 w-4" /> Adicionar
+          <Button onClick={add} disabled={createMutation.isPending}>
+            {createMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+            Adicionar
           </Button>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {items.map((name) => (
-            <div
-              key={name}
-              className="group flex items-center gap-2 pl-3 pr-2 py-1.5 rounded-full border border-border bg-muted/40 text-sm"
-            >
-              {name}
-              <button
-                type="button"
-                onClick={() => setConfirmRemove(name)}
-                className="opacity-50 hover:opacity-100 hover:text-destructive transition"
+        {isLoading ? (
+          <div className="rounded-md border border-border p-6 text-sm text-muted-foreground">
+            Carregando acessórios...
+          </div>
+        ) : items.length === 0 ? (
+          <div className="rounded-md border border-border p-6 text-sm text-muted-foreground">
+            Nenhum acessório cadastrado ainda.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {items.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center gap-3 rounded-md border border-border px-4 py-3"
               >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium">{item.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {item.active ? "Disponível para novos veículos" : "Inativo no catálogo"}
+                  </div>
+                </div>
+                <Badge variant={item.active ? "secondary" : "outline"}>
+                  {item.active ? "Ativo" : "Inativo"}
+                </Badge>
+                <Switch
+                  checked={item.active}
+                  disabled={statusMutation.isPending}
+                  onCheckedChange={(active) => {
+                    if (active) {
+                      statusMutation.mutate({ id: item.id, active: true });
+                      return;
+                    }
+                    setConfirmDeactivateId(item.id);
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+        )}
         <ConfirmActionDialog
-          open={confirmRemove != null}
+          open={confirmDeactivateId != null}
           onOpenChange={(open) => {
-            if (!open) setConfirmRemove(null);
+            if (!open) setConfirmDeactivateId(null);
           }}
-          title="Remover acessório?"
-          description="Este item será removido da lista de acessórios sugeridos."
-          confirmLabel={confirmRemove ? "Remover" : "Confirmar"}
+          title="Desativar acessório?"
+          description={
+            confirmDeactivate
+              ? `"${confirmDeactivate.name}" deixará de aparecer em novos cadastros, mas continuará preservado nos veículos que já usam esse item.`
+              : "O acessório será desativado no catálogo."
+          }
+          confirmLabel={statusMutation.isPending ? "Desativando..." : "Desativar"}
+          confirmDisabled={statusMutation.isPending || confirmDeactivateId == null}
           onConfirm={() => {
-            if (!confirmRemove) return;
-            const name = confirmRemove;
-            setConfirmRemove(null);
-            setItems((current) => current.filter((item) => item !== name));
-            toast.success("Acessório removido");
+            if (confirmDeactivateId == null) return;
+            statusMutation.mutate({ id: confirmDeactivateId, active: false });
           }}
         />
       </CardContent>
     </Card>
-  );
-}
-
-function GeneralTab() {
-  return (
-    <Card>
-      <CardContent className="p-6 space-y-6">
-        <div>
-          <h3 className="font-display font-semibold mb-3">Comissões padrão</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Tipo padrão">
-              <Select defaultValue="percentage">
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="percentage">Percentual</SelectItem>
-                  <SelectItem value="fixed">Valor fixo</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Taxa padrão (%)">
-              <Input type="number" defaultValue={2.5} />
-            </Field>
-          </div>
-        </div>
-
-        <div className="border-t border-border pt-4">
-          <h3 className="font-display font-semibold mb-3">Preferências</h3>
-          <div className="space-y-3">
-            <Toggle label="Mostrar margens estimadas em listagens" defaultChecked />
-            <Toggle label="Exibir alertas de parcelas vencidas no topo" defaultChecked />
-            <Toggle label="Notificar comissões aprovadas por e-mail" />
-            <Toggle label="Tema escuro como padrão para novos usuários" />
-          </div>
-        </div>
-
-        <div className="border-t border-border pt-4">
-          <h3 className="font-display font-semibold mb-3">Mensagem do dia</h3>
-          <Textarea rows={3} placeholder="Aparece no topo do dashboard para todos os usuários" />
-        </div>
-
-        <div className="flex justify-end">
-          <Button onClick={() => toast.success("Preferências salvas")}>Salvar preferências</Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function Toggle({ label, defaultChecked }: { label: string; defaultChecked?: boolean }) {
-  return (
-    <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-      <span className="text-sm">{label}</span>
-      <Switch defaultChecked={defaultChecked} />
-    </div>
   );
 }
 

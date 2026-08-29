@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabase } from "@/shared/supabase/client";
 import type {
+  Commission,
   CommissionType,
   Customer,
   Employee,
@@ -64,6 +65,20 @@ type PaymentRow = {
   remaining_amount: number;
 };
 
+type CommissionRow = {
+  id: number;
+  sale_id: number;
+  employee_id: number;
+  vehicle_id: number;
+  type: CommissionType;
+  rate: number;
+  amount: number;
+  status: "pending" | "paid";
+  due_date: string | null;
+  paid_at: string | null;
+  notes: string | null;
+};
+
 type SaleRow = {
   id: number;
   customer_id: number;
@@ -79,6 +94,7 @@ type SaleRow = {
   employee: EmployeeRow | null;
   vehicle: VehicleRow | null;
   payment: PaymentRow[] | null;
+  commission: CommissionRow[] | null;
 };
 
 export type CreateSaleInput = {
@@ -191,6 +207,7 @@ function mapSale(row: SaleRow): Sale {
   }
 
   const [payment] = row.payment ?? [];
+  const [commission] = row.commission ?? [];
 
   return {
     id: row.id,
@@ -214,11 +231,118 @@ function mapSale(row: SaleRow): Sale {
           remaining_amount: Number(payment.remaining_amount),
         }
       : undefined,
+    commission: commission
+      ? {
+          id: commission.id,
+          sale_id: commission.sale_id,
+          employee_id: commission.employee_id,
+          vehicle_id: commission.vehicle_id,
+          type: commission.type,
+          rate: Number(commission.rate),
+          amount: Number(commission.amount),
+          status: commission.status,
+          due_date: commission.due_date ?? undefined,
+          paid_at: commission.paid_at ?? undefined,
+          notes: commission.notes ?? undefined,
+        }
+      : undefined,
   };
 }
 
 const saleSelect =
-  "id, customer_id, vehicle_id, employee_id, total_value, discount, status, sale_date, notes, trade_in_value, customer:customers(id, person_id, notes, active, total_purchases, created_at, person:people(id, name, type, cpf, cnpj, phone, email)), employee:employees(id, person_id, position, salary, commission_rate, commission_type, active, hired_at, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles!sales_vehicle_id_fkey(*), payment:sale_payments(id, payment_method, payment_status, down_payment, installments_count, payment_date, remaining_amount)";
+  "id, customer_id, vehicle_id, employee_id, total_value, discount, status, sale_date, notes, trade_in_value, customer:customers(id, person_id, notes, active, total_purchases, created_at, person:people(id, name, type, cpf, cnpj, phone, email)), employee:employees(id, person_id, position, salary, commission_rate, commission_type, active, hired_at, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles!sales_vehicle_id_fkey(*), payment:sale_payments(id, payment_method, payment_status, down_payment, installments_count, payment_date, remaining_amount), commission:commissions(id, sale_id, employee_id, vehicle_id, type, rate, amount, status, due_date, paid_at, notes)";
+
+async function ensureSaleCommission({
+  supabaseAdmin,
+  sale,
+  vehicle,
+  employee,
+}: {
+  supabaseAdmin: Awaited<typeof import("@/shared/supabase/server")>["supabaseAdmin"];
+  sale: {
+    id: number;
+    vehicle_id: number;
+    employee_id: number;
+    total_value: number;
+    sale_date: string;
+  };
+  vehicle: { brand: string; model: string; plate: string | null };
+  employee: { commission_rate: number; commission_type: CommissionType };
+}) {
+  const commissionAmount = calculateCommission({
+    totalValue: sale.total_value,
+    commissionType: employee.commission_type,
+    commissionRate: Number(employee.commission_rate),
+  });
+
+  if (commissionAmount <= 0) {
+    return null;
+  }
+
+  const { data: existingCommission, error: existingCommissionError } = await supabaseAdmin
+    .from("commissions")
+    .select("id, sale_id, employee_id, vehicle_id, type, rate, amount, status, due_date, paid_at, notes")
+    .eq("sale_id", sale.id)
+    .eq("employee_id", sale.employee_id)
+    .maybeSingle();
+  if (existingCommissionError) throw new Error(existingCommissionError.message);
+
+  let commission = existingCommission;
+
+  if (!commission) {
+    const { data: createdCommission, error: createdCommissionError } = await supabaseAdmin
+      .from("commissions")
+      .insert({
+        sale_id: sale.id,
+        employee_id: sale.employee_id,
+        vehicle_id: sale.vehicle_id,
+        type: employee.commission_type,
+        rate: Number(employee.commission_rate),
+        amount: commissionAmount,
+        status: "pending",
+        due_date: sale.sale_date,
+      })
+      .select("id, sale_id, employee_id, vehicle_id, type, rate, amount, status, due_date, paid_at, notes")
+      .single();
+
+    if (createdCommissionError) {
+      throw new Error(createdCommissionError.message);
+    }
+
+    commission = createdCommission;
+  }
+
+  if (!commission) {
+    throw new Error("Falha ao registrar comissão da venda.");
+  }
+
+  const { data: existingCommissionTransaction, error: existingCommissionTransactionError } = await supabaseAdmin
+    .from("financial_transactions")
+    .select("id")
+    .eq("commission_id", commission.id)
+    .limit(1);
+  if (existingCommissionTransactionError) throw new Error(existingCommissionTransactionError.message);
+
+  if ((existingCommissionTransaction ?? []).length === 0) {
+    const { error: transactionError } = await supabaseAdmin.from("financial_transactions").insert({
+      type: "expense",
+      category: "commission",
+      status: commission.status === "paid" ? "paid" : "pending",
+      amount: Number(commission.amount),
+      transaction_date: sale.sale_date,
+      due_date: commission.due_date ?? sale.sale_date,
+      paid_at: commission.paid_at ?? null,
+      description: `Comissão venda #${sale.id} - ${vehicle.brand} ${vehicle.model}`,
+      related: vehicle.plate,
+      sale_id: sale.id,
+      employee_id: sale.employee_id,
+      commission_id: commission.id,
+    });
+    if (transactionError) throw new Error(transactionError.message);
+  }
+
+  return commission as Commission;
+}
 
 export async function listSales() {
   const { data, error } = await supabase
@@ -318,6 +442,8 @@ async function createSaleFinancialTransactions({
   supabaseAdmin: Awaited<typeof import("@/shared/supabase/server")>["supabaseAdmin"];
   sale: {
     id: number;
+    vehicle_id: number;
+    employee_id: number;
     total_value: number;
     sale_date: string;
   };
@@ -334,6 +460,7 @@ async function createSaleFinancialTransactions({
     .from("financial_transactions")
     .select("id")
     .eq("sale_id", sale.id)
+    .eq("category", "vehicle_sale")
     .limit(1);
   if (existingTransactionError) throw new Error(existingTransactionError.message);
   if ((existingTransaction ?? []).length > 0) return;
@@ -497,6 +624,8 @@ const createSaleServer = createServerFn({ method: "POST" })
         supabaseAdmin,
         sale: {
           id: sale.id as number,
+          vehicle_id: data.vehicleId,
+          employee_id: data.employeeId,
           total_value: totalValue,
           sale_date: data.saleDate,
         },
@@ -509,25 +638,21 @@ const createSaleServer = createServerFn({ method: "POST" })
           payment_date: paymentInput.paymentDate,
         },
       });
-
-      const commissionAmount = calculateCommission({
-        totalValue,
-        commissionType: employee.commission_type,
-        commissionRate: Number(employee.commission_rate),
-      });
-      if (commissionAmount > 0) {
-        const { error: commissionError } = await supabaseAdmin.from("commissions").insert({
-          sale_id: sale.id,
-          employee_id: data.employeeId,
+      await ensureSaleCommission({
+        supabaseAdmin,
+        sale: {
+          id: sale.id as number,
           vehicle_id: data.vehicleId,
-          type: employee.commission_type,
-          rate: Number(employee.commission_rate),
-          amount: commissionAmount,
-          status: "pending",
-          due_date: data.saleDate,
-        });
-        if (commissionError) throw new Error(commissionError.message);
-      }
+          employee_id: data.employeeId,
+          total_value: totalValue,
+          sale_date: data.saleDate,
+        },
+        vehicle,
+        employee: {
+          commission_rate: Number(employee.commission_rate),
+          commission_type: employee.commission_type as CommissionType,
+        },
+      });
     }
 
     return sale.id as number;
@@ -569,36 +694,7 @@ async function applyCompletedSale({
   if (vehicleUpdateError) throw new Error(vehicleUpdateError.message);
 
   await createSaleFinancialTransactions({ supabaseAdmin, sale, vehicle, payment });
-
-  const commissionAmount = calculateCommission({
-    totalValue: sale.total_value,
-    commissionType: employee.commission_type,
-    commissionRate: Number(employee.commission_rate),
-  });
-
-  if (commissionAmount > 0) {
-    const { data: existingCommission, error: existingCommissionError } = await supabaseAdmin
-      .from("commissions")
-      .select("id")
-      .eq("sale_id", sale.id)
-      .eq("employee_id", sale.employee_id)
-      .maybeSingle();
-    if (existingCommissionError) throw new Error(existingCommissionError.message);
-
-    if (!existingCommission) {
-      const { error: commissionError } = await supabaseAdmin.from("commissions").insert({
-        sale_id: sale.id,
-        employee_id: sale.employee_id,
-        vehicle_id: sale.vehicle_id,
-        type: employee.commission_type,
-        rate: Number(employee.commission_rate),
-        amount: commissionAmount,
-        status: "pending",
-        due_date: sale.sale_date,
-      });
-      if (commissionError) throw new Error(commissionError.message);
-    }
-  }
+  await ensureSaleCommission({ supabaseAdmin, sale, vehicle, employee });
 
   const { error: saleUpdateError } = await supabaseAdmin
     .from("sales")

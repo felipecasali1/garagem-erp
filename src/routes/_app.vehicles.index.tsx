@@ -243,9 +243,7 @@ function VehiclesPage() {
                 </div>
                 <div className="flex items-end justify-between pt-1">
                   <div>
-                    <div className="text-xs text-muted-foreground">
-                      {v.status === "evaluating" ? "Preço estimado" : "Preço"}
-                    </div>
+                    <div className="text-xs text-muted-foreground">Valor estimado de venda</div>
                     <div className="font-display font-semibold text-lg">{brl(v.sale_price)}</div>
                   </div>
                   <Button size="sm" variant="outline" asChild onClick={(e) => e.stopPropagation()}>
@@ -271,7 +269,7 @@ function VehiclesPage() {
                 <TableHead>Combustível</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Publicado</TableHead>
-                <TableHead className="text-right">Valor</TableHead>
+                <TableHead className="text-right">Valor estimado</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
@@ -320,9 +318,7 @@ function VehiclesPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="font-medium">{brl(v.sale_price)}</div>
-                    {v.status === "evaluating" && (
-                      <div className="text-xs text-muted-foreground">estimado</div>
-                    )}
+                    <div className="text-xs text-muted-foreground">venda</div>
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">

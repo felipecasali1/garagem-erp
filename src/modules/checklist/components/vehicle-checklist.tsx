@@ -16,6 +16,7 @@ import {
   CalendarDays,
   User as UserIcon,
   Sparkles,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -72,7 +73,13 @@ const STATUS_ICON: Record<ChecklistStatus, React.ComponentType<{ className?: str
   cancelled: XCircle,
 };
 
-export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
+export function VehicleChecklist({
+  vehicleId,
+  readOnly = false,
+}: {
+  vehicleId: number;
+  readOnly?: boolean;
+}) {
   const items = useChecklist(vehicleId);
   const { data: employees = [] } = useQuery({
     queryKey: employeeKeys.all,
@@ -134,15 +141,18 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
   }, [items, statusFilter, priorityFilter]);
 
   const openNew = () => {
+    if (readOnly) return;
     setEditing(null);
     setDialogOpen(true);
   };
   const openEdit = (item: ChecklistItem) => {
+    if (readOnly) return;
     setEditing(item);
     setDialogOpen(true);
   };
 
   const setStatus = (item: ChecklistItem, status: ChecklistStatus) => {
+    if (readOnly) return;
     statusMutation.mutate({ id: item.id, status });
   };
 
@@ -156,6 +166,17 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
       {/* Summary */}
       <Card>
         <CardContent className="p-5 space-y-4">
+          {readOnly && (
+            <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/5 p-3 text-sm">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+              <div>
+                <div className="font-medium">Checklist bloqueado</div>
+                <div className="text-muted-foreground">
+                  O veículo já foi vendido. A preparação fica preservada como histórico.
+                </div>
+              </div>
+            </div>
+          )}
           <div className="flex flex-col md:flex-row md:items-center gap-4">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
@@ -183,9 +204,11 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
               </p>
             </div>
             <div className="flex gap-2 shrink-0">
-              <Button type="button" size="sm" onClick={openNew}>
-                <Plus className="h-4 w-4" /> Novo item
-              </Button>
+              {!readOnly && (
+                <Button type="button" size="sm" onClick={openNew}>
+                  <Plus className="h-4 w-4" /> Novo item
+                </Button>
+              )}
             </div>
           </div>
 
@@ -273,9 +296,11 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
                 Adicione tarefas de preparação, reparo ou inspeção.
               </p>
             </div>
-            <Button type="button" onClick={openNew} variant="outline" size="sm">
-              <Plus className="h-4 w-4" /> Criar primeiro item
-            </Button>
+            {!readOnly && (
+              <Button type="button" onClick={openNew} variant="outline" size="sm">
+                <Plus className="h-4 w-4" /> Criar primeiro item
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -307,7 +332,8 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
                       onClick={() =>
                         setStatus(item, item.status === "completed" ? "pending" : "completed")
                       }
-                      className="mt-0.5 cursor-pointer"
+                      disabled={readOnly}
+                      className={cn("mt-0.5", readOnly ? "cursor-default" : "cursor-pointer")}
                       title="Marcar como concluído"
                     >
                       <StatusIcon
@@ -389,33 +415,35 @@ export function VehicleChecklist({ vehicleId }: { vehicleId: number }) {
                           <ChevronDown className="h-4 w-4" />
                         )}
                       </Button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => openEdit(item)}>
-                            <Pencil className="h-3.5 w-3.5" /> Editar
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          {(Object.keys(STATUS_META) as ChecklistStatus[])
-                            .filter((s) => s !== item.status)
-                            .map((s) => (
-                              <DropdownMenuItem key={s} onClick={() => setStatus(item, s)}>
-                                Marcar como {STATUS_META[s].label}
-                              </DropdownMenuItem>
-                            ))}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            disabled={item.status === "cancelled"}
-                            onClick={() => setConfirmCancel(item)}
-                          >
-                            <XCircle className="h-3.5 w-3.5" /> Cancelar
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      {!readOnly && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openEdit(item)}>
+                              <Pencil className="h-3.5 w-3.5" /> Editar
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            {(Object.keys(STATUS_META) as ChecklistStatus[])
+                              .filter((s) => s !== item.status)
+                              .map((s) => (
+                                <DropdownMenuItem key={s} onClick={() => setStatus(item, s)}>
+                                  Marcar como {STATUS_META[s].label}
+                                </DropdownMenuItem>
+                              ))}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              disabled={item.status === "cancelled"}
+                              onClick={() => setConfirmCancel(item)}
+                            >
+                              <XCircle className="h-3.5 w-3.5" /> Cancelar
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </div>
                   </div>
 
