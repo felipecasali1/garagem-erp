@@ -10,16 +10,16 @@ Este backlog organiza os próximos passos por fluxo de negócio. A ideia é mant
 - Veículos: funcional como avaliação/prospecção e estoque, com status de avaliação, preparação, disponibilidade, venda e arquivamento.
 - Compras: fluxo real construído. Compra usa fornecedores reais, vincula veículo em avaliação, conclui/cancela compra e gera despesa financeira ao concluir.
 - Preparação/checklist: fluxo operacional construído. Veículo em preparação só pode virar disponível quando não há checklist ativo pendente.
-- Vendas: fluxo real em construção, com veículos/clientes/vendedores reais, reserva, conclusão, cancelamento e pagamento contextual inicial.
-- Financeiro: já recebe despesa de compra concluída e receita/comissão de venda concluída, mas ainda precisa amadurecer baixa, comissões, crediário próprio e relatórios.
-- Dashboard/relatórios: parcialmente real, ainda precisa consolidar métricas depois de vendas e financeiro.
+- Vendas: fluxo real funcional. Já usa veículos/clientes/vendedores reais, reserva veículo em venda pendente, conclui/cancela venda, exibe comissão e permite atalho do veículo para nova venda.
+- Financeiro: fluxo real funcional para compras e vendas. Já recebe despesa de compra concluída, receita de venda concluída, contas a pagar/receber reais e comissão com baixa manual, mas ainda precisa amadurecer estorno, crediário próprio e relatórios.
+- Dashboard/relatórios: parcialmente real. Já usa dados persistidos, mas ainda precisa consolidar margem e indicadores gerenciais finais.
 - Configurações: possui task própria em `task-configuracoes.md`.
 
 ### Próxima grande etapa
 
 1. `task-financeiro.md`
-2. `task-vendas.md`
-3. `task-dashboard-e-relatorios.md`
+2. `task-dashboard-e-relatorios.md`
+3. `task-vendas.md`
 4. `task-cadastros-base.md`
 5. `task-configuracoes.md`
 
@@ -30,6 +30,13 @@ Este backlog organiza os próximos passos por fluxo de negócio. A ideia é mant
 - `task-preparacao-veiculo.md`
 
 Esses arquivos permanecem como referência de regra de negócio e pontos de estabilização, mas não são mais o foco principal de construção.
+
+### Próximos passos sugeridos
+
+1. Fechar o financeiro com regra de estorno/cancelamento e visão gerencial mais confiável.
+2. Consolidar o painel com margem estimada/realizada e comissões pendentes.
+3. Decidir se a loja realmente precisa de `crediário próprio`; se não precisar, manter fora do escopo.
+4. Só depois disso entrar em `troca` na venda, porque ela mexe em estoque, compra, margem e financeiro ao mesmo tempo.
 
 ### Regra importante
 

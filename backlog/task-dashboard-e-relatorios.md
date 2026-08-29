@@ -19,7 +19,7 @@ Veículos, compras e preparação já avançaram. A consolidação do dashboard 
 - Mostrar margem estimada/realizada.
 - Mostrar contas vencidas. Concluído no dashboard inicial.
 - Mostrar veículos em preparação. Concluído no dashboard inicial.
-- Mostrar comissões pendentes, quando o módulo estiver pronto.
+- Mostrar comissões pendentes. Agora já pode entrar na próxima revisão.
 
 ### Regras de negócio
 
@@ -30,10 +30,10 @@ Veículos, compras e preparação já avançaram. A consolidação do dashboard 
 
 ### Dependências
 
-- Compras reais: parcialmente atendido.
-- Veículos com status consistente: parcialmente atendido.
-- Vendas reais: próxima dependência principal.
-- Financeiro real: depende da integração de vendas, parcelas e comissões.
+- Compras reais: atendido para o fluxo atual.
+- Veículos com status consistente: atendido para o fluxo atual.
+- Vendas reais: atendido para o fluxo principal.
+- Financeiro real: atendido para compras, vendas e comissão; ainda pendente para estorno e crediário próprio.
 
 ### Critérios de aceite
 
@@ -47,4 +47,6 @@ Veículos, compras e preparação já avançaram. A consolidação do dashboard 
 - Dashboard inicial agora usa veículos, vendas, checklist e transações financeiras reais.
 - Série de receita vs despesas usa transações persistidas por mês, sem geração sintética de dias.
 - Cards principais deixam explícito que o mês atual considerado é agosto de 2026.
-- Ainda falta amadurecer margem realizada/estimada e comissões pendentes.
+- Ainda falta amadurecer margem realizada/estimada.
+- Ainda falta trazer comissões pendentes de forma explícita para a visão gerencial.
+- Ainda falta revisar se o painel principal deve continuar mostrando tudo em uma tela só ou separar relatórios depois.

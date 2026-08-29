@@ -1,12 +1,12 @@
-## Task - Construir fluxo real de vendas
+## Task - Consolidar fluxo real de vendas
 
 ### Objetivo
 
-Construir o fluxo real de venda usando clientes, funcionários e veículos persistidos, fechando a saída do estoque e alimentando financeiro/comissões.
+Consolidar o fluxo real de venda usando clientes, funcionários e veículos persistidos, fechando a saída do estoque e alimentando financeiro/comissões.
 
 ### Contexto
 
-A tela de venda existe, mas ainda usa dados mock/demo. O banco já possui tabelas para `sales`, `sale_payments`, `installments`, `commissions` e vínculos financeiros.
+A tela de venda já está persistida no Supabase. O banco possui tabelas `sales`, `sale_payments`, `installments`, `commissions` e vínculos financeiros, e o fluxo principal já funciona sem mocks.
 
 O sistema agora já possui o fluxo anterior necessário:
 
@@ -18,22 +18,26 @@ O sistema agora já possui o fluxo anterior necessário:
 
 A venda deve partir apenas de veículos realmente disponíveis, clientes ativos e vendedores ativos.
 
-### Escopo da primeira entrega
+### O que já foi construído
 
-- Trocar mocks da tela de nova venda por dados reais do Supabase.
-- Listar apenas veículos com status `available`.
-- Listar apenas clientes ativos.
-- Listar apenas funcionários/vendedores ativos.
-- Registrar venda persistida em `sales`.
-- Registrar pagamento em `sale_payments`.
-- Ao concluir venda:
-  - atualizar veículo para `sold`;
-  - despublicar veículo;
-  - gerar receita ou conta a receber no financeiro;
-  - gerar comissão do vendedor, quando aplicável.
-- Criar listagem real de vendas.
-- Criar detalhe real de venda.
-- Remover dependência dos mocks no fluxo principal de vendas.
+- Nova venda usa dados reais do Supabase.
+- Nova venda lista apenas veículos `available`, clientes ativos e vendedores ativos.
+- Venda pode nascer como `pending` ou `completed`.
+- Venda `pending` reserva o veículo.
+- Venda `completed` vende o veículo, despublica e gera financeiro.
+- Cancelamento de venda pendente devolve o veículo para `available`.
+- Pagamento contextual inicial já funciona para:
+  - à vista;
+  - PIX;
+  - cartão;
+  - financiamento com entrada e saldo de repasse.
+- Venda concluída gera:
+  - receita paga ou pendente conforme forma de pagamento;
+  - comissão rastreável;
+  - despesa financeira de comissão com baixa manual posterior.
+- Listagem de vendas e detalhe de venda usam Supabase.
+- Detalhe da venda já mostra comissão real.
+- Detalhe do veículo já possui atalho para iniciar nova venda com o veículo pré-selecionado.
 
 ### Regras de negócio
 
@@ -61,67 +65,16 @@ A venda deve partir apenas de veículos realmente disponíveis, clientes ativos 
 - Ao concluir venda financiada sem entrada, o financeiro deve gerar apenas receita pendente do repasse.
 - Troca como forma de pagamento fica fora da primeira entrega até existir o fluxo do veículo recebido.
 
-### Fase 1 - Venda simples persistida
+### Regras confirmadas do fluxo atual
 
-Construir primeiro o fluxo sem troca de veículo:
+- O fluxo inicial segue sem troca.
+- O valor definitivo da venda é definido apenas na venda.
+- O valor estimado do veículo serve como referência operacional, não como fechamento automático.
+- O status do pagamento continua sendo calculado pelo sistema.
+- O status do veículo continua sendo controlado pelo fluxo, não por edição manual.
+- Veículo vendido continua bloqueado para edição operacional e checklist.
 
-- Selecionar veículo disponível.
-- Selecionar cliente ativo.
-- Selecionar vendedor ativo.
-- Informar desconto, data e observações.
-- Informar forma de pagamento.
-- Calcular status do pagamento automaticamente conforme a forma escolhida, sem exibir campo editável para o usuário.
-- Salvar venda como `pending` ou `completed`.
-- Se `pending`, marcar veículo como reservado para o cliente escolhido.
-- Se `completed`, marcar veículo como vendido e gerar financeiro/comissão.
-- Permitir concluir ou cancelar uma venda pendente pela tela de detalhe.
-
-### Fase 2 - Pagamento contextual
-
-Regras da primeira versão:
-
-- À vista:
-  - não exibir entrada;
-  - não exibir parcelas;
-  - status do pagamento: quitado internamente;
-  - financeiro: receita paga.
-- PIX:
-  - não exibir entrada;
-  - não exibir parcelas;
-  - status do pagamento: quitado internamente;
-  - financeiro: receita paga.
-- Cartão:
-  - não exibir entrada;
-  - não exibir parcelas internas;
-  - status do pagamento: quitado internamente;
-  - financeiro: receita paga.
-- Financiamento:
-  - exibir entrada;
-  - não exibir quantidade de parcelas nesta fase;
-  - status do pagamento:
-    - sem entrada: pendente;
-    - com entrada menor que o total: parcial;
-      - entrada igual ao total: quitado;
-  - financeiro:
-    - entrada registrada como receita paga;
-    - saldo financiado/repasse registrado como receita pendente.
-- Troca + diferença:
-  - não exibir na primeira versão;
-  - construir depois junto com o fluxo de recebimento do veículo da troca.
-
-### Fase 3 - Crediário próprio e parcelas internas
-
-Construir somente se a loja precisar vender parcelado diretamente para o cliente:
-
-- Adicionar forma de pagamento específica para crediário próprio, se necessário.
-- Exibir entrada e quantidade de parcelas apenas para esse caso.
-- Gerar parcelas na tabela `installments`.
-- Parcelas devem nascer como `pending`.
-- Baixa de parcelas deve ser feita pelo financeiro.
-
-### Fase 4 - Troca
-
-Construir depois da venda simples estar estável:
+### Pontos futuros
 
 - Permitir veículo usado como parte de pagamento.
 - Definir se a troca cria automaticamente:
@@ -129,6 +82,9 @@ Construir depois da venda simples estar estável:
   - uma compra vinculada;
   - ou apenas um registro pendente para avaliação posterior.
 - Garantir que a troca não distorça margem, estoque e financeiro.
+- Construir crediário próprio e parcelas internas somente se a loja realmente precisar vender parcelado diretamente ao cliente.
+- Exibir vínculo da venda no detalhe do veículo.
+- Exibir histórico consolidado por cliente e por funcionário quando isso virar prioridade.
 
 ### Decisões definidas
 
@@ -143,21 +99,6 @@ Construir depois da venda simples estar estável:
 - Venda concluída pode ter pagamento pendente/parcial quando a forma for financiamento.
 - Parcelas internas não devem ser geradas na primeira versão.
 
-### Critérios de aceite
+### Status atual
 
-- Nova venda usa dados reais.
-- Listagem de vendas usa Supabase.
-- Detalhe da venda usa Supabase.
-- Venda concluída atualiza status do veículo para `sold`.
-- Venda concluída despublica o veículo.
-- Venda concluída gera registros financeiros esperados.
-- Comissão é registrada de forma rastreável.
-- Pagamento da venda respeita a forma escolhida e não mostra campos desnecessários.
-- À vista, PIX e cartão gravam pagamento quitado.
-- Financiamento grava entrada e saldo restante sem gerar parcelas internas.
-- Financiamento gera lançamentos financeiros separados para entrada paga e repasse pendente.
-- Venda pendente reserva o veículo para o cliente informado.
-- Venda pendente pode ser concluída ou cancelada pela tela de detalhe.
-- Venda cancelada libera o veículo para voltar ao estoque disponível.
-- Venda cancelada permanece no histórico.
-- Não existe exclusão física de venda.
+Concluída por enquanto para o fluxo principal. Manter este arquivo como referência de regras e usar os pontos futuros apenas quando a prioridade sair de financeiro/painel e entrar em expansão do comercial.

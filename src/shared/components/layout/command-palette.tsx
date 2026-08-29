@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Car, UserCircle2, Banknote, Users } from "lucide-react";
@@ -10,9 +11,12 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/shared/components/ui/command";
-import { vehicles, customers, sales, employees } from "@/shared/mock-data";
 import { canAccessPath } from "@/shared/auth/access-control";
 import { useAuth } from "@/shared/supabase/auth";
+import { customerKeys, listActiveCustomers } from "@/modules/customers/services/customers";
+import { employeeKeys, listActiveEmployees } from "@/modules/employees/services/employees";
+import { saleKeys, listSales } from "@/modules/sales/services/sales";
+import { listVehicles, vehicleKeys } from "@/modules/vehicles/services/vehicles";
 
 export function CommandPalette({
   open,
@@ -23,6 +27,26 @@ export function CommandPalette({
 }) {
   const navigate = useNavigate();
   const { accessRole } = useAuth();
+  const { data: vehicles = [] } = useQuery({
+    queryKey: vehicleKeys.all,
+    queryFn: listVehicles,
+    enabled: open && canAccessPath(accessRole, "/vehicles"),
+  });
+  const { data: customers = [] } = useQuery({
+    queryKey: customerKeys.all,
+    queryFn: listActiveCustomers,
+    enabled: open && canAccessPath(accessRole, "/clients"),
+  });
+  const { data: sales = [] } = useQuery({
+    queryKey: saleKeys.all,
+    queryFn: listSales,
+    enabled: open && canAccessPath(accessRole, "/sales"),
+  });
+  const { data: employees = [] } = useQuery({
+    queryKey: employeeKeys.active,
+    queryFn: listActiveEmployees,
+    enabled: open && canAccessPath(accessRole, "/employees"),
+  });
   const go = (to: string) => {
     onOpenChange(false);
     navigate({ to });
@@ -35,7 +59,10 @@ export function CommandPalette({
         <CommandEmpty>Nenhum resultado encontrado.</CommandEmpty>
         {canAccessPath(accessRole, "/vehicles") && (
           <CommandGroup heading="Veículos">
-            {vehicles.slice(0, 6).map((v) => (
+            {vehicles
+              .filter((vehicle) => vehicle.status !== "archived")
+              .slice(0, 6)
+              .map((v) => (
               <CommandItem
                 key={`v-${v.id}`}
                 value={`${v.brand} ${v.model} ${v.plate}`}
@@ -70,11 +97,11 @@ export function CommandPalette({
           <>
             <CommandSeparator />
             <CommandGroup heading="Vendas">
-              {sales.map((s) => (
+              {sales.slice(0, 6).map((s) => (
                 <CommandItem
                   key={`s-${s.id}`}
-                  value={`${s.id} ${s.customer.person.name}`}
-                  onSelect={() => go(`/sales`)}
+                  value={`${s.id} ${s.customer.person.name} ${s.vehicle.plate}`}
+                  onSelect={() => go(`/sales/${s.id}`)}
                 >
                   <Banknote className="h-4 w-4" />
                   <span>
@@ -90,7 +117,7 @@ export function CommandPalette({
           <>
             <CommandSeparator />
             <CommandGroup heading="Funcionários">
-              {employees.map((e) => (
+              {employees.slice(0, 6).map((e) => (
                 <CommandItem
                   key={`e-${e.id}`}
                   value={e.person.name}

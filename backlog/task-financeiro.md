@@ -8,7 +8,7 @@ Transformar o financeiro em reflexo dos fluxos reais do sistema, reduzindo dados
 
 O módulo financeiro já possui telas, KPIs e ações rápidas, mas ainda usa muitos dados demonstrativos.
 
-Compras concluídas já geram despesa financeira real. Vendas concluídas já geram receita e comissão, mas o financeiro ainda precisa amadurecer baixa de recebimentos, contas pendentes, comissões e relatórios.
+Compras concluídas já geram despesa financeira real. Vendas concluídas já geram receita e comissão, inclusive com despesa financeira de comissão e baixa manual. O financeiro agora está funcional, mas ainda precisa amadurecer estorno, indicadores e possíveis fluxos futuros de parcelamento próprio.
 
 ### Escopo
 
@@ -22,18 +22,22 @@ Compras concluídas já geram despesa financeira real. Vendas concluídas já ge
 - Gerar receita/contas a receber ao concluir venda.
 - Tratar financiamento como receita pendente/parcial conforme entrada e saldo de repasse.
 - Deixar parcelas internas para uma etapa futura de crediário próprio.
-- Gerar comissão a pagar para vendedor quando aplicável.
+- Gerar comissão a pagar para vendedor quando aplicável. Concluído.
 - Permitir lançamentos manuais de receita/despesa/custo fixo. Concluído nas ações rápidas.
 - Permitir registrar pagamento de salário com funcionário real. Concluído nas ações rápidas.
 - Revisar contas a pagar. Concluído em `/financial/bills`.
 - Revisar contas a receber. Concluído em `/financial/receivables`.
 - Revisar KPIs do dashboard financeiro. Parcialmente concluído em `/financial`.
+- Definir regra operacional para cancelamento/estorno de transação.
+- Revisar relatórios e visão gerencial do financeiro.
 
 ### Regras de negócio
 
 - Transação financeira não deve ser apagada fisicamente.
 - Transação incorreta deve ser cancelada/estornada, preservando histórico.
 - Valores financeiros devem ter vínculo com compra, venda, comissão ou lançamento manual.
+- Comissão deve nascer como despesa pendente vinculada à venda, ao vendedor e à transação financeira.
+- Baixa manual de comissão deve sincronizar status financeiro e status da comissão.
 - Parcelas vencidas devem ser calculadas com base em data de vencimento e status.
 - À vista, PIX e cartão em venda devem gerar receita paga.
 - Financiamento em venda deve gerar receita paga para a entrada e receita pendente para o saldo de repasse.
@@ -42,8 +46,7 @@ Compras concluídas já geram despesa financeira real. Vendas concluídas já ge
 ### Decisões pendentes
 
 - Teremos estorno explícito ou apenas status `canceled`?
-- Comissões serão pagas manualmente ou automaticamente após venda concluída?
-- Salário de funcionário será parte do financeiro nesta etapa ou depois?
+- Crediário próprio realmente entrará no produto ou ficará fora do escopo da garagem atual?
 
 ### Fora do escopo por enquanto
 
@@ -63,6 +66,9 @@ Compras concluídas já geram despesa financeira real. Vendas concluídas já ge
 6. Contas a pagar reais em `/financial/bills`. Concluído.
 7. Contas a receber reais em `/financial/receivables`. Concluído.
 8. Lançamentos manuais pelas ações rápidas. Concluído.
+9. Comissão financeira com baixa manual. Concluído.
+10. Regra de estorno/cancelamento financeiro. Pendente.
+11. Consolidação final dos KPIs e relatórios. Pendente.
 
 ### Critérios de aceite
 
@@ -75,6 +81,8 @@ Compras concluídas já geram despesa financeira real. Vendas concluídas já ge
 - Vendas concluídas geram receita/contas a receber.
 - Receitas de venda respeitam a forma de pagamento.
 - Venda financiada com entrada separa caixa recebido de saldo a receber.
+- Comissão é registrada de forma rastreável e vinculada à venda.
+- Comissão pode ser baixada manualmente pelo financeiro.
 - Visão geral financeira calcula KPIs a partir de transações reais.
 - Ações rápidas criam lançamentos reais no Supabase.
 - Pagamento de salário usa funcionários ativos reais.

@@ -178,8 +178,8 @@ function EmployeeDetail() {
             <div className="border-t border-border pt-4">
               <h2 className="font-display font-semibold mb-2">Integração com vendas</h2>
               <p className="text-sm text-muted-foreground">
-                O histórico de vendas real será conectado quando o módulo de vendas deixar de usar
-                mock data.
+                As vendas já usam dados reais. Falta evoluir esta tela para consolidar aqui o
+                histórico comercial e financeiro do funcionário.
               </p>
             </div>
           </CardContent>

@@ -67,6 +67,21 @@ function monthLabel(key: string) {
   );
 }
 
+function currentMonthYearLabel() {
+  return new Intl.DateTimeFormat("pt-BR", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
+}
+
+function currentFullDateLabel() {
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
+}
+
 function isCurrentMonth(date: string) {
   const now = new Date();
   const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -189,6 +204,8 @@ function Dashboard() {
     const selected = periods.find((entry) => entry.key === period) ?? periods[1];
     return buildFinancialSeries(transactions, selected.months);
   }, [period, transactions]);
+  const currentMonthLabel = currentMonthYearLabel();
+  const currentDateLabel = currentFullDateLabel();
 
   const recentSales = completedSales
     .slice()
@@ -269,7 +286,7 @@ function Dashboard() {
     {
       label: "Receita recebida",
       value: brl(currentMonthPaidIncome),
-      sub: "Pagamentos confirmados em agosto de 2026",
+      sub: `Pagamentos confirmados em ${currentMonthLabel}`,
       delta: `${transactions.filter((transaction) => transaction.type === "income" && transaction.status === "pending").length} a receber`,
       deltaType: "up" as const,
       icon: DollarSign,
@@ -278,7 +295,7 @@ function Dashboard() {
     {
       label: "Despesas pagas",
       value: brl(currentMonthPaidExpenses),
-      sub: "Saídas confirmadas em agosto de 2026",
+      sub: `Saídas confirmadas em ${currentMonthLabel}`,
       delta: `${transactions.filter((transaction) => transaction.type === "expense" && transaction.status === "pending").length} a pagar`,
       deltaType: "down" as const,
       icon: TrendingDown,
@@ -302,7 +319,7 @@ function Dashboard() {
       <div>
         <h1 className="text-2xl font-display font-semibold tracking-tight">Visão Geral</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Painel consolidado com dados reais da operação em 25 de agosto de 2026.
+          Painel consolidado com dados reais da operação em {currentDateLabel}.
         </p>
       </div>
 
