@@ -10,6 +10,7 @@ import {
   Banknote,
   PieChart,
   Receipt,
+  HandCoins,
   Wallet,
   Settings,
   LogOut,
@@ -61,6 +62,7 @@ const groups = [
     items: [
       { title: "Visão Geral", url: "/financial", icon: PieChart },
       { title: "Transações", url: "/financial/transactions", icon: Receipt },
+      { title: "Contas a Receber", url: "/financial/receivables", icon: HandCoins },
       { title: "Contas a Pagar", url: "/financial/bills", icon: Wallet },
     ],
   },

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
+  CircleOff,
   Clock,
   Filter,
   HandCoins,
@@ -37,7 +38,9 @@ import { StatusBadge } from "@/shared/components/status-badge";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { brl, fmtDate } from "@/shared/lib/format";
 import {
+  cancelFinancialTransaction,
   financialTransactionKeys,
+  isManualFinancialTransaction,
   listFinancialTransactions,
   markFinancialTransactionPaid,
   type FinancialTransactionWithLinks,
@@ -59,6 +62,7 @@ function ReceivablesPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [confirmPaidId, setConfirmPaidId] = useState<number | null>(null);
+  const [confirmCancelId, setConfirmCancelId] = useState<number | null>(null);
   const {
     data: transactions = [],
     isLoading,
@@ -78,6 +82,19 @@ function ReceivablesPage() {
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Falha ao marcar conta como recebida.");
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: cancelFinancialTransaction,
+    onSuccess: async (id) => {
+      await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
+      await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.detail(id) });
+      setConfirmCancelId(null);
+      toast.success("Conta cancelada");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao cancelar conta.");
     },
   });
 
@@ -125,6 +142,9 @@ function ReceivablesPage() {
     { name: "Recebidas", value: totalPaid, color: "var(--success)" },
   ].filter((entry) => entry.value > 0);
   const confirmPaidReceivable = receivables.find((receivable) => receivable.id === confirmPaidId);
+  const confirmCancelReceivable = receivables.find(
+    (receivable) => receivable.id === confirmCancelId,
+  );
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto">
@@ -244,6 +264,7 @@ function ReceivablesPage() {
                       key={receivable.id}
                       receivable={receivable}
                       onMarkPaid={() => setConfirmPaidId(receivable.id)}
+                      onCancel={() => setConfirmCancelId(receivable.id)}
                     />
                   ))
                 )}
@@ -340,6 +361,25 @@ function ReceivablesPage() {
           if (confirmPaidId != null) receiveMutation.mutate(confirmPaidId);
         }}
       />
+
+      <ConfirmActionDialog
+        open={confirmCancelId != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmCancelId(null);
+        }}
+        title="Cancelar conta?"
+        description={
+          confirmCancelReceivable
+            ? `A conta "${confirmCancelReceivable.description}" será preservada no histórico com status cancelado.`
+            : "A conta será preservada no histórico com status cancelado."
+        }
+        confirmLabel={cancelMutation.isPending ? "Cancelando..." : "Cancelar conta"}
+        confirmDisabled={cancelMutation.isPending}
+        confirmVariant="destructive"
+        onConfirm={() => {
+          if (confirmCancelId != null) cancelMutation.mutate(confirmCancelId);
+        }}
+      />
     </div>
   );
 }
@@ -347,11 +387,15 @@ function ReceivablesPage() {
 function ReceivableRow({
   receivable,
   onMarkPaid,
+  onCancel,
 }: {
   receivable: FinancialTransactionWithLinks;
   onMarkPaid: () => void;
+  onCancel: () => void;
 }) {
   const canMarkPaid = receivable.status === "pending" || receivable.status === "overdue";
+  const canCancel =
+    receivable.status !== "canceled" && isManualFinancialTransaction(receivable);
 
   return (
     <TableRow>
@@ -378,15 +422,24 @@ function ReceivableRow({
       </TableCell>
       <TableCell className="text-right font-semibold">{brl(receivable.amount)}</TableCell>
       <TableCell className="text-right">
-        {canMarkPaid ? (
-          <Button size="sm" variant="outline" onClick={onMarkPaid}>
-            <CheckCircle2 className="h-3.5 w-3.5" /> Receber
-          </Button>
-        ) : receivable.status === "paid" ? (
-          <span className="text-xs text-muted-foreground">Recebida</span>
-        ) : (
-          <span className="text-xs text-muted-foreground">-</span>
-        )}
+        <div className="flex justify-end gap-2">
+          {canCancel && (
+            <Button size="sm" variant="ghost" onClick={onCancel}>
+              <CircleOff className="h-3.5 w-3.5" /> Cancelar
+            </Button>
+          )}
+          {canMarkPaid ? (
+            <Button size="sm" variant="outline" onClick={onMarkPaid}>
+              <CheckCircle2 className="h-3.5 w-3.5" /> Receber
+            </Button>
+          ) : receivable.status === "paid" ? (
+            <span className="text-xs text-muted-foreground">Recebida</span>
+          ) : receivable.status === "canceled" ? (
+            <span className="text-xs text-muted-foreground">Cancelada</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">-</span>
+          )}
+        </div>
       </TableCell>
     </TableRow>
   );

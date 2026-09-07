@@ -28,7 +28,7 @@ Compras concluídas já geram despesa financeira real. Vendas concluídas já ge
 - Revisar contas a pagar. Concluído em `/financial/bills`.
 - Revisar contas a receber. Concluído em `/financial/receivables`.
 - Revisar KPIs do dashboard financeiro. Parcialmente concluído em `/financial`.
-- Definir regra operacional para cancelamento/estorno de transação.
+- Definir regra operacional para cancelamento/estorno de transação. Concluído para lançamentos manuais.
 - Revisar relatórios e visão gerencial do financeiro.
 
 ### Regras de negócio
@@ -45,7 +45,8 @@ Compras concluídas já geram despesa financeira real. Vendas concluídas já ge
 
 ### Decisões pendentes
 
-- Teremos estorno explícito ou apenas status `canceled`?
+- Por enquanto, usar apenas status `canceled` para lançamentos manuais.
+- Lançamentos vinculados a compra, venda ou comissão não podem ser cancelados diretamente no financeiro; o ajuste deve acontecer pela origem.
 - Crediário próprio realmente entrará no produto ou ficará fora do escopo da garagem atual?
 
 ### Fora do escopo por enquanto
@@ -67,7 +68,7 @@ Compras concluídas já geram despesa financeira real. Vendas concluídas já ge
 7. Contas a receber reais em `/financial/receivables`. Concluído.
 8. Lançamentos manuais pelas ações rápidas. Concluído.
 9. Comissão financeira com baixa manual. Concluído.
-10. Regra de estorno/cancelamento financeiro. Pendente.
+10. Regra de estorno/cancelamento financeiro. Concluído para lançamentos manuais.
 11. Consolidação final dos KPIs e relatórios. Pendente.
 
 ### Critérios de aceite

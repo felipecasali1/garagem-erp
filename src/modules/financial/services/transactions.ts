@@ -46,6 +46,10 @@ export type FinancialTransactionWithLinks = FinancialTransaction & {
   commission_id?: number;
 };
 
+export function isManualFinancialTransaction(transaction: FinancialTransactionWithLinks) {
+  return !transaction.sale_id && !transaction.purchase_id && !transaction.commission_id;
+}
+
 export const financialTransactionKeys = {
   all: ["financial-transactions"] as const,
   detail: (id: number) => ["financial-transactions", id] as const,
@@ -151,6 +155,43 @@ const markFinancialTransactionPaidServer = createServerFn({ method: "POST" })
 
 export async function markFinancialTransactionPaid(id: number) {
   return markFinancialTransactionPaidServer({ data: { id } });
+}
+
+const cancelFinancialTransactionServer = createServerFn({ method: "POST" })
+  .inputValidator(z.object({ id: z.number().int().positive() }))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/shared/supabase/server");
+
+    const { data: transaction, error: transactionError } = await supabaseAdmin
+      .from("financial_transactions")
+      .select("id, status, sale_id, purchase_id, commission_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (transactionError) throw new Error(transactionError.message);
+    if (!transaction) throw new Error("Transação não encontrada.");
+    if (transaction.status === "canceled") {
+      throw new Error("Esta transação já está cancelada.");
+    }
+    if (transaction.sale_id || transaction.purchase_id || transaction.commission_id) {
+      throw new Error(
+        "Lançamentos vinculados a compra, venda ou comissão devem ser ajustados pela origem.",
+      );
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from("financial_transactions")
+      .update({
+        status: "canceled",
+        paid_at: null,
+      })
+      .eq("id", data.id);
+    if (updateError) throw new Error(updateError.message);
+
+    return data.id;
+  });
+
+export async function cancelFinancialTransaction(id: number) {
+  return cancelFinancialTransactionServer({ data: { id } });
 }
 
 const createManualFinancialTransactionServer = createServerFn({ method: "POST" })

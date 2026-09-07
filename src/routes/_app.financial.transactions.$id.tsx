@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowUpCircle,
   Calendar,
+  CircleOff,
   CheckCircle2,
   Clock,
   Link2,
@@ -17,8 +18,10 @@ import { StatusBadge } from "@/shared/components/status-badge";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { brl, fmtDate } from "@/shared/lib/format";
 import {
+  cancelFinancialTransaction,
   financialTransactionKeys,
   getFinancialTransactionById,
+  isManualFinancialTransaction,
   markFinancialTransactionPaid,
 } from "@/modules/financial/services/transactions";
 
@@ -42,6 +45,7 @@ function TransactionDetail() {
   const queryClient = useQueryClient();
   const transactionId = Number(id);
   const [confirmPaidOpen, setConfirmPaidOpen] = useState(false);
+  const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const {
     data: t,
     isLoading,
@@ -67,6 +71,21 @@ function TransactionDetail() {
     },
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: cancelFinancialTransaction,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
+      await queryClient.invalidateQueries({
+        queryKey: financialTransactionKeys.detail(transactionId),
+      });
+      setConfirmCancelOpen(false);
+      toast.success("Transação cancelada");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao cancelar transação.");
+    },
+  });
+
   if (isLoading) {
     return (
       <div className="max-w-4xl mx-auto py-16 text-sm text-muted-foreground">
@@ -86,6 +105,7 @@ function TransactionDetail() {
 
   const isIncome = t.type === "income";
   const canMarkPaid = t.status === "pending" || t.status === "overdue";
+  const canCancel = t.status !== "canceled" && isManualFinancialTransaction(t);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -99,14 +119,25 @@ function TransactionDetail() {
           Transação #{t.id}
         </h1>
         <StatusBadge kind="transaction" value={t.status} />
-        {canMarkPaid && (
-          <Button
-            onClick={() => setConfirmPaidOpen(true)}
-            disabled={markPaidMutation.isPending}
-          >
-            <CheckCircle2 className="h-4 w-4" /> Marcar como paga
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {canCancel && (
+            <Button
+              variant="outline"
+              onClick={() => setConfirmCancelOpen(true)}
+              disabled={cancelMutation.isPending}
+            >
+              <CircleOff className="h-4 w-4" /> Cancelar lançamento
+            </Button>
+          )}
+          {canMarkPaid && (
+            <Button
+              onClick={() => setConfirmPaidOpen(true)}
+              disabled={markPaidMutation.isPending}
+            >
+              <CheckCircle2 className="h-4 w-4" /> Marcar como paga
+            </Button>
+          )}
+        </div>
       </div>
 
       <Card>
@@ -178,6 +209,17 @@ function TransactionDetail() {
         confirmDisabled={markPaidMutation.isPending}
         confirmVariant="default"
         onConfirm={() => markPaidMutation.mutate(t.id)}
+      />
+
+      <ConfirmActionDialog
+        open={confirmCancelOpen}
+        onOpenChange={setConfirmCancelOpen}
+        title="Cancelar lançamento?"
+        description="O lançamento será preservado no histórico com status cancelado e deixará de contar nos indicadores financeiros."
+        confirmLabel={cancelMutation.isPending ? "Cancelando..." : "Cancelar lançamento"}
+        confirmDisabled={cancelMutation.isPending}
+        confirmVariant="destructive"
+        onConfirm={() => cancelMutation.mutate(t.id)}
       />
     </div>
   );

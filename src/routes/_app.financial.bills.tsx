@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
+  CircleOff,
   Clock,
   Filter,
   Receipt,
@@ -36,7 +37,9 @@ import { StatusBadge } from "@/shared/components/status-badge";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { brl, fmtDate } from "@/shared/lib/format";
 import {
+  cancelFinancialTransaction,
   financialTransactionKeys,
+  isManualFinancialTransaction,
   listFinancialTransactions,
   markFinancialTransactionPaid,
   type FinancialTransactionWithLinks,
@@ -61,6 +64,7 @@ function BillsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [confirmPaidId, setConfirmPaidId] = useState<number | null>(null);
+  const [confirmCancelId, setConfirmCancelId] = useState<number | null>(null);
   const {
     data: transactions = [],
     isLoading,
@@ -80,6 +84,19 @@ function BillsPage() {
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Falha ao marcar conta como paga.");
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: cancelFinancialTransaction,
+    onSuccess: async (id) => {
+      await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
+      await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.detail(id) });
+      setConfirmCancelId(null);
+      toast.success("Conta cancelada");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Falha ao cancelar conta.");
     },
   });
 
@@ -127,6 +144,7 @@ function BillsPage() {
     { name: "Pagas", value: totalPaid, color: "var(--success)" },
   ].filter((entry) => entry.value > 0);
   const confirmPaidBill = bills.find((bill) => bill.id === confirmPaidId);
+  const confirmCancelBill = bills.find((bill) => bill.id === confirmCancelId);
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto">
@@ -246,6 +264,7 @@ function BillsPage() {
                       key={bill.id}
                       bill={bill}
                       onMarkPaid={() => setConfirmPaidId(bill.id)}
+                      onCancel={() => setConfirmCancelId(bill.id)}
                     />
                   ))
                 )}
@@ -342,6 +361,25 @@ function BillsPage() {
           if (confirmPaidId != null) payMutation.mutate(confirmPaidId);
         }}
       />
+
+      <ConfirmActionDialog
+        open={confirmCancelId != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmCancelId(null);
+        }}
+        title="Cancelar conta?"
+        description={
+          confirmCancelBill
+            ? `A conta "${confirmCancelBill.description}" será preservada no histórico com status cancelado.`
+            : "A conta será preservada no histórico com status cancelado."
+        }
+        confirmLabel={cancelMutation.isPending ? "Cancelando..." : "Cancelar conta"}
+        confirmDisabled={cancelMutation.isPending}
+        confirmVariant="destructive"
+        onConfirm={() => {
+          if (confirmCancelId != null) cancelMutation.mutate(confirmCancelId);
+        }}
+      />
     </div>
   );
 }
@@ -349,11 +387,14 @@ function BillsPage() {
 function BillRow({
   bill,
   onMarkPaid,
+  onCancel,
 }: {
   bill: FinancialTransactionWithLinks;
   onMarkPaid: () => void;
+  onCancel: () => void;
 }) {
   const canMarkPaid = bill.status === "pending" || bill.status === "overdue";
+  const canCancel = bill.status !== "canceled" && isManualFinancialTransaction(bill);
 
   return (
     <TableRow>
@@ -378,15 +419,24 @@ function BillRow({
       </TableCell>
       <TableCell className="text-right font-semibold">{brl(bill.amount)}</TableCell>
       <TableCell className="text-right">
-        {canMarkPaid ? (
-          <Button size="sm" variant="outline" onClick={onMarkPaid}>
-            <CheckCircle2 className="h-3.5 w-3.5" /> Pagar
-          </Button>
-        ) : bill.status === "paid" ? (
-          <span className="text-xs text-muted-foreground">Quitada</span>
-        ) : (
-          <span className="text-xs text-muted-foreground">-</span>
-        )}
+        <div className="flex justify-end gap-2">
+          {canCancel && (
+            <Button size="sm" variant="ghost" onClick={onCancel}>
+              <CircleOff className="h-3.5 w-3.5" /> Cancelar
+            </Button>
+          )}
+          {canMarkPaid ? (
+            <Button size="sm" variant="outline" onClick={onMarkPaid}>
+              <CheckCircle2 className="h-3.5 w-3.5" /> Pagar
+            </Button>
+          ) : bill.status === "paid" ? (
+            <span className="text-xs text-muted-foreground">Quitada</span>
+          ) : bill.status === "canceled" ? (
+            <span className="text-xs text-muted-foreground">Cancelada</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">-</span>
+          )}
+        </div>
       </TableCell>
     </TableRow>
   );

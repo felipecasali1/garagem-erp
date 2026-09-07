@@ -195,8 +195,13 @@ Depois, execute a função de bootstrap:
 
 ```sql
 select public.bootstrap_internal_user(
-  'admin@example.com',
-  'Administrador'
+  'seu-email@exemplo.com',
+  'Seu Nome',
+  'Administrador',
+  'admin',
+  true,
+  'individual',
+  '67999999999'
 );
 ```
 
