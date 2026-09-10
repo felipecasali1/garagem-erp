@@ -76,10 +76,10 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { signOut, session, accessRole } = useAuth();
+  const { signOut, session, accessRole, displayName: profileDisplayName } = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
   const email = session?.user.email ?? "colaborador@garagemerp.local";
-  const displayName = email.split("@")[0]?.replace(/[._-]+/g, " ") || "Colaborador";
+  const displayName = profileDisplayName ?? "Colaborador";
   const visibleGroups = groups
     .map((group) => ({
       ...group,

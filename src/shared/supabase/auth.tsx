@@ -11,6 +11,7 @@ type SignInInput = {
 type AuthContextValue = {
   loading: boolean;
   session: Session | null;
+  displayName: string | null;
   accessRole: EmployeeAccessRole | null;
   isAdmin: boolean;
   accessError: string | null;
@@ -26,6 +27,9 @@ type SystemUserProfile = {
   auth_user_id: string | null;
   person_id: number;
   employee_id: number | null;
+  person: {
+    name: string;
+  } | null;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -47,7 +51,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data, error } = await supabase
       .from("users")
-      .select("id, active, access_role, is_admin, auth_user_id, person_id, employee_id")
+      .select(
+        "id, active, access_role, is_admin, auth_user_id, person_id, employee_id, person:people(name)",
+      )
       .eq("auth_user_id", nextSession.user.id)
       .maybeSingle();
 
@@ -124,6 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         loading,
         session,
+        displayName: profile?.person?.name.trim() || null,
         accessRole: profile?.access_role ?? null,
         isAdmin: profile?.access_role === "admin",
         accessError,

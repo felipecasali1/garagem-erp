@@ -28,8 +28,8 @@ export function TopNav() {
   const segments = pathname.split("/").filter(Boolean);
   const { theme, toggle } = useTheme();
   const { open, setOpen } = useCommandPalette();
-  const { session } = useAuth();
-  const userLabel = session?.user.email ?? "Colaborador";
+  const { displayName } = useAuth();
+  const userLabel = displayName ?? "Colaborador";
 
   return (
     <header className="h-16 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30 flex items-center gap-3 px-4">
@@ -86,7 +86,7 @@ export function TopNav() {
         <NotificationsMenu />
         <Avatar className="h-8 w-8 ml-1">
           <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-            {initials(userLabel.replace(/[@._-]+/g, " ")).slice(0, 2) || "GE"}
+            {initials(userLabel).slice(0, 2) || "GE"}
           </AvatarFallback>
         </Avatar>
       </div>
