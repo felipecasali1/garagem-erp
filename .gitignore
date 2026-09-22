@@ -34,3 +34,4 @@ dist-ssr
 .agents
 .codex
 .lovable
+.test-dist
