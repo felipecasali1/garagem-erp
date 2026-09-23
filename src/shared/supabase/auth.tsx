@@ -84,7 +84,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    setProfile(data satisfies SystemUserProfile);
+    const profile = {
+      ...data,
+      person: Array.isArray(data.person) ? data.person[0] ?? null : data.person,
+    } as unknown as SystemUserProfile;
+
+    setProfile(profile);
     setAccessError(null);
     setSession(nextSession);
     setLoading(false);

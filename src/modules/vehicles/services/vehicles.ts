@@ -1,6 +1,5 @@
 import { supabase } from "@/shared/supabase/client";
 import type { Vehicle } from "@/shared/types/domain";
-import type { ChecklistItem } from "@/modules/checklist/types";
 import type { VehicleDraft } from "@/modules/vehicles/types";
 import { normalizeVehicleDraft } from "@/modules/vehicles/lib/normalize-vehicle-draft";
 
@@ -75,16 +74,16 @@ function isSaleManagedStatus(status: Vehicle["status"]) {
 }
 
 async function unwrapSingle<T>(
-  promise: Promise<{ data: T | null; error: { message: string } | null }>,
-) {
-  const { data, error } = await promise;
+  response: PromiseLike<{ data: unknown; error: { message: string } | null }>,
+): Promise<T> {
+  const { data, error } = await response;
   if (error) {
     throw new Error(error.message);
   }
   if (!data) {
     throw new Error("Registro nao encontrado.");
   }
-  return data;
+  return data as T;
 }
 
 function isMissingVehicleAccessoryActiveColumn(error: { message: string } | null) {
@@ -104,7 +103,7 @@ function toChecklistPayload(item: VehicleDraft["checklist"][number], vehicleId: 
     actual_cost: 0,
     due_date: item.due_date ?? null,
     attachments: [],
-  } satisfies Partial<ChecklistItem>;
+  };
 }
 
 async function syncVehicleAccessories(vehicleId: number, accessories: string[]) {
@@ -229,15 +228,15 @@ export async function getVehicleById(id: number) {
     .eq("id", id)
     .single();
   const data = isMissingVehicleAccessoryActiveColumn(result.error)
-    ? await unwrapSingle(
+    ? await unwrapSingle<VehicleRow>(
         supabase
           .from("vehicles")
           .select("*, vehicle_accessories(accessories(name))")
           .eq("id", id)
           .single(),
       )
-    : await unwrapSingle(Promise.resolve(result));
-  return mapVehicle(data satisfies VehicleRow);
+    : await unwrapSingle<VehicleRow>(Promise.resolve(result));
+  return mapVehicle(data);
 }
 
 export async function createVehicle(draft: VehicleDraft) {
@@ -247,7 +246,7 @@ export async function createVehicle(draft: VehicleDraft) {
     published: false,
   };
 
-  const data = await unwrapSingle(
+  const data = await unwrapSingle<{ id: number }>(
     supabase.from("vehicles").insert(payload).select("id").single(),
   );
   await syncVehicleAccessories(data.id, draft.accessories);
@@ -267,7 +266,7 @@ export async function updateVehicle(id: number, draft: VehicleDraft) {
     published: currentVehicle.status === "available" ? draft.published : false,
   };
 
-  await unwrapSingle(
+  await unwrapSingle<{ id: number }>(
     supabase.from("vehicles").update(payload).eq("id", id).select("id").single(),
   );
   await syncVehicleAccessories(id, draft.accessories);
@@ -280,7 +279,7 @@ export async function archiveVehicle(id: number) {
     throw new Error("Veículos reservados ou vendidos não devem ser arquivados manualmente.");
   }
 
-  await unwrapSingle(
+  await unwrapSingle<{ id: number }>(
     supabase
       .from("vehicles")
       .update({ published: false, status: "archived" })
@@ -299,7 +298,7 @@ export async function setVehiclePublished(id: number, published: boolean) {
     }
   }
 
-  await unwrapSingle(
+  await unwrapSingle<{ id: number }>(
     supabase.from("vehicles").update({ published }).eq("id", id).select("id").single(),
   );
   return getVehicleById(id);
@@ -325,7 +324,7 @@ export async function finishVehiclePreparation(id: number) {
     throw new Error("Conclua ou cancele os itens pendentes antes de finalizar a preparação.");
   }
 
-  await unwrapSingle(
+  await unwrapSingle<{ id: number }>(
     supabase
       .from("vehicles")
       .update({ status: "available", published: false })

@@ -100,7 +100,8 @@ export function VehicleChecklist({
     mutationFn: ({ id, status }: { id: string; status: ChecklistStatus }) =>
       updateChecklistItem(id, {
         status,
-        completion_date: status === "completed" ? new Date().toISOString().slice(0, 10) : null,
+        completion_date:
+          status === "completed" ? new Date().toISOString().slice(0, 10) : undefined,
       }),
     onSuccess: async (_item, variables) => {
       await invalidateChecklist();

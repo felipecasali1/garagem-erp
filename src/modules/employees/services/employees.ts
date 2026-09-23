@@ -180,7 +180,10 @@ async function fetchEmployeeRows(id?: number) {
     throw new Error(error.message);
   }
 
-  const rows = data satisfies EmployeeRow[];
+  const rows = (data ?? []).map((row) => ({
+    ...row,
+    person: Array.isArray(row.person) ? row.person[0] ?? null : row.person,
+  })) as unknown as EmployeeRow[];
   const personIds = rows.map((row) => row.person_id);
   const employeeIds = rows.map((row) => row.id);
   const [addresses, users] = await Promise.all([

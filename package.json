@@ -9,10 +9,11 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
-    "test:unit": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit",
-    "test:integration": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/integration",
-    "test": "tsc -p tsconfig.tests.json && node --test .test-dist/tests"
+    "test:unit": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js",
+    "test:integration": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/integration/*.test.js",
+    "test": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js .test-dist/tests/integration/*.test.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

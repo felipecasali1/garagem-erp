@@ -74,7 +74,7 @@ test("fluxo de preparacao integra normalizacao do veiculo, checklist e margem es
   const totalInvestidoEstimado = veiculoNormalizado.cost_price + resumo.estimatedCost;
   const margem = veiculoNormalizado.sale_price - totalInvestidoEstimado;
 
-  assert.equal(veiculoNormalizado.plate, "QAD-1F23");
+  assert.equal(veiculoNormalizado.plate, "QAD1F23");
   assert.equal(veiculoNormalizado.brand, "Toyota");
   assert.equal(resumo.readyForSale, true);
   assert.equal(resumo.progress, 100);

@@ -125,7 +125,10 @@ async function fetchCustomerRows(id?: number) {
     throw new Error(error.message);
   }
 
-  const rows = (data ?? []) as CustomerRow[];
+  const rows = (data ?? []).map((row) => ({
+    ...row,
+    person: Array.isArray(row.person) ? row.person[0] ?? null : row.person,
+  })) as unknown as CustomerRow[];
   const addresses = await fetchAddresses(rows.map((row) => row.person_id));
 
   return rows.map((row) => mapCustomer(row, addresses.get(row.person_id)));

@@ -92,16 +92,16 @@ function toChecklistPatch(patch: Partial<ChecklistItem>) {
 }
 
 async function unwrapSingle<T>(
-  promise: Promise<{ data: T | null; error: { message: string } | null }>,
-) {
-  const { data, error } = await promise;
+  response: PromiseLike<{ data: unknown; error: { message: string } | null }>,
+): Promise<T> {
+  const { data, error } = await response;
   if (error) {
     throw new Error(error.message);
   }
   if (!data) {
     throw new Error("Registro nao encontrado.");
   }
-  return data;
+  return data as T;
 }
 
 async function assertVehicleChecklistEditable(vehicleId: number) {
@@ -162,16 +162,16 @@ export async function listChecklist(vehicleId?: number) {
 export async function createChecklistItem(input: ChecklistWriteInput) {
   await assertVehicleChecklistEditable(input.vehicle_id);
 
-  const data = await unwrapSingle(
+  const data = await unwrapSingle<ChecklistRow>(
     supabase.from("vehicle_checklist_items").insert(toChecklistPayload(input)).select("*").single(),
   );
-  return mapChecklistItem(data satisfies ChecklistRow);
+  return mapChecklistItem(data);
 }
 
 export async function updateChecklistItem(id: string, patch: Partial<ChecklistItem>) {
   await assertChecklistItemEditable(id);
 
-  const data = await unwrapSingle(
+  const data = await unwrapSingle<ChecklistRow>(
     supabase
       .from("vehicle_checklist_items")
       .update(toChecklistPatch(patch))
@@ -179,13 +179,13 @@ export async function updateChecklistItem(id: string, patch: Partial<ChecklistIt
       .select("*")
       .single(),
   );
-  return mapChecklistItem(data satisfies ChecklistRow);
+  return mapChecklistItem(data);
 }
 
 export async function cancelChecklistItem(id: string) {
   await assertChecklistItemEditable(id);
 
-  const data = await unwrapSingle(
+  const data = await unwrapSingle<ChecklistRow>(
     supabase
       .from("vehicle_checklist_items")
       .update({ status: "cancelled" })
@@ -193,7 +193,7 @@ export async function cancelChecklistItem(id: string) {
       .select("*")
       .single(),
   );
-  return mapChecklistItem(data satisfies ChecklistRow);
+  return mapChecklistItem(data);
 }
 
 export function summarize(list: ChecklistItem[]): ChecklistSummary {

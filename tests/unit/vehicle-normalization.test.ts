@@ -54,7 +54,7 @@ test("normalizeVehicleDraft converte campos vazios opcionais para null", () => {
   assert.equal(normalized.notes, null);
 });
 
-test("normalizeVehicleDraft preserva campos numericos e enums", () => {
+test("normalizeVehicleDraft preserva campos numericos e restringe publicacao a veiculos disponiveis", () => {
   const normalized = normalizeVehicleDraft(
     makeDraft({
       current_mileage: 12345,
@@ -73,5 +73,5 @@ test("normalizeVehicleDraft preserva campos numericos e enums", () => {
   assert.equal(normalized.fuel_type, "diesel");
   assert.equal(normalized.transmission, "manual");
   assert.equal(normalized.status, "reserved");
-  assert.equal(normalized.published, true);
+  assert.equal(normalized.published, false);
 });
