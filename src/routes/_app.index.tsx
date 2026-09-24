@@ -32,10 +32,14 @@ import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { brl, fmtDate, initials, relTime } from "@/shared/lib/format";
-import { useChecklist, summarize } from "@/modules/checklist";
+import { checklistKeys, listChecklist, summarize } from "@/modules/checklist";
+import { buildOperationalAlerts } from "@/modules/alerts/lib/build-operational-alerts";
+import { useOperationalDate } from "@/modules/alerts/hooks/use-operational-date";
 import { financialTransactionKeys, listFinancialTransactions } from "@/modules/financial/services/transactions";
 import { saleKeys, listSales } from "@/modules/sales/services/sales";
 import { listVehicles, vehicleKeys } from "@/modules/vehicles/services/vehicles";
+import { canAccessPath } from "@/shared/auth/access-control";
+import { useAuth } from "@/shared/supabase/auth";
 
 export const Route = createFileRoute("/_app/")({
   head: () => ({ meta: [{ title: "Painel | GaragemERP" }] }),
@@ -117,28 +121,56 @@ function buildFinancialSeries(
 function Dashboard() {
   const navigate = useNavigate();
   const [period, setPeriod] = useState<(typeof periods)[number]["key"]>("6m");
+  const { accessRole, loading: loadingAuth } = useAuth();
+  const today = useOperationalDate();
+  const canSeeVehicles = canAccessPath(accessRole, "/vehicles");
+  const canSeeSales = canAccessPath(accessRole, "/sales");
+  const canSeeFinancial = canAccessPath(accessRole, "/financial");
   const { data: vehicles = [], isLoading: loadingVehicles } = useQuery({
     queryKey: vehicleKeys.all,
     queryFn: listVehicles,
+    enabled: canSeeVehicles,
   });
   const { data: sales = [], isLoading: loadingSales } = useQuery({
     queryKey: saleKeys.all,
     queryFn: listSales,
+    enabled: canSeeSales,
   });
   const { data: transactions = [], isLoading: loadingTransactions } = useQuery({
     queryKey: financialTransactionKeys.all,
     queryFn: listFinancialTransactions,
+    enabled: canSeeFinancial,
   });
-  const allChecklist = useChecklist();
+  const { data: allChecklist = [], isLoading: loadingChecklist } = useQuery({
+    queryKey: checklistKeys.all,
+    queryFn: () => listChecklist(),
+    enabled: canSeeVehicles,
+  });
 
-  const filteredVehicles = vehicles.filter((vehicle) => vehicle.status !== "archived");
-  const completedSales = sales.filter((sale) => sale.status === "completed");
+  const visibleVehicles = useMemo(
+    () => (canSeeVehicles ? vehicles : []),
+    [canSeeVehicles, vehicles],
+  );
+  const visibleSales = useMemo(() => (canSeeSales ? sales : []), [canSeeSales, sales]);
+  const visibleTransactions = useMemo(
+    () => (canSeeFinancial ? transactions : []),
+    [canSeeFinancial, transactions],
+  );
+  const visibleChecklist = useMemo(
+    () => (canSeeVehicles ? allChecklist : []),
+    [allChecklist, canSeeVehicles],
+  );
+  const filteredVehicles = useMemo(
+    () => visibleVehicles.filter((vehicle) => vehicle.status !== "archived"),
+    [visibleVehicles],
+  );
+  const completedSales = visibleSales.filter((sale) => sale.status === "completed");
   const currentMonthCompletedSales = completedSales.filter((sale) => isCurrentMonth(sale.sale_date));
   const currentMonthRevenue = currentMonthCompletedSales.reduce(
     (sum, sale) => sum + sale.total_value,
     0,
   );
-  const currentMonthPaidExpenses = transactions
+  const currentMonthPaidExpenses = visibleTransactions
     .filter(
       (transaction) =>
         transaction.type === "expense" &&
@@ -146,7 +178,7 @@ function Dashboard() {
         isCurrentMonth(transaction.transaction_date),
     )
     .reduce((sum, transaction) => sum + transaction.amount, 0);
-  const currentMonthPaidIncome = transactions
+  const currentMonthPaidIncome = visibleTransactions
     .filter(
       (transaction) =>
         transaction.type === "income" &&
@@ -177,7 +209,7 @@ function Dashboard() {
     for (const vehicle of filteredVehicles) {
       byVehicle.set(
         vehicle.id,
-        summarize(allChecklist.filter((item) => item.vehicle_id === vehicle.id)),
+        summarize(visibleChecklist.filter((item) => item.vehicle_id === vehicle.id)),
       );
     }
 
@@ -195,15 +227,15 @@ function Dashboard() {
       (vehicle) =>
         vehicle.status === "in_repair" || (byVehicle.get(vehicle.id)?.inProgress ?? 0) > 0,
     );
-    const totalPrepCost = allChecklist.reduce((sum, item) => sum + (item.actual_cost || 0), 0);
+    const totalPrepCost = visibleChecklist.reduce((sum, item) => sum + (item.actual_cost || 0), 0);
 
     return { withPending, ready, inMaintenance, totalPrepCost };
-  }, [allChecklist, filteredVehicles]);
+  }, [filteredVehicles, visibleChecklist]);
 
   const chartData = useMemo(() => {
     const selected = periods.find((entry) => entry.key === period) ?? periods[1];
-    return buildFinancialSeries(transactions, selected.months);
-  }, [period, transactions]);
+    return buildFinancialSeries(visibleTransactions, selected.months);
+  }, [period, visibleTransactions]);
   const currentMonthLabel = currentMonthYearLabel();
   const currentDateLabel = currentFullDateLabel();
 
@@ -213,14 +245,14 @@ function Dashboard() {
     .slice(0, 5);
 
   const recentActivity = useMemo(() => {
-    const salesActivity = sales.map((sale) => ({
+    const salesActivity = visibleSales.map((sale) => ({
       id: `sale-${sale.id}`,
       label: `Venda ${sale.status === "completed" ? "concluída" : sale.status === "pending" ? "reservada" : "cancelada"} - ${sale.vehicle.brand} ${sale.vehicle.model}`,
       time: `${sale.sale_date}T12:00:00`,
       href: `/sales/${sale.id}`,
       icon: ShoppingBag,
     }));
-    const financialActivity = transactions.map((transaction) => ({
+    const financialActivity = visibleTransactions.map((transaction) => ({
       id: `transaction-${transaction.id}`,
       label: `${transaction.type === "income" ? "Receita" : "Despesa"} - ${transaction.description}`,
       time: `${transaction.transaction_date}T12:00:00`,
@@ -231,38 +263,20 @@ function Dashboard() {
     return [...salesActivity, ...financialActivity]
       .sort((a, b) => b.time.localeCompare(a.time))
       .slice(0, 6);
-  }, [sales, transactions]);
+  }, [visibleSales, visibleTransactions]);
 
   const alerts = useMemo(() => {
-    const overdueFinancial = transactions.filter((transaction) => transaction.status === "overdue");
-    const reservedVehicles = filteredVehicles.filter((vehicle) => vehicle.status === "reserved");
-    const preparingVehicles = filteredVehicles.filter((vehicle) => vehicle.status === "in_repair");
-    const items: Array<{ type: "danger" | "warning"; label: string; href: string }> = [];
+    if (!accessRole) return [];
 
-    if (overdueFinancial.length > 0) {
-      items.push({
-        type: "danger",
-        label: `${overdueFinancial.length} conta(s) vencida(s) no financeiro`,
-        href: "/financial/transactions",
-      });
-    }
-    if (reservedVehicles.length > 0) {
-      items.push({
-        type: "warning",
-        label: `${reservedVehicles.length} veículo(s) reservado(s) aguardando definição`,
-        href: "/sales",
-      });
-    }
-    if (preparingVehicles.length > 0) {
-      items.push({
-        type: "warning",
-        label: `${preparingVehicles.length} veículo(s) em preparação`,
-        href: "/vehicles",
-      });
-    }
-
-    return items;
-  }, [filteredVehicles, transactions]);
+    return buildOperationalAlerts({
+      financialTransactions: visibleTransactions,
+      sales: visibleSales,
+      vehicles: filteredVehicles,
+      checklist: visibleChecklist,
+      today,
+      accessRole,
+    });
+  }, [accessRole, filteredVehicles, today, visibleChecklist, visibleSales, visibleTransactions]);
 
   const stats = [
     {
@@ -278,7 +292,7 @@ function Dashboard() {
       label: "Vendas no mês",
       value: currentMonthCompletedSales.length.toString(),
       sub: brl(currentMonthRevenue),
-      delta: `${sales.filter((sale) => sale.status === "pending").length} pendente(s)`,
+      delta: `${visibleSales.filter((sale) => sale.status === "pending").length} pendente(s)`,
       deltaType: "up" as const,
       icon: ShoppingBag,
       accent: "text-success bg-success/10",
@@ -287,7 +301,7 @@ function Dashboard() {
       label: "Receita recebida",
       value: brl(currentMonthPaidIncome),
       sub: `Pagamentos confirmados em ${currentMonthLabel}`,
-      delta: `${transactions.filter((transaction) => transaction.type === "income" && transaction.status === "pending").length} a receber`,
+      delta: `${visibleTransactions.filter((transaction) => transaction.type === "income" && transaction.status === "pending").length} a receber`,
       deltaType: "up" as const,
       icon: DollarSign,
       accent: "text-success bg-success/10",
@@ -296,7 +310,7 @@ function Dashboard() {
       label: "Despesas pagas",
       value: brl(currentMonthPaidExpenses),
       sub: `Saídas confirmadas em ${currentMonthLabel}`,
-      delta: `${transactions.filter((transaction) => transaction.type === "expense" && transaction.status === "pending").length} a pagar`,
+      delta: `${visibleTransactions.filter((transaction) => transaction.type === "expense" && transaction.status === "pending").length} a pagar`,
       deltaType: "down" as const,
       icon: TrendingDown,
       accent: "text-destructive bg-destructive/10",
@@ -305,14 +319,15 @@ function Dashboard() {
       label: "Resultado do mês",
       value: brl(currentMonthPaidIncome - currentMonthPaidExpenses),
       sub: "Entradas pagas menos saídas pagas",
-      delta: `${transactions.filter((transaction) => transaction.status === "overdue").length} vencida(s)`,
+      delta: `${visibleTransactions.filter((transaction) => transaction.status === "overdue").length} vencida(s)`,
       deltaType: "up" as const,
       icon: TrendingUp,
       accent: "text-warning bg-warning/10",
     },
   ];
 
-  const loading = loadingVehicles || loadingSales || loadingTransactions;
+  const loading =
+    loadingAuth || loadingVehicles || loadingSales || loadingTransactions || loadingChecklist;
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto">
@@ -604,25 +619,25 @@ function Dashboard() {
       <Card>
         <CardHeader className="flex flex-row items-center gap-2">
           <AlertTriangle className="h-4 w-4 text-warning" />
-          <CardTitle className="text-base">Alertas Pendentes</CardTitle>
+          <CardTitle className="text-base">Alertas Operacionais</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           {loading ? (
             <div className="text-sm text-muted-foreground">Carregando alertas...</div>
           ) : alerts.length === 0 ? (
             <div className="text-sm text-muted-foreground">
-              Nenhum alerta operacional relevante no momento.
+              Nenhum alerta operacional relevante nas áreas acessíveis.
             </div>
           ) : (
-            alerts.map((alert, index) => (
+            alerts.map((alert) => (
               <button
-                key={index}
+                key={alert.kind}
                 type="button"
                 onClick={() => navigate({ to: alert.href })}
                 className="w-full flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-muted/40 hover:border-primary/30 transition-colors text-left cursor-pointer"
               >
                 <span
-                  className={`h-2 w-2 rounded-full ${alert.type === "danger" ? "bg-destructive" : "bg-warning"}`}
+                  className={`h-2 w-2 rounded-full ${alert.severity === "critical" ? "bg-destructive" : "bg-warning"}`}
                 />
                 <span className="text-sm flex-1">{alert.label}</span>
                 <ChevronRight className="h-4 w-4 text-muted-foreground" />

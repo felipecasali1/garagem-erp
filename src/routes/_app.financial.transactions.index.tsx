@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { ArrowDownCircle, ArrowUpCircle } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -10,9 +11,14 @@ import {
   listFinancialTransactions,
   type FinancialTransactionWithLinks,
 } from "@/modules/financial/services/transactions";
+import { isFinancialAlertTransaction } from "@/modules/alerts/lib/build-operational-alerts";
+import { useOperationalDate } from "@/modules/alerts/hooks/use-operational-date";
 
 export const Route = createFileRoute("/_app/financial/transactions/")({
   head: () => ({ meta: [{ title: "Transações | GaragemERP" }] }),
+  validateSearch: (search: { alert?: unknown }): { alert?: "overdue" } => ({
+    alert: search.alert === "overdue" ? "overdue" : undefined,
+  }),
   component: TransactionsPage,
 });
 
@@ -26,6 +32,8 @@ const categoryLabel: Record<string, string> = {
 };
 
 function TransactionsPage() {
+  const { alert: alertFilter } = Route.useSearch();
+  const today = useOperationalDate();
   const {
     data: transactions = [],
     isLoading,
@@ -35,7 +43,17 @@ function TransactionsPage() {
     queryFn: listFinancialTransactions,
   });
 
-  const grouped = transactions.reduce<Record<string, FinancialTransactionWithLinks[]>>((acc, t) => {
+  const visibleTransactions = useMemo(
+    () =>
+      alertFilter === "overdue"
+        ? transactions.filter((transaction) =>
+            isFinancialAlertTransaction(transaction, today),
+          )
+        : transactions,
+    [alertFilter, today, transactions],
+  );
+
+  const grouped = visibleTransactions.reduce<Record<string, FinancialTransactionWithLinks[]>>((acc, t) => {
     (acc[t.transaction_date] ||= []).push(t);
     return acc;
   }, {});
@@ -48,7 +66,7 @@ function TransactionsPage() {
         description={
           isLoading
             ? "Carregando lançamentos..."
-            : `${transactions.length} lançamentos financeiros`
+            : `${visibleTransactions.length} lançamentos financeiros${alertFilter === "overdue" ? " vencidos" : ""}`
         }
       />
 
@@ -61,9 +79,11 @@ function TransactionsPage() {
               Falha ao carregar transações:{" "}
               {error instanceof Error ? error.message : "erro desconhecido"}
             </div>
-          ) : transactions.length === 0 ? (
+          ) : visibleTransactions.length === 0 ? (
             <div className="p-6 text-sm text-muted-foreground">
-              Nenhuma transação financeira registrada ainda.
+              {alertFilter === "overdue"
+                ? "Nenhuma transação financeira vencida encontrada."
+                : "Nenhuma transação financeira registrada ainda."}
             </div>
           ) : (
             <div className="divide-y divide-border">

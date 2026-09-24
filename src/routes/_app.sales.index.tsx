@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { Eye, MoreHorizontal, Search } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -20,15 +21,23 @@ import {
 
 export const Route = createFileRoute("/_app/sales/")({
   head: () => ({ meta: [{ title: "Vendas | GaragemERP" }] }),
+  validateSearch: (search: { status?: unknown }): { status?: "pending" } => ({
+    status: search.status === "pending" ? "pending" : undefined,
+  }),
   component: SalesPage,
 });
 
 function SalesPage() {
   const navigate = useNavigate();
+  const { status: statusFilter } = Route.useSearch();
   const { data: sales = [], isLoading, error } = useQuery({
     queryKey: saleKeys.all,
     queryFn: listSales,
   });
+  const visibleSales = useMemo(
+    () => (statusFilter === "pending" ? sales.filter((sale) => sale.status === "pending") : sales),
+    [sales, statusFilter],
+  );
 
   if (error) {
     return (
@@ -42,7 +51,11 @@ function SalesPage() {
     <div className="max-w-[1600px] mx-auto">
       <PageHeader
         title="Vendas"
-        description={isLoading ? "Carregando vendas..." : `${sales.length} vendas registradas`}
+        description={
+          isLoading
+            ? "Carregando vendas..."
+            : `${visibleSales.length} vendas${statusFilter === "pending" ? " pendentes" : " registradas"}`
+        }
         action={{ label: "Nova Venda", onClick: () => navigate({ to: "/sales/new" }) }}
       />
 
@@ -58,13 +71,19 @@ function SalesPage() {
       <Card>
         {isLoading ? (
           <div className="p-8 text-sm text-muted-foreground">Carregando vendas...</div>
-        ) : sales.length === 0 ? (
+        ) : visibleSales.length === 0 ? (
           <div className="p-12 text-center space-y-2">
-            <h3 className="font-display font-semibold">Nenhuma venda registrada</h3>
+            <h3 className="font-display font-semibold">
+              {statusFilter === "pending" ? "Nenhuma venda pendente" : "Nenhuma venda registrada"}
+            </h3>
             <p className="text-sm text-muted-foreground">
-              Registre a primeira venda a partir de um veículo disponível.
+              {statusFilter === "pending"
+                ? "Não há reservas aguardando definição no momento."
+                : "Registre a primeira venda a partir de um veículo disponível."}
             </p>
-            <Button onClick={() => navigate({ to: "/sales/new" })}>Nova Venda</Button>
+            {statusFilter !== "pending" && (
+              <Button onClick={() => navigate({ to: "/sales/new" })}>Nova Venda</Button>
+            )}
           </div>
         ) : (
           <Table>
@@ -82,7 +101,7 @@ function SalesPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sales.map((s) => (
+            {visibleSales.map((s) => (
               <TableRow
                 key={s.id}
                 className="cursor-pointer"

@@ -5,7 +5,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { useTheme } from "@/shared/hooks/use-theme";
 import { CommandPalette, useCommandPalette } from "@/shared/components/layout/command-palette";
-import { NotificationsMenu } from "@/shared/components/layout/notifications";
+import { AlertsMenu } from "@/shared/components/layout/alerts";
 import { useAuth } from "@/shared/supabase/auth";
 import { initials } from "@/shared/lib/format";
 
@@ -83,7 +83,7 @@ export function TopNav() {
         >
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </Button>
-        <NotificationsMenu />
+        <AlertsMenu />
         <Avatar className="h-8 w-8 ml-1">
           <AvatarFallback className="bg-primary text-primary-foreground text-xs">
             {initials(userLabel).slice(0, 2) || "GE"}

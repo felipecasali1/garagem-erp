@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutGrid,
@@ -20,6 +20,12 @@ import { Input } from "@/shared/components/ui/input";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { brl } from "@/shared/lib/format";
 import { toast } from "sonner";
+import { checklistKeys, listChecklist } from "@/modules/checklist";
+import {
+  hasActiveChecklistForVehicle,
+  isChecklistAlertItem,
+} from "@/modules/alerts/lib/build-operational-alerts";
+import { useOperationalDate } from "@/modules/alerts/hooks/use-operational-date";
 import {
   listVehicles,
   setVehiclePublished,
@@ -37,6 +43,10 @@ import type { VehicleStatus } from "@/shared/types/domain";
 
 export const Route = createFileRoute("/_app/vehicles/")({
   head: () => ({ meta: [{ title: "Veículos | GaragemERP" }] }),
+  validateSearch: (search: { alert?: unknown }): { alert?: "checklist" | "preparation" } => ({
+    alert:
+      search.alert === "checklist" || search.alert === "preparation" ? search.alert : undefined,
+  }),
   component: VehiclesPage,
 });
 
@@ -61,6 +71,8 @@ function VehiclesPage() {
   const [view, setView] = useState<"grid" | "table">("grid");
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | VehicleStatus>("all");
+  const { alert: alertFilter } = Route.useSearch();
+  const today = useOperationalDate();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const {
@@ -70,6 +82,11 @@ function VehiclesPage() {
   } = useQuery({
     queryKey: vehicleKeys.all,
     queryFn: listVehicles,
+  });
+  const { data: checklist = [] } = useQuery({
+    queryKey: checklistKeys.all,
+    queryFn: () => listChecklist(),
+    enabled: alertFilter != null,
   });
   const publishMutation = useMutation({
     mutationFn: ({ id, published }: { id: number; published: boolean }) =>
@@ -85,8 +102,30 @@ function VehiclesPage() {
     },
   });
 
+  const alertVehicleIds = useMemo(() => {
+    if (alertFilter === "checklist") {
+      return new Set(
+        checklist
+          .filter((item) => isChecklistAlertItem(item, today))
+          .map((item) => item.vehicle_id),
+      );
+    }
+    if (alertFilter === "preparation") {
+      return new Set(
+        vehicles
+          .filter(
+            (vehicle) =>
+              vehicle.status === "in_repair" && hasActiveChecklistForVehicle(vehicle.id, checklist),
+          )
+          .map((vehicle) => vehicle.id),
+      );
+    }
+    return null;
+  }, [alertFilter, checklist, today, vehicles]);
+
   const filtered = vehicles
     .filter((v) => statusFilter === "all" || v.status === statusFilter)
+    .filter((v) => alertVehicleIds == null || alertVehicleIds.has(v.id))
     .filter(
       (v) => !q || `${v.brand} ${v.model} ${v.plate}`.toLowerCase().includes(q.toLowerCase()),
     );

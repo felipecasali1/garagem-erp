@@ -1,4 +1,4 @@
-import type { EmployeeAccessRole } from "@/modules/employees/types";
+import type { EmployeeAccessRole } from "../../modules/employees/types.js";
 
 export type AccessRole = EmployeeAccessRole;
 

@@ -1,4 +1,4 @@
-import type { Address, CommissionType } from "@/shared/types/domain";
+import type { Address, CommissionType } from "../../shared/types/domain.js";
 
 export type EmployeeAccessRole = "admin" | "manager" | "seller" | "financial";
 

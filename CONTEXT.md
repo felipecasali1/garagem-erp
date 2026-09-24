@@ -73,3 +73,13 @@ _Avoid_: tratar `Commission` como parte do preço do veículo ou como o próprio
 **FinancialTransaction**:
 Registro de uma entrada ou saída financeira relacionada a uma operação de negócio, como `Purchase`, `Sale` ou `Commission`, ou lançada de forma independente.
 _Avoid_: usar `FinancialTransaction` para representar a operação comercial que originou o lançamento.
+
+### Operational follow-up
+
+**OperationalAlert**:
+Situação atual da operação que merece atenção, como uma obrigação financeira vencida, uma tarefa urgente ou atrasada, uma venda pendente ou uma preparação com pendências. O alerta representa uma condição ainda existente e deixa de ser relevante quando essa condição é resolvida.
+_Avoid_: tratar `OperationalAlert` como uma mensagem histórica, um evento de auditoria ou uma notificação individual para um usuário.
+
+**Alert**:
+Rótulo usado na interface para apresentar um `OperationalAlert` ao `User`. A condição é da instalação da garagem, mas cada usuário vê apenas os alertas das áreas que seu nível de acesso permite consultar.
+_Avoid_: usar “Notificação” para os alertas operacionais atuais.
