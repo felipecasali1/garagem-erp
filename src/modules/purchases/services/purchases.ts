@@ -55,6 +55,7 @@ export type CreatePurchaseInput = {
 
 export const purchaseKeys = {
   all: ["purchases"] as const,
+  byVehicle: (vehicleId: number) => ["purchases", "vehicle", vehicleId] as const,
   detail: (id: number) => ["purchases", id] as const,
 };
 
@@ -119,10 +120,24 @@ function mapPurchase(row: PurchaseRow): Purchase {
 }
 
 export async function listPurchases() {
-  const { data, error } = await supabase
+  return queryPurchases();
+}
+
+export async function listPurchasesByVehicle(vehicleId: number) {
+  return queryPurchases(vehicleId);
+}
+
+async function queryPurchases(vehicleId?: number) {
+  let query = supabase
     .from("purchases")
     .select("id, supplier_id, vehicle_id, financial_transaction_id, total_value, purchase_date, status, notes, supplier:suppliers(id, person_id, supplier_type, active, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles(*)")
     .order("purchase_date", { ascending: false });
+
+  if (vehicleId != null) {
+    query = query.eq("vehicle_id", vehicleId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw new Error(error.message);

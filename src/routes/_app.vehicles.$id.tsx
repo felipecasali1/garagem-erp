@@ -21,9 +21,12 @@ import { Button } from "@/shared/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
-import { brl } from "@/shared/lib/format";
+import { brl, fmtDate } from "@/shared/lib/format";
 import { VehicleChecklist } from "@/modules/checklist/components/vehicle-checklist";
 import { checklistKeys, useChecklist, summarize } from "@/modules/checklist";
+import { buildVehicleHistory } from "@/modules/vehicles/lib/build-vehicle-history";
+import { listPurchasesByVehicle, purchaseKeys } from "@/modules/purchases/services/purchases";
+import { listSalesByVehicle, saleKeys } from "@/modules/sales/services/sales";
 import {
   finishVehiclePreparation,
   getVehicleById,
@@ -66,6 +69,16 @@ function VehicleDetail() {
   } = useQuery({
     queryKey: vehicleKeys.detail(numericId),
     queryFn: () => getVehicleById(numericId),
+    enabled: Number.isFinite(numericId),
+  });
+  const purchaseHistoryQuery = useQuery({
+    queryKey: purchaseKeys.byVehicle(numericId),
+    queryFn: () => listPurchasesByVehicle(numericId),
+    enabled: Number.isFinite(numericId),
+  });
+  const saleHistoryQuery = useQuery({
+    queryKey: saleKeys.byVehicle(numericId),
+    queryFn: () => listSalesByVehicle(numericId),
     enabled: Number.isFinite(numericId),
   });
   const publishMutation = useMutation({
@@ -119,6 +132,11 @@ function VehicleDetail() {
   }
 
   const checklistSummary = summarize(checklistItems);
+  const vehicleHistory = buildVehicleHistory(
+    vehicle.id,
+    purchaseHistoryQuery.data ?? [],
+    saleHistoryQuery.data ?? [],
+  );
   const estimatedInvested = vehicle.cost_price + checklistSummary.estimatedCost;
   const actualInvested = vehicle.cost_price + checklistSummary.actualCost;
   const margin = vehicle.sale_price - estimatedInvested;
@@ -295,7 +313,7 @@ function VehicleDetail() {
         <TabsList>
           <TabsTrigger value="info">Informações</TabsTrigger>
           <TabsTrigger value="checklist">Checklist ({checklistSummary.total})</TabsTrigger>
-          <TabsTrigger value="history">Histórico (0)</TabsTrigger>
+          <TabsTrigger value="history">Histórico ({vehicleHistory.length})</TabsTrigger>
           <TabsTrigger value="accessories">Acessórios</TabsTrigger>
         </TabsList>
         <TabsContent value="checklist">
@@ -325,11 +343,57 @@ function VehicleDetail() {
         </TabsContent>
         <TabsContent value="history">
           <Card>
-            <CardContent className="p-6 space-y-3">
-              <div className="text-sm text-muted-foreground text-center py-8">
-                O histórico de compras e vendas será exibido aqui quando esses módulos forem
-                migrados para o Supabase.
-              </div>
+            <CardContent className="p-6">
+              {purchaseHistoryQuery.isLoading || saleHistoryQuery.isLoading ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  Carregando histórico...
+                </div>
+              ) : purchaseHistoryQuery.error || saleHistoryQuery.error ? (
+                <div className="py-8 text-center text-sm text-destructive">
+                  Falha ao carregar o histórico do veículo.
+                </div>
+              ) : vehicleHistory.length === 0 ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  Nenhuma compra ou venda registrada para este veículo.
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {vehicleHistory.map((entry) => {
+                    const isPurchase = entry.kind === "purchase";
+                    return (
+                      <div
+                        key={`${entry.kind}-${entry.id}`}
+                        className="flex flex-wrap items-center gap-3 py-4 first:pt-0 last:pb-0"
+                      >
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+                          {isPurchase ? (
+                            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium">
+                            {isPurchase ? "Compra" : "Venda"} #{entry.id}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {fmtDate(entry.date)} · {brl(entry.amount)}
+                          </div>
+                        </div>
+                        <StatusBadge kind={isPurchase ? "purchase" : "sale"} value={entry.status} />
+                        <Button variant="outline" size="sm" asChild>
+                          <Link
+                            to={isPurchase ? "/purchases/$id" : "/sales/$id"}
+                            params={{ id: String(entry.id) }}
+                          >
+                            Ver detalhes
+                          </Link>
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

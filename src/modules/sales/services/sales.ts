@@ -119,6 +119,7 @@ export type SaleActionInput = {
 
 export const saleKeys = {
   all: ["sales"] as const,
+  byVehicle: (vehicleId: number) => ["sales", "vehicle", vehicleId] as const,
   detail: (id: number) => ["sales", id] as const,
 };
 
@@ -345,10 +346,21 @@ async function ensureSaleCommission({
 }
 
 export async function listSales() {
-  const { data, error } = await supabase
-    .from("sales")
-    .select(saleSelect)
-    .order("sale_date", { ascending: false });
+  return querySales();
+}
+
+export async function listSalesByVehicle(vehicleId: number) {
+  return querySales(vehicleId);
+}
+
+async function querySales(vehicleId?: number) {
+  let query = supabase.from("sales").select(saleSelect).order("sale_date", { ascending: false });
+
+  if (vehicleId != null) {
+    query = query.eq("vehicle_id", vehicleId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw new Error(error.message);
