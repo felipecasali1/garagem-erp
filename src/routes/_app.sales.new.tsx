@@ -46,6 +46,7 @@ const steps = [
 ] as const;
 
 function getPaymentStatusLabel(draft: SaleDraft, total: number) {
+  if (draft.status !== "completed") return "Pendente";
   if (draft.payment_method !== "financing") return "Quitado";
   if (draft.down_payment >= total && total > 0) return "Quitado";
   if (draft.down_payment > 0) return "Parcial";
@@ -167,7 +168,9 @@ function NewSale() {
       notes: draft.notes,
       paymentMethod: draft.payment_method,
       paymentStatus:
-        draft.payment_method !== "financing"
+        draft.status !== "completed"
+          ? "pending"
+          : draft.payment_method !== "financing"
           ? "paid"
           : draft.down_payment >= total
             ? "paid"

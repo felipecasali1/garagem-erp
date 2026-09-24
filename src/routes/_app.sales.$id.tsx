@@ -24,6 +24,7 @@ import { vehicleKeys } from "@/modules/vehicles/services/vehicles";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
 import { formatDocument, formatPhone } from "@/shared/lib/field-format";
 import type { PaymentMethod, PaymentStatus } from "@/shared/types/domain";
+import { summarizeSaleFinancials } from "@/modules/sales/lib/sale-financials";
 
 export const Route = createFileRoute("/_app/sales/$id")({
   head: () => ({ meta: [{ title: "Venda | GaragemERP" }] }),
@@ -106,16 +107,17 @@ function SaleDetail() {
     );
   }
 
-  const commission =
-    sale.commission?.amount ??
-    (sale.employee.commission_type === "percentage"
-      ? (sale.total_value * sale.employee.commission_rate) / 100
-      : sale.employee.commission_rate);
+  const financialSummary = summarizeSaleFinancials({
+    saleStatus: sale.status,
+    totalValue: sale.total_value,
+    vehicleCost: sale.vehicle.cost_price,
+    commission: sale.commission,
+    commissionType: sale.employee.commission_type,
+    commissionRate: sale.employee.commission_rate,
+  });
   const subtotal = sale.total_value + sale.discount;
-  const profit = sale.total_value - sale.vehicle.cost_price;
   const isPending = sale.status === "pending";
   const customerDocument = sale.customer.person.cpf ?? sale.customer.person.cnpj ?? "";
-  const hasCommission = Boolean(sale.commission);
   const commissionRuleLabel =
     sale.employee.commission_type === "percentage"
       ? `${sale.employee.commission_rate}% sobre a venda`
@@ -208,11 +210,15 @@ function SaleDetail() {
                 <Row label="Valor final" value={brl(sale.total_value)} bold />
                 <Separator />
                 <Row
-                  label={`Comissão (${sale.employee.commission_type === "percentage"
+                  label={`${financialSummary.commissionLabel} (${sale.employee.commission_type === "percentage"
                     ? `${sale.employee.commission_rate}%`
                     : "fixa"
                     })`}
-                  value={hasCommission ? brl(commission) : "-"}
+                  value={
+                    financialSummary.commissionAmount > 0
+                      ? brl(financialSummary.commissionAmount)
+                      : "-"
+                  }
                   muted
                 />
                 <Row
@@ -222,9 +228,11 @@ function SaleDetail() {
                 />
                 <Row
                   label="Lucro estimado"
-                  value={brl(profit - commission)}
+                  value={brl(financialSummary.profit)}
                   bold
-                  className={profit - commission >= 0 ? "text-success" : "text-destructive"}
+                  className={
+                    financialSummary.profit >= 0 ? "text-success" : "text-destructive"
+                  }
                 />
               </div>
             </CardContent>
@@ -253,12 +261,17 @@ function SaleDetail() {
                     }
                   />
                   <Separator />
-                  <Row label="Entrada / recebido" value={brl(sale.payment.down_payment)} />
+                  <Row
+                    label={sale.status === "pending" ? "Entrada prevista" : "Entrada / recebido"}
+                    value={brl(sale.payment.down_payment)}
+                  />
                   <Row
                     label={
                       sale.payment.payment_method === "financing"
                         ? "Saldo financiado/repasse"
-                        : "Saldo restante"
+                        : sale.status === "pending"
+                          ? "Saldo previsto"
+                          : "Saldo restante"
                     }
                     value={brl(sale.payment.remaining_amount)}
                   />
@@ -266,7 +279,9 @@ function SaleDetail() {
                     label={
                       sale.payment.payment_method === "financing"
                         ? "Data prevista do repasse"
-                        : "Data do pagamento"
+                        : sale.status === "pending"
+                          ? "Data prevista"
+                          : "Data do pagamento"
                     }
                     value={sale.payment.payment_date ? fmtDate(sale.payment.payment_date) : "-"}
                     muted
@@ -362,9 +377,16 @@ function SaleDetail() {
                     muted
                   />
                 </div>
+              ) : sale.status === "pending" && financialSummary.commissionAmount > 0 ? (
+                <div className="space-y-3 text-sm">
+                  <Row label="Valor estimado" value={brl(financialSummary.commissionAmount)} bold />
+                  <div className="text-muted-foreground">
+                    A comissão será gerada quando a venda for concluída.
+                  </div>
+                </div>
               ) : (
                 <div className="text-sm text-muted-foreground">
-                  Esta venda não gerou comissão para o vendedor.
+                  Esta venda não possui comissão configurada para o vendedor.
                 </div>
               )}
             </CardContent>

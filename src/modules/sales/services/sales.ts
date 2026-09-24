@@ -13,6 +13,7 @@ import type {
   SaleStatus,
   Vehicle,
 } from "@/shared/types/domain";
+import { normalizeSalePayment } from "@/modules/sales/lib/sale-financials";
 
 type PersonRow = {
   id: number;
@@ -209,6 +210,15 @@ function mapSale(row: SaleRow): Sale {
 
   const [payment] = row.payment ?? [];
   const [commission] = row.commission ?? [];
+  const displayPayment =
+    payment && row.status !== "completed"
+      ? {
+          ...payment,
+          payment_status: "pending" as const,
+          down_payment: payment.payment_method === "financing" ? payment.down_payment : 0,
+          remaining_amount: Number(row.total_value),
+        }
+      : payment;
 
   return {
     id: row.id,
@@ -221,15 +231,15 @@ function mapSale(row: SaleRow): Sale {
     sale_date: row.sale_date,
     notes: row.notes ?? undefined,
     trade_in_value: Number(row.trade_in_value),
-    payment: payment
+    payment: displayPayment
       ? {
-          id: payment.id,
-          payment_method: payment.payment_method,
-          payment_status: payment.payment_status,
-          down_payment: Number(payment.down_payment),
-          installments_count: Number(payment.installments_count),
-          payment_date: payment.payment_date ?? undefined,
-          remaining_amount: Number(payment.remaining_amount),
+          id: displayPayment.id,
+          payment_method: displayPayment.payment_method,
+          payment_status: displayPayment.payment_status,
+          down_payment: Number(displayPayment.down_payment),
+          installments_count: Number(displayPayment.installments_count),
+          payment_date: displayPayment.payment_date ?? undefined,
+          remaining_amount: Number(displayPayment.remaining_amount),
         }
       : undefined,
     commission: commission
@@ -404,47 +414,6 @@ function calculateCommission({
   return commissionType === "percentage" ? (totalValue * commissionRate) / 100 : commissionRate;
 }
 
-function normalizeSalePayment({
-  method,
-  totalValue,
-  downPayment,
-  paymentDate,
-  saleDate,
-}: {
-  method: PaymentMethod;
-  totalValue: number;
-  downPayment: number;
-  paymentDate?: string;
-  saleDate: string;
-}) {
-  if (method === "trade_in") {
-    throw new Error("Troca como forma de pagamento ainda depende do fluxo de veículo recebido.");
-  }
-
-  if (method === "financing") {
-    if (downPayment > totalValue) {
-      throw new Error("A entrada não pode ser maior que o valor final da venda.");
-    }
-
-    return {
-      paymentStatus:
-        downPayment >= totalValue ? ("paid" as const) : downPayment > 0 ? ("partial" as const) : ("pending" as const),
-      downPayment,
-      installmentsCount: 1,
-      paymentDate: paymentDate ?? saleDate,
-      remainingAmount: Math.max(0, totalValue - downPayment),
-    };
-  }
-
-  return {
-    paymentStatus: "paid" as const,
-    downPayment: totalValue,
-    installmentsCount: 1,
-    paymentDate: paymentDate ?? saleDate,
-    remainingAmount: 0,
-  };
-}
-
 async function createSaleFinancialTransactions({
   supabaseAdmin,
   sale,
@@ -585,6 +554,7 @@ const createSaleServer = createServerFn({ method: "POST" })
       throw new Error("O valor final da venda deve ser maior que zero.");
     }
     const paymentInput = normalizeSalePayment({
+      saleStatus: data.status,
       method: data.paymentMethod,
       totalValue,
       downPayment: data.downPayment,
@@ -755,6 +725,28 @@ const completeSaleServer = createServerFn({ method: "POST" })
       .maybeSingle();
     if (paymentError) throw new Error(paymentError.message);
 
+    const paymentInput = normalizeSalePayment({
+      saleStatus: "completed",
+      method: (payment?.payment_method as PaymentMethod | undefined) ?? "financing",
+      totalValue: Number(sale.total_value),
+      downPayment: Number(payment?.down_payment ?? 0),
+      paymentDate: payment?.payment_date,
+      saleDate: String(sale.sale_date),
+    });
+
+    if (payment) {
+      const { error: paymentUpdateError } = await supabaseAdmin
+        .from("sale_payments")
+        .update({
+          payment_status: paymentInput.paymentStatus,
+          down_payment: paymentInput.downPayment,
+          remaining_amount: paymentInput.remainingAmount,
+          payment_date: paymentInput.paymentDate,
+        })
+        .eq("sale_id", sale.id);
+      if (paymentUpdateError) throw new Error(paymentUpdateError.message);
+    }
+
     await applyCompletedSale({
       supabaseAdmin,
       sale: {
@@ -771,10 +763,10 @@ const completeSaleServer = createServerFn({ method: "POST" })
       },
       payment: {
         payment_method: (payment?.payment_method as PaymentMethod | undefined) ?? "financing",
-        payment_status: (payment?.payment_status as PaymentStatus | undefined) ?? "pending",
-        down_payment: Number(payment?.down_payment ?? 0),
-        remaining_amount: Number(payment?.remaining_amount ?? sale.total_value),
-        payment_date: payment?.payment_date,
+        payment_status: paymentInput.paymentStatus,
+        down_payment: paymentInput.downPayment,
+        remaining_amount: paymentInput.remainingAmount,
+        payment_date: paymentInput.paymentDate,
       },
     });
 
