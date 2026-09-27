@@ -1,21 +1,38 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeft,
+  BriefcaseBusiness,
+  CircleDollarSign,
+  ExternalLink,
   Mail,
   Phone,
   FileText,
   Calendar,
   Briefcase,
   Percent,
-  Building2,
+  ShoppingBag,
 } from "lucide-react";
+import { useMemo } from "react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { StatusBadge } from "@/shared/components/status-badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/components/ui/table";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
 import { formatCpf, formatPhone, formatCep } from "@/shared/lib/field-format";
+import {
+  buildEmployeeSalesHistory,
+  type EmployeeSalesHistory,
+} from "@/modules/employees/lib/build-employee-sales-history";
 import { employeeKeys, getEmployeeById } from "@/modules/employees/services/employees";
+import { listSalesByEmployee, saleKeys } from "@/modules/sales/services/sales";
 import { useQuery } from "@tanstack/react-query";
 
 export const Route = createFileRoute("/_app/employees/$id")({
@@ -38,6 +55,17 @@ function EmployeeDetail() {
     queryKey: employeeKeys.detail(employeeId),
     queryFn: () => getEmployeeById(employeeId),
   });
+  const {
+    data: sales = [],
+    isLoading: isLoadingSales,
+    error: salesError,
+    refetch: refetchSales,
+  } = useQuery({
+    queryKey: saleKeys.byEmployee(employeeId),
+    queryFn: () => listSalesByEmployee(employeeId),
+    enabled: Number.isFinite(employeeId),
+  });
+  const salesHistory = useMemo(() => buildEmployeeSalesHistory(sales), [sales]);
 
   if (isLoading) {
     return (
@@ -174,17 +202,200 @@ function EmployeeDetail() {
                 <div className="text-sm text-muted-foreground">Nenhum endereço cadastrado.</div>
               )}
             </div>
-
-            <div className="border-t border-border pt-4">
-              <h2 className="font-display font-semibold mb-2">Integração com vendas</h2>
-              <p className="text-sm text-muted-foreground">
-                As vendas já usam dados reais. Falta evoluir esta tela para consolidar aqui o
-                histórico comercial e financeiro do funcionário.
-              </p>
-            </div>
           </CardContent>
         </Card>
       </div>
+
+      <EmployeeSalesHistorySection
+        history={salesHistory}
+        isLoading={isLoadingSales}
+        error={salesError}
+        onRetry={() => void refetchSales()}
+      />
+    </div>
+  );
+}
+
+function EmployeeSalesHistorySection({
+  history,
+  isLoading,
+  error,
+  onRetry,
+}: {
+  history: EmployeeSalesHistory;
+  isLoading: boolean;
+  error: Error | null;
+  onRetry: () => void;
+}) {
+  return (
+    <Card>
+      <CardContent className="p-6 space-y-6">
+        <div className="flex items-center gap-2">
+          <BriefcaseBusiness className="h-4 w-4 text-muted-foreground" />
+          <div>
+            <h2 className="font-display font-semibold">Histórico comercial</h2>
+            <p className="text-sm text-muted-foreground">
+              Vendas pendentes e concluídas atribuídas a este funcionário.
+            </p>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="text-sm text-muted-foreground py-8 text-center">
+            Carregando histórico comercial...
+          </div>
+        ) : error ? (
+          <div className="space-y-3 py-8 text-center">
+            <p className="text-sm text-destructive">
+              Não foi possível carregar o histórico comercial.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {error.message || "Tente novamente em instantes."}
+            </p>
+            <Button variant="outline" size="sm" onClick={onRetry}>
+              Tentar novamente
+            </Button>
+          </div>
+        ) : history.sales.length === 0 ? (
+          <div className="py-8 text-center space-y-2">
+            <ShoppingBag className="h-8 w-8 mx-auto text-muted-foreground" />
+            <p className="text-sm font-medium">Nenhuma venda no histórico</p>
+            <p className="text-sm text-muted-foreground">
+              Este funcionário ainda não possui vendas pendentes ou concluídas.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              <HistoryMetric
+                label="Vendas concluídas"
+                value={String(history.completedSalesCount)}
+                icon={ShoppingBag}
+              />
+              <HistoryMetric
+                label="Valor vendido"
+                value={brl(history.completedSalesValue)}
+                icon={CircleDollarSign}
+              />
+              <HistoryMetric
+                label="Vendas pendentes"
+                value={String(history.pendingSalesCount)}
+                icon={BriefcaseBusiness}
+              />
+              <div className="rounded-lg bg-muted p-4">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <CircleDollarSign className="h-3.5 w-3.5" />
+                  Comissões
+                </div>
+                <div className="mt-2 space-y-1 text-sm">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">Consolidadas</span>
+                    <span className="font-semibold">{brl(history.consolidatedCommission)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">Estimadas</span>
+                    <span className="font-semibold">{brl(history.estimatedCommission)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-md border border-border overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Venda</TableHead>
+                    <TableHead>Veículo</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead className="text-right">Valor</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Comissão</TableHead>
+                    <TableHead className="text-right">Ação</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {history.sales.map((sale) => (
+                    <TableRow key={sale.saleId}>
+                      <TableCell>
+                        <div className="font-mono text-xs">#{sale.saleId}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {fmtDate(sale.saleDate)}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-medium">{sale.vehicleName}</div>
+                        <span className="plate-chip">{sale.vehiclePlate}</span>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{sale.customerName}</TableCell>
+                      <TableCell className="text-right font-semibold">
+                        {brl(sale.totalValue)}
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge kind="sale" value={sale.status} />
+                      </TableCell>
+                      <TableCell>
+                        <HistoryCommission commission={sale.commission} />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button size="icon" variant="ghost" asChild>
+                          <Link
+                            to="/sales/$id"
+                            params={{ id: String(sale.saleId) }}
+                            aria-label={`Ver venda ${sale.saleId}`}
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function HistoryMetric({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  icon: React.ComponentType<{ className?: string }>;
+}) {
+  return (
+    <div className="rounded-lg bg-muted p-4">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      <div className="mt-2 font-display text-xl font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function HistoryCommission({
+  commission,
+}: {
+  commission: EmployeeSalesHistory["sales"][number]["commission"];
+}) {
+  if (commission.source === "none") {
+    return <span className="text-sm text-muted-foreground">Sem comissão</span>;
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="text-sm font-medium">{brl(commission.amount)}</div>
+      {commission.source === "estimated" ? (
+        <span className="text-xs text-muted-foreground">Estimada</span>
+      ) : (
+        <StatusBadge kind="commission" value={commission.status} />
+      )}
     </div>
   );
 }

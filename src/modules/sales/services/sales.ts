@@ -121,6 +121,7 @@ export type SaleActionInput = {
 export const saleKeys = {
   all: ["sales"] as const,
   byVehicle: (vehicleId: number) => ["sales", "vehicle", vehicleId] as const,
+  byEmployee: (employeeId: number) => ["sales", "employee", employeeId] as const,
   detail: (id: number) => ["sales", id] as const,
 };
 
@@ -292,7 +293,9 @@ async function ensureSaleCommission({
 
   const { data: existingCommission, error: existingCommissionError } = await supabaseAdmin
     .from("commissions")
-    .select("id, sale_id, employee_id, vehicle_id, type, rate, amount, status, due_date, paid_at, notes")
+    .select(
+      "id, sale_id, employee_id, vehicle_id, type, rate, amount, status, due_date, paid_at, notes",
+    )
     .eq("sale_id", sale.id)
     .eq("employee_id", sale.employee_id)
     .maybeSingle();
@@ -313,7 +316,9 @@ async function ensureSaleCommission({
         status: "pending",
         due_date: sale.sale_date,
       })
-      .select("id, sale_id, employee_id, vehicle_id, type, rate, amount, status, due_date, paid_at, notes")
+      .select(
+        "id, sale_id, employee_id, vehicle_id, type, rate, amount, status, due_date, paid_at, notes",
+      )
       .single();
 
     if (createdCommissionError) {
@@ -327,12 +332,14 @@ async function ensureSaleCommission({
     throw new Error("Falha ao registrar comissão da venda.");
   }
 
-  const { data: existingCommissionTransaction, error: existingCommissionTransactionError } = await supabaseAdmin
-    .from("financial_transactions")
-    .select("id")
-    .eq("commission_id", commission.id)
-    .limit(1);
-  if (existingCommissionTransactionError) throw new Error(existingCommissionTransactionError.message);
+  const { data: existingCommissionTransaction, error: existingCommissionTransactionError } =
+    await supabaseAdmin
+      .from("financial_transactions")
+      .select("id")
+      .eq("commission_id", commission.id)
+      .limit(1);
+  if (existingCommissionTransactionError)
+    throw new Error(existingCommissionTransactionError.message);
 
   if ((existingCommissionTransaction ?? []).length === 0) {
     const { error: transactionError } = await supabaseAdmin.from("financial_transactions").insert({
@@ -360,14 +367,24 @@ export async function listSales() {
 }
 
 export async function listSalesByVehicle(vehicleId: number) {
-  return querySales(vehicleId);
+  return querySales({ vehicleId });
 }
 
-async function querySales(vehicleId?: number) {
+export async function listSalesByEmployee(employeeId: number) {
+  return querySales({ employeeId });
+}
+
+async function querySales({
+  vehicleId,
+  employeeId,
+}: { vehicleId?: number; employeeId?: number } = {}) {
   let query = supabase.from("sales").select(saleSelect).order("sale_date", { ascending: false });
 
   if (vehicleId != null) {
     query = query.eq("vehicle_id", vehicleId);
+  }
+  if (employeeId != null) {
+    query = query.eq("employee_id", employeeId);
   }
 
   const { data, error } = await query;

@@ -70,9 +70,17 @@ Parcela individual de um `Payment` ou de uma obrigação financeira, com valor, 
 Valor devido a um `Employee` em razão de uma `Sale`, calculado conforme a regra de comissão aplicável ao funcionário.
 _Avoid_: tratar `Commission` como parte do preço do veículo ou como o próprio salário do funcionário.
 
+**EstimatedCommission**:
+Expectativa de comissão de uma `Sale` ainda pendente, calculada pela regra atual do `Employee` e não consolidada como um registro de comissão.
+_Avoid_: apresentar a estimativa como comissão paga ou como obrigação financeira já gerada.
+
 **FinancialTransaction**:
 Registro de uma entrada ou saída financeira relacionada a uma operação de negócio, como `Purchase`, `Sale` ou `Commission`, ou lançada de forma independente.
 _Avoid_: usar `FinancialTransaction` para representar a operação comercial que originou o lançamento.
+
+**EmployeeSalesHistory**:
+Visão histórica das `Sale` atribuídas a um `Employee`, formada por vendas pendentes e concluídas; vendas canceladas não fazem parte desta visão.
+_Avoid_: tratar o histórico comercial como folha salarial ou como um extrato completo de `FinancialTransaction`.
 
 ### Operational follow-up
 
