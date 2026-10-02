@@ -1,12 +1,14 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { DEFAULT_PAGE_SIZE, getPaginationState } from "@/shared/lib/pagination";
+import { cn } from "@/shared/lib/utils";
 
 type ListPaginationProps = {
   page: number;
   total: number;
   pageSize?: number;
   onPageChange: (page: number) => void;
+  className?: string;
 };
 
 export function ListPagination({
@@ -14,11 +16,17 @@ export function ListPagination({
   total,
   pageSize = DEFAULT_PAGE_SIZE,
   onPageChange,
+  className,
 }: ListPaginationProps) {
   const { displayPage, totalPages, range } = getPaginationState(page, total, pageSize);
 
   return (
-    <div className="flex flex-col gap-3 py-5 sm:flex-row sm:items-center sm:justify-between">
+    <div
+      className={cn(
+        "flex flex-col gap-3 py-5 sm:flex-row sm:items-center sm:justify-between",
+        className,
+      )}
+    >
       <span className="text-sm text-muted-foreground">
         {total === 0 ? "0 de 0" : `${range.from}–${range.to} de ${total}`}
       </span>

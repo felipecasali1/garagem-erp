@@ -227,6 +227,7 @@ function ClientsPage() {
             page={displayPage}
             total={total}
             pageSize={pageSize}
+            className="border-t px-4 sm:px-6"
             onPageChange={(nextPage) =>
               void navigate({ to: "/clients", search: () => ({ page: nextPage }) })
             }
