@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutGrid,
@@ -20,17 +20,21 @@ import { Input } from "@/shared/components/ui/input";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { brl } from "@/shared/lib/format";
 import { toast } from "sonner";
-import { checklistKeys, listChecklist } from "@/modules/checklist";
-import {
-  hasActiveChecklistForVehicle,
-  isChecklistAlertItem,
-} from "@/modules/alerts/lib/build-operational-alerts";
 import { useOperationalDate } from "@/modules/alerts/hooks/use-operational-date";
 import {
-  listVehicles,
+  countVehiclesByStatus,
+  listVehiclesPage,
   setVehiclePublished,
+  vehicleStatuses,
   vehicleKeys,
 } from "@/modules/vehicles/services/vehicles";
+import { ListPagination } from "@/shared/components/list-pagination";
+import {
+  DEFAULT_PAGE_SIZE,
+  getPageRange,
+  getTotalPages,
+  normalizePage,
+} from "@/shared/lib/pagination";
 import {
   Table,
   TableBody,
@@ -43,7 +47,22 @@ import type { VehicleStatus } from "@/shared/types/domain";
 
 export const Route = createFileRoute("/_app/vehicles/")({
   head: () => ({ meta: [{ title: "Veículos | GaragemERP" }] }),
-  validateSearch: (search: { alert?: unknown }): { alert?: "checklist" | "preparation" } => ({
+  validateSearch: (search: {
+    page?: unknown;
+    q?: unknown;
+    status?: unknown;
+    alert?: unknown;
+  }): {
+    page?: number;
+    q?: string;
+    status?: VehicleStatus;
+    alert?: "checklist" | "preparation";
+  } => ({
+    page: normalizePage(search.page),
+    q: typeof search.q === "string" && search.q.trim() ? search.q.trim() : undefined,
+    status: statusOptions.includes(search.status as VehicleStatus)
+      ? (search.status as VehicleStatus)
+      : undefined,
     alert:
       search.alert === "checklist" || search.alert === "preparation" ? search.alert : undefined,
   }),
@@ -58,36 +77,58 @@ const fuelLabel: Record<string, string> = {
   hybrid: "Híbrido",
 };
 
-const statusOptions: VehicleStatus[] = [
-  "evaluating",
-  "available",
-  "reserved",
-  "in_repair",
-  "sold",
-  "archived",
-];
+const statusOptions = vehicleStatuses;
 
 function VehiclesPage() {
   const [view, setView] = useState<"grid" | "table">("grid");
-  const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | VehicleStatus>("all");
-  const { alert: alertFilter } = Route.useSearch();
+  const { page: rawPage, q, status: statusFilter, alert: alertFilter } = Route.useSearch();
+  const page = rawPage ?? 1;
   const today = useOperationalDate();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const {
-    data: vehicles = [],
+    data: vehiclesPage,
     isLoading,
     error,
   } = useQuery({
-    queryKey: vehicleKeys.all,
-    queryFn: listVehicles,
+    queryKey: vehicleKeys.list({
+      page,
+      search: q,
+      status: statusFilter,
+      alert: alertFilter,
+      today,
+    }),
+    queryFn: () =>
+      listVehiclesPage({ page, search: q, status: statusFilter, alert: alertFilter, today }),
   });
-  const { data: checklist = [] } = useQuery({
-    queryKey: checklistKeys.all,
-    queryFn: () => listChecklist(),
-    enabled: alertFilter != null,
+  const { data: statusCounts } = useQuery({
+    queryKey: vehicleKeys.statusCounts,
+    queryFn: countVehiclesByStatus,
   });
+  const vehicles = vehiclesPage?.data ?? [];
+  const total = vehiclesPage?.total ?? 0;
+  const totalPages = getTotalPages(total, vehiclesPage?.pageSize ?? DEFAULT_PAGE_SIZE);
+  const displayPage = Math.min(page, totalPages);
+
+  const updateSearch = (next: { page: number; q?: string; status?: VehicleStatus }) => {
+    void navigate({
+      to: "/vehicles",
+      search: () => ({ ...next, alert: alertFilter }),
+    });
+  };
+
+  useEffect(() => {
+    if (!vehiclesPage) return;
+    const pageCount = getTotalPages(vehiclesPage.total, vehiclesPage.pageSize);
+    if (page > pageCount) {
+      void navigate({
+        to: "/vehicles",
+        replace: true,
+        search: () => ({ page: pageCount, q, status: statusFilter, alert: alertFilter }),
+      });
+    }
+  }, [alertFilter, navigate, page, q, statusFilter, vehiclesPage]);
+
   const publishMutation = useMutation({
     mutationFn: ({ id, published }: { id: number; published: boolean }) =>
       setVehiclePublished(id, published),
@@ -101,41 +142,6 @@ function VehiclesPage() {
       );
     },
   });
-
-  const alertVehicleIds = useMemo(() => {
-    if (alertFilter === "checklist") {
-      return new Set(
-        checklist
-          .filter((item) => isChecklistAlertItem(item, today))
-          .map((item) => item.vehicle_id),
-      );
-    }
-    if (alertFilter === "preparation") {
-      return new Set(
-        vehicles
-          .filter(
-            (vehicle) =>
-              vehicle.status === "in_repair" && hasActiveChecklistForVehicle(vehicle.id, checklist),
-          )
-          .map((vehicle) => vehicle.id),
-      );
-    }
-    return null;
-  }, [alertFilter, checklist, today, vehicles]);
-
-  const filtered = vehicles
-    .filter((v) => statusFilter === "all" || v.status === statusFilter)
-    .filter((v) => alertVehicleIds == null || alertVehicleIds.has(v.id))
-    .filter(
-      (v) => !q || `${v.brand} ${v.model} ${v.plate}`.toLowerCase().includes(q.toLowerCase()),
-    );
-  const statusCounts = statusOptions.reduce(
-    (acc, status) => ({
-      ...acc,
-      [status]: vehicles.filter((vehicle) => vehicle.status === status).length,
-    }),
-    {} as Record<VehicleStatus, number>,
-  );
 
   if (isLoading) {
     return (
@@ -157,7 +163,14 @@ function VehiclesPage() {
     <div className="max-w-[1600px] mx-auto">
       <PageHeader
         title="Estoque de Veículos"
-        description={`${filtered.length} de ${vehicles.length} veículos`}
+        description={
+          total === 0
+            ? "0 veículos"
+            : (() => {
+                const range = getPageRange(displayPage, total, vehiclesPage?.pageSize);
+                return `${range.from}–${range.to} de ${total} veículos`;
+              })()
+        }
         action={{ label: "Nova avaliação", onClick: () => navigate({ to: "/vehicles/new" }) }}
       />
 
@@ -166,8 +179,14 @@ function VehiclesPage() {
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
+              value={q ?? ""}
+              onChange={(e) =>
+                updateSearch({
+                  q: e.target.value || undefined,
+                  status: statusFilter,
+                  page: 1,
+                })
+              }
               placeholder="Buscar por placa, marca, modelo..."
               className="pl-9"
             />
@@ -175,10 +194,10 @@ function VehiclesPage() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setStatusFilter("all")}
-              aria-pressed={statusFilter === "all"}
+              onClick={() => updateSearch({ q, status: undefined, page: 1 })}
+              aria-pressed={statusFilter == null}
               className={`text-xs px-2.5 py-1.5 rounded-md border transition ${
-                statusFilter === "all"
+                statusFilter == null
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-border hover:bg-muted"
               }`}
@@ -189,7 +208,13 @@ function VehiclesPage() {
               <button
                 type="button"
                 key={s}
-                onClick={() => setStatusFilter((current) => (current === s ? "all" : s))}
+                onClick={() =>
+                  updateSearch({
+                    q,
+                    status: statusFilter === s ? undefined : s,
+                    page: 1,
+                  })
+                }
                 aria-pressed={statusFilter === s}
                 className={`text-xs px-2.5 py-1.5 rounded-md border transition inline-flex items-center gap-1.5 ${
                   statusFilter === s
@@ -198,7 +223,7 @@ function VehiclesPage() {
                 }`}
               >
                 <StatusBadge kind="vehicle" value={s} />
-                <span className="text-muted-foreground">{statusCounts[s]}</span>
+                <span className="text-muted-foreground">{statusCounts?.[s] ?? 0}</span>
               </button>
             ))}
           </div>
@@ -219,9 +244,18 @@ function VehiclesPage() {
         </CardContent>
       </Card>
 
-      {view === "grid" ? (
+      {vehicles.length === 0 ? (
+        <Card>
+          <CardContent className="p-12 text-center">
+            <h2 className="font-display font-semibold">Nenhum veículo encontrado</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Ajuste os filtros ou cadastre uma nova avaliação para começar.
+            </p>
+          </CardContent>
+        </Card>
+      ) : view === "grid" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filtered.map((v) => (
+          {vehicles.map((v) => (
             <Card
               key={v.id}
               onClick={() => navigate({ to: "/vehicles/$id", params: { id: String(v.id) } })}
@@ -297,90 +331,110 @@ function VehiclesPage() {
         </div>
       ) : (
         <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Placa</TableHead>
-                <TableHead>Veículo</TableHead>
-                <TableHead>Ano</TableHead>
-                <TableHead>Km</TableHead>
-                <TableHead>Cor</TableHead>
-                <TableHead>Combustível</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Publicado</TableHead>
-                <TableHead className="text-right">Valor estimado</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((v) => (
-                <TableRow
-                  key={v.id}
-                  onClick={() => navigate({ to: "/vehicles/$id", params: { id: String(v.id) } })}
-                  className="cursor-pointer"
-                >
-                  <TableCell>
-                    <span className="plate-chip">{v.plate}</span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium">
-                      {v.brand} {v.model}
-                    </div>
-                    <div className="text-xs text-muted-foreground">{v.version}</div>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{v.model_year}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {v.current_mileage.toLocaleString("pt-BR")}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{v.color}</TableCell>
-                  <TableCell className="text-muted-foreground">{fuelLabel[v.fuel_type]}</TableCell>
-                  <TableCell>
-                    <StatusBadge kind="vehicle" value={v.status} />
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        publishMutation.mutate({ id: v.id, published: !v.published });
-                      }}
-                      disabled={!v.published && v.status !== "available"}
-                      aria-label={v.published ? `Despublicar ${v.plate}` : `Publicar ${v.plate}`}
-                    >
-                      {v.published ? (
-                        <Eye className="h-4 w-4" />
-                      ) : (
-                        <EyeOff className="h-4 w-4 text-muted-foreground" />
-                      )}
-                    </Button>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="font-medium">{brl(v.sale_price)}</div>
-                    <div className="text-xs text-muted-foreground">venda</div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-1">
-                      <Button size="icon" variant="ghost" asChild aria-label={`Editar ${v.plate}`}>
-                        <Link
-                          to="/vehicles/edit/$id"
-                          params={{ id: String(v.id) }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <Button size="icon" variant="ghost" aria-label={`Mais ações para ${v.plate}`}>
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Placa</TableHead>
+                  <TableHead>Veículo</TableHead>
+                  <TableHead>Ano</TableHead>
+                  <TableHead>Km</TableHead>
+                  <TableHead>Cor</TableHead>
+                  <TableHead>Combustível</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Publicado</TableHead>
+                  <TableHead className="text-right">Valor estimado</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {vehicles.map((v) => (
+                  <TableRow
+                    key={v.id}
+                    onClick={() => navigate({ to: "/vehicles/$id", params: { id: String(v.id) } })}
+                    className="cursor-pointer"
+                  >
+                    <TableCell>
+                      <span className="plate-chip">{v.plate}</span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="font-medium">
+                        {v.brand} {v.model}
+                      </div>
+                      <div className="text-xs text-muted-foreground">{v.version}</div>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{v.model_year}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {v.current_mileage.toLocaleString("pt-BR")}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{v.color}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {fuelLabel[v.fuel_type]}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge kind="vehicle" value={v.status} />
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          publishMutation.mutate({ id: v.id, published: !v.published });
+                        }}
+                        disabled={!v.published && v.status !== "available"}
+                        aria-label={v.published ? `Despublicar ${v.plate}` : `Publicar ${v.plate}`}
+                      >
+                        {v.published ? (
+                          <Eye className="h-4 w-4" />
+                        ) : (
+                          <EyeOff className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </Button>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="font-medium">{brl(v.sale_price)}</div>
+                      <div className="text-xs text-muted-foreground">venda</div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          asChild
+                          aria-label={`Editar ${v.plate}`}
+                        >
+                          <Link
+                            to="/vehicles/edit/$id"
+                            params={{ id: String(v.id) }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Mais ações para ${v.plate}`}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </Card>
       )}
+
+      <ListPagination
+        page={displayPage}
+        total={total}
+        pageSize={vehiclesPage?.pageSize}
+        onPageChange={(nextPage) => updateSearch({ page: nextPage, q, status: statusFilter })}
+      />
     </div>
   );
 }

@@ -2,6 +2,8 @@ import { supabase } from "@/shared/supabase/client";
 import type { Vehicle } from "@/shared/types/domain";
 import type { VehicleDraft } from "@/modules/vehicles/types";
 import { normalizeVehicleDraft } from "@/modules/vehicles/lib/normalize-vehicle-draft";
+import { currentOperationalDate } from "@/modules/alerts/lib/current-operational-date";
+import { DEFAULT_PAGE_SIZE, normalizePage, type PaginatedResult } from "@/shared/lib/pagination";
 
 type VehicleRow = {
   id: number;
@@ -31,8 +33,29 @@ type VehicleRow = {
   }>;
 };
 
+export type VehicleListFilters = {
+  page: number;
+  search?: string;
+  status?: Vehicle["status"];
+  alert?: "checklist" | "preparation";
+  today?: string;
+};
+
+export type VehicleStatusCounts = Record<Vehicle["status"], number>;
+
+export const vehicleStatuses: Vehicle["status"][] = [
+  "evaluating",
+  "available",
+  "reserved",
+  "in_repair",
+  "sold",
+  "archived",
+];
+
 export const vehicleKeys = {
   all: ["vehicles"] as const,
+  list: (filters: VehicleListFilters) => ["vehicles", "list", filters] as const,
+  statusCounts: ["vehicles", "status-counts"] as const,
   detail: (id: number) => ["vehicles", id] as const,
 };
 
@@ -90,6 +113,29 @@ function isMissingVehicleAccessoryActiveColumn(error: { message: string } | null
   return Boolean(
     error?.message.includes("vehicle_accessories") && error.message.includes("active"),
   );
+}
+
+function escapePostgrestSearch(value: string) {
+  return value.trim().replace(/[\\%_(),]/g, "\\$&");
+}
+
+function applyVehicleListFilters<
+  T extends {
+    eq: (column: string, value: unknown) => T;
+    or: (filters: string) => T;
+  },
+>(query: T, filters: VehicleListFilters) {
+  let nextQuery = query;
+  if (filters.status) {
+    nextQuery = nextQuery.eq("status", filters.status);
+  }
+  if (filters.search?.trim()) {
+    const search = escapePostgrestSearch(filters.search);
+    nextQuery = nextQuery.or(
+      `plate.ilike.*${search}*,brand.ilike.*${search}*,model.ilike.*${search}*`,
+    );
+  }
+  return nextQuery;
 }
 
 function toChecklistPayload(item: VehicleDraft["checklist"][number], vehicleId: number) {
@@ -219,6 +265,87 @@ export async function listVehicles() {
     throw new Error(error.message);
   }
   return (data satisfies VehicleRow[]).map(mapVehicle);
+}
+
+export async function listVehiclesPage(
+  filters: VehicleListFilters,
+): Promise<PaginatedResult<Vehicle>> {
+  const page = normalizePage(filters.page);
+  const pageSize = DEFAULT_PAGE_SIZE;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const today = filters.today ?? currentOperationalDate();
+  const checklistSelection = filters.alert
+    ? ", vehicle_checklist_items!inner(id, status, priority, due_date)"
+    : "";
+  const applyAlertFilters = <
+    T extends {
+      eq: (column: string, value: unknown) => T;
+      not: (column: string, operator: string, value: string) => T;
+      or: (filters: string, options?: { foreignTable?: string }) => T;
+    },
+  >(
+    query: T,
+  ) => {
+    let nextQuery = query;
+    if (!filters.alert) return nextQuery;
+
+    nextQuery = nextQuery.not("vehicle_checklist_items.status", "in", "(completed,cancelled)");
+    if (filters.alert === "preparation") {
+      nextQuery = nextQuery.eq("status", "in_repair");
+    } else {
+      nextQuery = nextQuery.or(`priority.eq.urgent,due_date.lt.${today}`, {
+        foreignTable: "vehicle_checklist_items",
+      });
+    }
+    return nextQuery;
+  };
+
+  const buildPageQuery = (includeAccessoryActive: boolean) => {
+    const accessorySelection = includeAccessoryActive
+      ? "vehicle_accessories(active, accessories(name))"
+      : "vehicle_accessories(accessories(name))";
+    let query = supabase
+      .from("vehicles")
+      .select(`*, ${accessorySelection}${checklistSelection}`, { count: "exact" });
+    query = applyVehicleListFilters(query, filters);
+    query = applyAlertFilters(query);
+    return query.order("id").range(from, to);
+  };
+
+  let result = await buildPageQuery(true);
+
+  if (isMissingVehicleAccessoryActiveColumn(result.error)) {
+    result = await buildPageQuery(false);
+  }
+
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+
+  return {
+    data: ((result.data as unknown as VehicleRow[] | null | undefined) ?? []).map(mapVehicle),
+    total: result.count ?? 0,
+    page,
+    pageSize,
+  };
+}
+
+export async function countVehiclesByStatus(): Promise<VehicleStatusCounts> {
+  const counts = await Promise.all(
+    vehicleStatuses.map(async (status) => {
+      const { count, error } = await supabase
+        .from("vehicles")
+        .select("id", { count: "exact", head: true })
+        .eq("status", status);
+      if (error) {
+        throw new Error(error.message);
+      }
+      return [status, count ?? 0] as const;
+    }),
+  );
+
+  return Object.fromEntries(counts) as VehicleStatusCounts;
 }
 
 export async function getVehicleById(id: number) {
