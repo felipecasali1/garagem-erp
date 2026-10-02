@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_PAGE_SIZE,
   getPageRange,
+  getPaginationState,
   getTotalPages,
   normalizePage,
 } from "../../src/shared/lib/pagination.js";
@@ -28,4 +29,22 @@ test("calcula o intervalo visível da página", () => {
   assert.deepEqual(getPageRange(2, 87), { from: 21, to: 40 });
   assert.deepEqual(getPageRange(5, 87), { from: 81, to: 87 });
   assert.deepEqual(getPageRange(1, 0), { from: 0, to: 0 });
+});
+
+test("normaliza uma página inválida e representa uma lista vazia", () => {
+  assert.deepEqual(getPaginationState("invalid", 0), {
+    page: 1,
+    totalPages: 1,
+    displayPage: 1,
+    range: { from: 0, to: 0 },
+  });
+});
+
+test("limita a página exibida quando ela ultrapassa o total", () => {
+  assert.deepEqual(getPaginationState(9, 41), {
+    page: 9,
+    totalPages: 3,
+    displayPage: 3,
+    range: { from: 41, to: 41 },
+  });
 });

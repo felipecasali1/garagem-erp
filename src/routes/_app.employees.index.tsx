@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, MoreHorizontal, Pencil, Power, PowerOff } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
@@ -27,27 +27,51 @@ import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
 import {
   employeeKeys,
-  listEmployees,
+  listEmployeesPage,
   setEmployeeActive,
 } from "@/modules/employees/services/employees";
 import type { EmployeeRecord } from "@/modules/employees/services/employees";
+import { ListPagination } from "@/shared/components/list-pagination";
+import { DEFAULT_PAGE_SIZE, getPaginationState, normalizePage } from "@/shared/lib/pagination";
 
 export const Route = createFileRoute("/_app/employees/")({
   head: () => ({ meta: [{ title: "Funcionários | GaragemERP" }] }),
+  validateSearch: (search: { page?: unknown }): { page?: number } => ({
+    page: normalizePage(search.page),
+  }),
   component: EmployeesPage,
 });
 
 function EmployeesPage() {
   const navigate = useNavigate();
+  const { page: rawPage } = Route.useSearch();
+  const page = rawPage ?? 1;
   const queryClient = useQueryClient();
   const [confirmToggle, setConfirmToggle] = useState<{
     id: number;
     nextActive: boolean;
   } | null>(null);
-  const { data: employees = [], isLoading } = useQuery({
-    queryKey: employeeKeys.all,
-    queryFn: listEmployees,
+  const {
+    data: employeesPage,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: employeeKeys.list(page),
+    queryFn: () => listEmployeesPage(page),
   });
+  const employees = employeesPage?.data ?? [];
+  const total = employeesPage?.total ?? 0;
+  const pageSize = employeesPage?.pageSize ?? DEFAULT_PAGE_SIZE;
+  const { totalPages, displayPage, range } = getPaginationState(page, total, pageSize);
+
+  useEffect(() => {
+    if (!employeesPage || page <= totalPages) return;
+    void navigate({
+      to: "/employees",
+      replace: true,
+      search: () => ({ page: totalPages }),
+    });
+  }, [employeesPage, navigate, page, totalPages]);
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: employeeKeys.all });
     await queryClient.invalidateQueries({ queryKey: employeeKeys.active });
@@ -66,7 +90,13 @@ function EmployeesPage() {
     <div className="max-w-[1600px] mx-auto">
       <PageHeader
         title="Funcionários"
-        description={`${employees.length} colaboradores`}
+        description={
+          isLoading
+            ? "Carregando funcionários..."
+            : total === 0
+              ? "0 colaboradores"
+              : `${range.from}–${range.to} de ${total} colaboradores`
+        }
         action={{ label: "Novo Funcionário", to: "/employees/new" }}
       />
 
@@ -74,6 +104,11 @@ function EmployeesPage() {
         <CardContent className="p-0">
           {isLoading ? (
             <div className="p-8 text-sm text-muted-foreground">Carregando funcionários...</div>
+          ) : error ? (
+            <div className="p-8 text-sm text-destructive">
+              Falha ao carregar funcionários:{" "}
+              {error instanceof Error ? error.message : "erro desconhecido"}.
+            </div>
           ) : employees.length === 0 ? (
             <div className="p-12 text-center space-y-2">
               <h3 className="font-display font-semibold">Nenhum funcionário cadastrado</h3>
@@ -85,31 +120,43 @@ function EmployeesPage() {
               </Button>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Funcionário</TableHead>
-                  <TableHead>Cargo</TableHead>
-                  <TableHead>Comissão</TableHead>
-                  <TableHead>Contratação</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Usuário</TableHead>
-                  <TableHead>Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {employees.map((employee) => (
-                  <EmployeeRow
-                    key={employee.id}
-                    employee={employee}
-                    navigate={navigate}
-                    onToggleActive={() =>
-                      setConfirmToggle({ id: employee.id, nextActive: !employee.active })
-                    }
-                  />
-                ))}
-              </TableBody>
-            </Table>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Funcionário</TableHead>
+                    <TableHead>Cargo</TableHead>
+                    <TableHead>Comissão</TableHead>
+                    <TableHead>Contratação</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Usuário</TableHead>
+                    <TableHead>Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {employees.map((employee) => (
+                    <EmployeeRow
+                      key={employee.id}
+                      employee={employee}
+                      navigate={navigate}
+                      onToggleActive={() =>
+                        setConfirmToggle({ id: employee.id, nextActive: !employee.active })
+                      }
+                    />
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          {!isLoading && !error && total > 0 && (
+            <ListPagination
+              page={displayPage}
+              total={total}
+              pageSize={pageSize}
+              onPageChange={(nextPage) =>
+                void navigate({ to: "/employees", search: () => ({ page: nextPage }) })
+              }
+            />
           )}
         </CardContent>
       </Card>

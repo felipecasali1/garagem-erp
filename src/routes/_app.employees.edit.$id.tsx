@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Save } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -25,6 +25,7 @@ export const Route = createFileRoute("/_app/employees/edit/$id")({
 function EditEmployee() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const employeeId = Number(id);
   const { data: employee, isLoading } = useQuery({
     queryKey: employeeKeys.detail(employeeId),
@@ -60,6 +61,8 @@ function EditEmployee() {
   const updateMutation = useMutation({
     mutationFn: (values: EmployeeDraft) => updateEmployee(employeeId, values),
     onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: employeeKeys.all });
+      await queryClient.invalidateQueries({ queryKey: employeeKeys.active });
       toast.success("Funcionário atualizado");
       await navigate({ to: "/employees/$id", params: { id } });
     },

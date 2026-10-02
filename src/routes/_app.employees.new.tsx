@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ArrowLeft, Save } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -9,7 +9,7 @@ import { Label } from "@/shared/components/ui/label";
 import { Switch } from "@/shared/components/ui/switch";
 import { DatePicker } from "@/shared/components/ui/date-picker";
 import { toast } from "sonner";
-import { createEmployee } from "@/modules/employees/services/employees";
+import { createEmployee, employeeKeys } from "@/modules/employees/services/employees";
 import type { EmployeeDraft } from "@/modules/employees/types";
 import { CepInput, CpfCnpjInput, PhoneInput, UfInput } from "@/shared/components/form/field-inputs";
 
@@ -20,6 +20,7 @@ export const Route = createFileRoute("/_app/employees/new")({
 
 function NewEmployee() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [draft, setDraft] = useState<EmployeeDraft>({
     name: "",
     cpf: "",
@@ -45,6 +46,8 @@ function NewEmployee() {
   const createMutation = useMutation({
     mutationFn: createEmployee,
     onSuccess: async (employee) => {
+      await queryClient.invalidateQueries({ queryKey: employeeKeys.all });
+      await queryClient.invalidateQueries({ queryKey: employeeKeys.active });
       toast.success("Funcionário cadastrado");
       await navigate({ to: "/employees/$id", params: { id: String(employee.id) } });
     },

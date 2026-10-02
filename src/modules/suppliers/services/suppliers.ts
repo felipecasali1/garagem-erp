@@ -8,6 +8,7 @@ import {
 import { getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
 import type { Address, Person, PersonType } from "@/shared/types/domain";
 import type { SupplierDraft, SupplierType } from "@/modules/suppliers/types";
+import { getPageBounds, type PaginatedResult } from "@/shared/lib/pagination";
 
 export type { SupplierType } from "@/modules/suppliers/types";
 
@@ -44,6 +45,9 @@ type SupplierRow = {
   person: PersonRow | null;
 };
 
+const SUPPLIER_SELECT =
+  "id, person_id, supplier_type, active, notes, created_at, person:people(id, name, type, cpf, cnpj, phone, email)";
+
 export type SupplierRecord = {
   id: number;
   person_id: number;
@@ -67,6 +71,7 @@ export type CreateSupplierInput = {
 
 export const supplierKeys = {
   all: ["suppliers"] as const,
+  list: (page: number) => ["suppliers", "list", { page }] as const,
   detail: (id: number) => ["suppliers", id] as const,
 };
 
@@ -143,10 +148,9 @@ async function fetchAddresses(personIds: number[]) {
 async function fetchSupplierRows(options: { id?: number; activeOnly?: boolean } = {}) {
   let query = supabase
     .from("suppliers")
-    .select(
-      "id, person_id, supplier_type, active, notes, created_at, person:people(id, name, type, cpf, cnpj, phone, email)",
-    )
-    .order("created_at", { ascending: false });
+    .select(SUPPLIER_SELECT)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
 
   if (options.id != null) {
     query = query.eq("id", options.id);
@@ -165,6 +169,30 @@ async function fetchSupplierRows(options: { id?: number; activeOnly?: boolean } 
   const addresses = await fetchAddresses(rows.map((row) => row.person_id));
 
   return rows.map((row) => mapSupplier(row, addresses.get(row.person_id)));
+}
+
+async function fetchSupplierPage(pageInput: number): Promise<PaginatedResult<SupplierRecord>> {
+  const { page, pageSize, from, to } = getPageBounds(pageInput);
+  const { data, error, count } = await supabase
+    .from("suppliers")
+    .select(SUPPLIER_SELECT, { count: "exact" })
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .range(from, to);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = (data ?? []) as unknown as SupplierRow[];
+  const addresses = await fetchAddresses(rows.map((row) => row.person_id));
+
+  return {
+    data: rows.map((row) => mapSupplier(row, addresses.get(row.person_id))),
+    total: count ?? 0,
+    page,
+    pageSize,
+  };
 }
 
 async function upsertPrimaryAddress(personId: number, address: Address) {
@@ -249,6 +277,10 @@ async function ensureSupplierRole(personId: number, input: CreateSupplierInput) 
 
 export async function listSuppliers() {
   return fetchSupplierRows();
+}
+
+export async function listSuppliersPage(page: number) {
+  return fetchSupplierPage(page);
 }
 
 export async function listActiveSuppliers() {

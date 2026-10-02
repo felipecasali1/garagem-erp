@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Eye, MoreHorizontal, Pencil, Power, PowerOff, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/shared/components/layout/page-header";
@@ -28,28 +28,52 @@ import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { formatDocument, formatPhone } from "@/shared/lib/field-format";
 import { fmtDate, initials } from "@/shared/lib/format";
 import {
-  listSuppliers,
+  listSuppliersPage,
   setSupplierActive,
   supplierKeys,
 } from "@/modules/suppliers/services/suppliers";
 import { getSupplierTypeLabel } from "@/modules/suppliers/components/supplier-form";
+import { ListPagination } from "@/shared/components/list-pagination";
+import { DEFAULT_PAGE_SIZE, getPaginationState, normalizePage } from "@/shared/lib/pagination";
 
 export const Route = createFileRoute("/_app/suppliers/")({
   head: () => ({ meta: [{ title: "Fornecedores | GaragemERP" }] }),
+  validateSearch: (search: { page?: unknown }): { page?: number } => ({
+    page: normalizePage(search.page),
+  }),
   component: SuppliersPage,
 });
 
 function SuppliersPage() {
   const navigate = useNavigate();
+  const { page: rawPage } = Route.useSearch();
+  const page = rawPage ?? 1;
   const queryClient = useQueryClient();
   const [confirmStatus, setConfirmStatus] = useState<{
     id: number;
     active: boolean;
   } | null>(null);
-  const { data: suppliers = [], isLoading } = useQuery({
-    queryKey: supplierKeys.all,
-    queryFn: listSuppliers,
+  const {
+    data: suppliersPage,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: supplierKeys.list(page),
+    queryFn: () => listSuppliersPage(page),
   });
+  const suppliers = suppliersPage?.data ?? [];
+  const total = suppliersPage?.total ?? 0;
+  const pageSize = suppliersPage?.pageSize ?? DEFAULT_PAGE_SIZE;
+  const { totalPages, displayPage, range } = getPaginationState(page, total, pageSize);
+
+  useEffect(() => {
+    if (!suppliersPage || page <= totalPages) return;
+    void navigate({
+      to: "/suppliers",
+      replace: true,
+      search: () => ({ page: totalPages }),
+    });
+  }, [navigate, page, suppliersPage, totalPages]);
 
   const statusMutation = useMutation({
     mutationFn: ({ id, active }: { id: number; active: boolean }) => setSupplierActive(id, active),
@@ -69,13 +93,20 @@ function SuppliersPage() {
         description={
           isLoading
             ? "Carregando fornecedores..."
-            : `${suppliers.length} fornecedores cadastrados`
+            : total === 0
+              ? "0 fornecedores"
+              : `${range.from}–${range.to} de ${total} fornecedores`
         }
         action={{ label: "Novo Fornecedor", to: "/suppliers/new" }}
       />
       <Card>
         {isLoading ? (
           <div className="p-8 text-sm text-muted-foreground">Carregando fornecedores...</div>
+        ) : error ? (
+          <div className="p-8 text-sm text-destructive">
+            Falha ao carregar fornecedores:{" "}
+            {error instanceof Error ? error.message : "erro desconhecido"}.
+          </div>
         ) : suppliers.length === 0 ? (
           <div className="p-12 text-center space-y-2">
             <Truck className="mx-auto h-8 w-8 text-muted-foreground" />
@@ -88,115 +119,127 @@ function SuppliersPage() {
             </Button>
           </div>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Fornecedor</TableHead>
-                <TableHead>Origem / categoria</TableHead>
-                <TableHead>CPF/CNPJ</TableHead>
-                <TableHead>Telefone</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Cadastro</TableHead>
-                <TableHead>Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {suppliers.map((supplier) => (
-                <TableRow
-                  key={supplier.id}
-                  onClick={() =>
-                    navigate({ to: "/suppliers/$id", params: { id: String(supplier.id) } })
-                  }
-                  className="cursor-pointer"
-                >
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Avatar className="h-8 w-8">
-                        <AvatarFallback className="text-xs bg-muted">
-                          {initials(supplier.person.name)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <span className="font-medium">{supplier.person.name}</span>
-                      {!supplier.active && <Badge variant="outline">Arquivado</Badge>}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {getSupplierTypeLabel(supplier.supplier_type)}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {formatDocument(
-                      supplier.person.cpf ?? supplier.person.cnpj ?? "",
-                      supplier.person.type,
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatPhone(supplier.person.phone)}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{supplier.person.email}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    {fmtDate(supplier.created_at)}
-                  </TableCell>
-                  <TableCell onClick={(event) => event.stopPropagation()}>
-                    <div className="flex gap-1">
-                      <Button size="icon" variant="ghost" aria-label="Ver" asChild>
-                        <Link to="/suppliers/$id" params={{ id: String(supplier.id) }}>
-                          <Eye className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <Button size="icon" variant="ghost" aria-label="Editar" asChild>
-                        <Link to="/suppliers/edit/$id" params={{ id: String(supplier.id) }}>
-                          <Pencil className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button size="icon" variant="ghost" aria-label="Mais ações">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48">
-                          <DropdownMenuLabel>Ações</DropdownMenuLabel>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              navigate({
-                                to: "/suppliers/$id",
-                                params: { id: String(supplier.id) },
-                              })
-                            }
-                          >
-                            <Eye className="h-4 w-4" /> Ver detalhes
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              navigate({
-                                to: "/suppliers/edit/$id",
-                                params: { id: String(supplier.id) },
-                              })
-                            }
-                          >
-                            <Pencil className="h-4 w-4" /> Editar
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onSelect={() =>
-                              setConfirmStatus({ id: supplier.id, active: !supplier.active })
-                            }
-                          >
-                            {supplier.active ? (
-                              <PowerOff className="h-4 w-4" />
-                            ) : (
-                              <Power className="h-4 w-4" />
-                            )}
-                            {supplier.active ? "Arquivar" : "Reativar"}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </TableCell>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Fornecedor</TableHead>
+                  <TableHead>Origem / categoria</TableHead>
+                  <TableHead>CPF/CNPJ</TableHead>
+                  <TableHead>Telefone</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Cadastro</TableHead>
+                  <TableHead>Ações</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {suppliers.map((supplier) => (
+                  <TableRow
+                    key={supplier.id}
+                    onClick={() =>
+                      navigate({ to: "/suppliers/$id", params: { id: String(supplier.id) } })
+                    }
+                    className="cursor-pointer"
+                  >
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Avatar className="h-8 w-8">
+                          <AvatarFallback className="text-xs bg-muted">
+                            {initials(supplier.person.name)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="font-medium">{supplier.person.name}</span>
+                        {!supplier.active && <Badge variant="outline">Arquivado</Badge>}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {getSupplierTypeLabel(supplier.supplier_type)}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {formatDocument(
+                        supplier.person.cpf ?? supplier.person.cnpj ?? "",
+                        supplier.person.type,
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatPhone(supplier.person.phone)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{supplier.person.email}</TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
+                      {fmtDate(supplier.created_at)}
+                    </TableCell>
+                    <TableCell onClick={(event) => event.stopPropagation()}>
+                      <div className="flex gap-1">
+                        <Button size="icon" variant="ghost" aria-label="Ver" asChild>
+                          <Link to="/suppliers/$id" params={{ id: String(supplier.id) }}>
+                            <Eye className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                        <Button size="icon" variant="ghost" aria-label="Editar" asChild>
+                          <Link to="/suppliers/edit/$id" params={{ id: String(supplier.id) }}>
+                            <Pencil className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button size="icon" variant="ghost" aria-label="Mais ações">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            <DropdownMenuLabel>Ações</DropdownMenuLabel>
+                            <DropdownMenuItem
+                              onClick={() =>
+                                navigate({
+                                  to: "/suppliers/$id",
+                                  params: { id: String(supplier.id) },
+                                })
+                              }
+                            >
+                              <Eye className="h-4 w-4" /> Ver detalhes
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() =>
+                                navigate({
+                                  to: "/suppliers/edit/$id",
+                                  params: { id: String(supplier.id) },
+                                })
+                              }
+                            >
+                              <Pencil className="h-4 w-4" /> Editar
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onSelect={() =>
+                                setConfirmStatus({ id: supplier.id, active: !supplier.active })
+                              }
+                            >
+                              {supplier.active ? (
+                                <PowerOff className="h-4 w-4" />
+                              ) : (
+                                <Power className="h-4 w-4" />
+                              )}
+                              {supplier.active ? "Arquivar" : "Reativar"}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+        {!isLoading && !error && total > 0 && (
+          <ListPagination
+            page={displayPage}
+            total={total}
+            pageSize={pageSize}
+            onPageChange={(nextPage) =>
+              void navigate({ to: "/suppliers", search: () => ({ page: nextPage }) })
+            }
+          />
         )}
       </Card>
       <ConfirmActionDialog

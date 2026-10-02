@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ export const Route = createFileRoute("/_app/suppliers/edit/$id")({
 function EditSupplier() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const supplierId = Number(id);
   const { data: supplier, isLoading } = useQuery({
     queryKey: supplierKeys.detail(supplierId),
@@ -53,6 +54,7 @@ function EditSupplier() {
   const updateMutation = useMutation({
     mutationFn: (values: SupplierDraft) => updateSupplier(supplierId, values),
     onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: supplierKeys.all });
       toast.success("Fornecedor atualizado");
       await navigate({ to: "/suppliers/$id", params: { id } });
     },

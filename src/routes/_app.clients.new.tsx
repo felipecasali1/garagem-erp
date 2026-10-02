@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ArrowLeft, Save } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -16,7 +16,7 @@ import {
 } from "@/shared/components/ui/select";
 import { CepInput, CpfCnpjInput, PhoneInput, UfInput } from "@/shared/components/form/field-inputs";
 import type { CustomerDraft } from "@/modules/customers/types";
-import { createCustomer } from "@/modules/customers/services/customers";
+import { createCustomer, customerKeys } from "@/modules/customers/services/customers";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/clients/new")({
@@ -26,6 +26,7 @@ export const Route = createFileRoute("/_app/clients/new")({
 
 function NewClient() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [draft, setDraft] = useState<CustomerDraft>({
     type: "individual",
     name: "",
@@ -47,6 +48,7 @@ function NewClient() {
   const createMutation = useMutation({
     mutationFn: createCustomer,
     onSuccess: async (customer) => {
+      await queryClient.invalidateQueries({ queryKey: customerKeys.all });
       toast.success("Cliente cadastrado");
       await navigate({ to: "/clients/$id", params: { id: String(customer.id) } });
     },

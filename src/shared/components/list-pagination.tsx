@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
-import { DEFAULT_PAGE_SIZE, getPageRange, getTotalPages } from "@/shared/lib/pagination";
+import { DEFAULT_PAGE_SIZE, getPaginationState } from "@/shared/lib/pagination";
 
 type ListPaginationProps = {
   page: number;
@@ -15,9 +15,7 @@ export function ListPagination({
   pageSize = DEFAULT_PAGE_SIZE,
   onPageChange,
 }: ListPaginationProps) {
-  const totalPages = getTotalPages(total, pageSize);
-  const displayPage = Math.min(page, totalPages);
-  const range = getPageRange(displayPage, total, pageSize);
+  const { displayPage, totalPages, range } = getPaginationState(page, total, pageSize);
 
   return (
     <div className="flex flex-col gap-3 py-5 sm:flex-row sm:items-center sm:justify-between">

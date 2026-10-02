@@ -8,6 +8,7 @@ import {
 import { getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
 import type { Address, Customer, PersonType } from "@/shared/types/domain";
 import type { CustomerDraft } from "@/modules/customers/types";
+import { getPageBounds, type PaginatedResult } from "@/shared/lib/pagination";
 
 type PersonRow = {
   id: number;
@@ -42,6 +43,9 @@ type CustomerRow = {
   created_at: string;
   person: PersonRow | null;
 };
+
+const CUSTOMER_SELECT =
+  "id, person_id, notes, active, total_purchases, created_at, person:people(id, name, type, cpf, cnpj, phone, email, notes)";
 
 function normalizeText(value: string | undefined) {
   const trimmed = value?.trim();
@@ -111,10 +115,9 @@ async function fetchAddresses(personIds: number[]) {
 async function fetchCustomerRows(id?: number) {
   let query = supabase
     .from("customers")
-    .select(
-      "id, person_id, notes, active, total_purchases, created_at, person:people(id, name, type, cpf, cnpj, phone, email, notes)",
-    )
-    .order("created_at", { ascending: false });
+    .select(CUSTOMER_SELECT)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
 
   if (id != null) {
     query = query.eq("id", id);
@@ -127,11 +130,41 @@ async function fetchCustomerRows(id?: number) {
 
   const rows = (data ?? []).map((row) => ({
     ...row,
-    person: Array.isArray(row.person) ? row.person[0] ?? null : row.person,
+    person: Array.isArray(row.person) ? (row.person[0] ?? null) : row.person,
   })) as unknown as CustomerRow[];
+  return mapCustomerRows(rows);
+}
+
+async function mapCustomerRows(rows: CustomerRow[]) {
   const addresses = await fetchAddresses(rows.map((row) => row.person_id));
 
   return rows.map((row) => mapCustomer(row, addresses.get(row.person_id)));
+}
+
+async function fetchCustomerPage(pageInput: number): Promise<PaginatedResult<Customer>> {
+  const { page, pageSize, from, to } = getPageBounds(pageInput);
+  const { data, error, count } = await supabase
+    .from("customers")
+    .select(CUSTOMER_SELECT, { count: "exact" })
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .range(from, to);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = (data ?? []).map((row) => ({
+    ...row,
+    person: Array.isArray(row.person) ? (row.person[0] ?? null) : row.person,
+  })) as unknown as CustomerRow[];
+
+  return {
+    data: await mapCustomerRows(rows),
+    total: count ?? 0,
+    page,
+    pageSize,
+  };
 }
 
 async function upsertPrimaryAddress(personId: number, address: CustomerDraft["primary_address"]) {
@@ -201,11 +234,16 @@ async function createPersonAndCustomer(draft: CustomerDraft) {
 
 export const customerKeys = {
   all: ["customers"] as const,
+  list: (page: number) => ["customers", "list", { page }] as const,
   detail: (id: number) => ["customers", id] as const,
 };
 
 export async function listCustomers() {
   return fetchCustomerRows();
+}
+
+export async function listCustomersPage(page: number) {
+  return fetchCustomerPage(page);
 }
 
 export async function listActiveCustomers() {

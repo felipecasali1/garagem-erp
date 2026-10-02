@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
@@ -9,7 +9,7 @@ import {
   createEmptySupplierDraft,
 } from "@/modules/suppliers/components/supplier-form";
 import type { SupplierDraft } from "@/modules/suppliers/types";
-import { createSupplierFromDraft } from "@/modules/suppliers/services/suppliers";
+import { createSupplierFromDraft, supplierKeys } from "@/modules/suppliers/services/suppliers";
 
 export const Route = createFileRoute("/_app/suppliers/new")({
   head: () => ({ meta: [{ title: "Novo Fornecedor | GaragemERP" }] }),
@@ -18,11 +18,13 @@ export const Route = createFileRoute("/_app/suppliers/new")({
 
 function NewSupplier() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [draft, setDraft] = useState<SupplierDraft>(() => createEmptySupplierDraft());
 
   const createMutation = useMutation({
     mutationFn: createSupplierFromDraft,
     onSuccess: async (supplier) => {
+      await queryClient.invalidateQueries({ queryKey: supplierKeys.all });
       toast.success("Fornecedor cadastrado");
       await navigate({ to: "/suppliers/$id", params: { id: String(supplier.id) } });
     },

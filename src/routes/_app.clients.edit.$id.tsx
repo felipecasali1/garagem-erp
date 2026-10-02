@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Save } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -31,6 +31,7 @@ export const Route = createFileRoute("/_app/clients/edit/$id")({
 function EditClient() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const customerId = Number(id);
   const { data: customer, isLoading } = useQuery({
     queryKey: customerKeys.detail(customerId),
@@ -63,6 +64,7 @@ function EditClient() {
   const updateMutation = useMutation({
     mutationFn: (values: CustomerDraft) => updateCustomer(customerId, values),
     onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: customerKeys.all });
       toast.success("Cliente atualizado");
       await navigate({ to: "/clients/$id", params: { id } });
     },

@@ -3,6 +3,7 @@ import { normalizeCep, normalizeCpf, normalizePhone, normalizeUf } from "@/share
 import { getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
 import type { Address, Employee, PersonType } from "@/shared/types/domain";
 import type { EmployeeAccessRole, EmployeeDraft } from "@/modules/employees/types";
+import { getPageBounds, type PaginatedResult } from "@/shared/lib/pagination";
 
 type PersonRow = {
   id: number;
@@ -52,6 +53,9 @@ type UserRow = {
   last_login_at: string | null;
   invited_at: string | null;
 };
+
+const EMPLOYEE_SELECT =
+  "id, person_id, position, salary, commission_rate, commission_type, active, hired_at, notes, person:people(id, name, type, cpf, cnpj, phone, email, notes)";
 
 export type EmployeeRecord = Employee & {
   access_role?: EmployeeAccessRole;
@@ -166,10 +170,9 @@ async function fetchUsers(employeeIds: number[]) {
 async function fetchEmployeeRows(id?: number) {
   let query = supabase
     .from("employees")
-    .select(
-      "id, person_id, position, salary, commission_rate, commission_type, active, hired_at, notes, person:people(id, name, type, cpf, cnpj, phone, email, notes)",
-    )
-    .order("id");
+    .select(EMPLOYEE_SELECT)
+    .order("id", { ascending: true })
+    .order("person_id", { ascending: true });
 
   if (id != null) {
     query = query.eq("id", id);
@@ -182,10 +185,18 @@ async function fetchEmployeeRows(id?: number) {
 
   const rows = (data ?? []).map((row) => ({
     ...row,
-    person: Array.isArray(row.person) ? row.person[0] ?? null : row.person,
+    person: Array.isArray(row.person) ? (row.person[0] ?? null) : row.person,
   })) as unknown as EmployeeRow[];
   const personIds = rows.map((row) => row.person_id);
   const employeeIds = rows.map((row) => row.id);
+  return mapEmployeeRows(rows, personIds, employeeIds);
+}
+
+async function mapEmployeeRows(
+  rows: EmployeeRow[],
+  personIds = rows.map((row) => row.person_id),
+  employeeIds = rows.map((row) => row.id),
+) {
   const [addresses, users] = await Promise.all([
     fetchAddresses(personIds),
     fetchUsers(employeeIds),
@@ -194,14 +205,45 @@ async function fetchEmployeeRows(id?: number) {
   return rows.map((row) => mapEmployee(row, users.get(row.id), addresses.get(row.person_id)));
 }
 
+async function fetchEmployeePage(pageInput: number): Promise<PaginatedResult<EmployeeRecord>> {
+  const { page, pageSize, from, to } = getPageBounds(pageInput);
+  const { data, error, count } = await supabase
+    .from("employees")
+    .select(EMPLOYEE_SELECT, { count: "exact" })
+    .order("id", { ascending: true })
+    .order("person_id", { ascending: true })
+    .range(from, to);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = (data ?? []).map((row) => ({
+    ...row,
+    person: Array.isArray(row.person) ? (row.person[0] ?? null) : row.person,
+  })) as unknown as EmployeeRow[];
+
+  return {
+    data: await mapEmployeeRows(rows),
+    total: count ?? 0,
+    page,
+    pageSize,
+  };
+}
+
 export const employeeKeys = {
   all: ["employees"] as const,
+  list: (page: number) => ["employees", "list", { page }] as const,
   detail: (id: number) => ["employees", id] as const,
   active: ["employees", "active"] as const,
 };
 
 export async function listEmployees() {
   return fetchEmployeeRows();
+}
+
+export async function listEmployeesPage(page: number) {
+  return fetchEmployeePage(page);
 }
 
 export async function listActiveEmployees() {
