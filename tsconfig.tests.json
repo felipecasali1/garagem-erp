@@ -25,6 +25,7 @@
     "src/modules/checklist/lib/summarize-checklist.ts",
     "src/modules/vehicles/types.ts",
     "src/modules/vehicles/lib/normalize-vehicle-draft.ts",
+    "src/modules/sales/lib/build-sale-search-filter.ts",
     "tests/unit/**/*.ts",
     "tests/integration/**/*.ts"
   ]

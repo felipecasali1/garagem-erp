@@ -13,7 +13,9 @@ import type {
   SaleStatus,
   Vehicle,
 } from "@/shared/types/domain";
+import { buildSaleSearchFilter } from "@/modules/sales/lib/build-sale-search-filter";
 import { normalizeSalePayment } from "@/modules/sales/lib/sale-financials";
+import { getPageBounds, type PaginatedResult } from "@/shared/lib/pagination";
 
 type PersonRow = {
   id: number;
@@ -118,8 +120,15 @@ export type SaleActionInput = {
   saleId: number;
 };
 
+export type SaleListFilters = {
+  page: number;
+  status?: "pending";
+  search?: string;
+};
+
 export const saleKeys = {
   all: ["sales"] as const,
+  list: (filters: SaleListFilters) => ["sales", "list", filters] as const,
   byVehicle: (vehicleId: number) => ["sales", "vehicle", vehicleId] as const,
   byEmployee: (employeeId: number) => ["sales", "employee", employeeId] as const,
   detail: (id: number) => ["sales", id] as const,
@@ -366,6 +375,10 @@ export async function listSales() {
   return querySales();
 }
 
+export async function listSalesPage(filters: SaleListFilters): Promise<PaginatedResult<Sale>> {
+  return querySalesPage(filters);
+}
+
 export async function listSalesByVehicle(vehicleId: number) {
   return querySales({ vehicleId });
 }
@@ -378,7 +391,11 @@ async function querySales({
   vehicleId,
   employeeId,
 }: { vehicleId?: number; employeeId?: number } = {}) {
-  let query = supabase.from("sales").select(saleSelect).order("sale_date", { ascending: false });
+  let query = supabase
+    .from("sales")
+    .select(saleSelect)
+    .order("sale_date", { ascending: false })
+    .order("id", { ascending: false });
 
   if (vehicleId != null) {
     query = query.eq("vehicle_id", vehicleId);
@@ -394,6 +411,85 @@ async function querySales({
   }
 
   return ((data ?? []) as unknown as SaleRow[]).map(mapSale);
+}
+
+function escapeIlikeSearch(value: string) {
+  return value.trim().replace(/[\\%_]/g, "\\$&");
+}
+
+async function findSaleSearchIds(search: string) {
+  const pattern = `%${escapeIlikeSearch(search)}%`;
+  const [peopleResult, vehiclesResult] = await Promise.all([
+    supabase.from("people").select("id").ilike("name", pattern),
+    supabase.from("vehicles").select("id").ilike("plate", pattern),
+  ]);
+
+  if (peopleResult.error) {
+    throw new Error(peopleResult.error.message);
+  }
+  if (vehiclesResult.error) {
+    throw new Error(vehiclesResult.error.message);
+  }
+
+  const personIds = (peopleResult.data ?? []).map((person) => person.id);
+  const vehicleIds = (vehiclesResult.data ?? []).map((vehicle) => vehicle.id);
+
+  const customerResult =
+    personIds.length > 0
+      ? await supabase.from("customers").select("id").in("person_id", personIds)
+      : { data: [], error: null };
+  if (customerResult.error) {
+    throw new Error(customerResult.error.message);
+  }
+
+  return {
+    customerIds: (customerResult.data ?? []).map((customer) => customer.id),
+    vehicleIds,
+  };
+}
+
+async function querySalesPage(filters: SaleListFilters): Promise<PaginatedResult<Sale>> {
+  const { page, pageSize, from, to } = getPageBounds(filters.page);
+  const search = filters.search?.trim();
+  const searchIds = search ? await findSaleSearchIds(search) : undefined;
+  const searchFilter = searchIds
+    ? buildSaleSearchFilter(searchIds.customerIds, searchIds.vehicleIds)
+    : undefined;
+
+  if (searchFilter?.kind === "none") {
+    return { data: [], total: 0, page, pageSize };
+  }
+
+  let query = supabase
+    .from("sales")
+    .select(saleSelect, { count: "exact" })
+    .order("sale_date", { ascending: false })
+    .order("id", { ascending: false })
+    .range(from, to);
+
+  if (filters.status === "pending") {
+    query = query.eq("status", "pending");
+  }
+
+  if (searchFilter?.kind === "or") {
+    query = query.or(searchFilter.expression);
+  } else if (searchFilter?.kind === "customer") {
+    query = query.in("customer_id", searchFilter.ids);
+  } else if (searchFilter?.kind === "vehicle") {
+    query = query.in("vehicle_id", searchFilter.ids);
+  }
+
+  const { data, error, count } = await query;
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    data: ((data ?? []) as unknown as SaleRow[]).map(mapSale),
+    total: count ?? 0,
+    page,
+    pageSize,
+  };
 }
 
 export async function getSaleById(id: number) {

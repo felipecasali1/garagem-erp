@@ -3,6 +3,7 @@ import { z } from "zod";
 import { supabase } from "@/shared/supabase/client";
 import type { Person, PersonType, Purchase, PurchaseStatus, Vehicle } from "@/shared/types/domain";
 import type { SupplierType } from "@/modules/suppliers/services/suppliers";
+import { getPageBounds, type PaginatedResult } from "@/shared/lib/pagination";
 
 type PersonRow = {
   id: number;
@@ -44,6 +45,9 @@ type PurchaseRow = {
   vehicle: VehicleRow | null;
 };
 
+const purchaseSelect =
+  "id, supplier_id, vehicle_id, financial_transaction_id, total_value, purchase_date, status, notes, supplier:suppliers(id, person_id, supplier_type, active, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles(*)";
+
 export type CreatePurchaseInput = {
   supplierId: number;
   vehicleId: number;
@@ -55,6 +59,7 @@ export type CreatePurchaseInput = {
 
 export const purchaseKeys = {
   all: ["purchases"] as const,
+  list: (page: number) => ["purchases", "list", { page }] as const,
   byVehicle: (vehicleId: number) => ["purchases", "vehicle", vehicleId] as const,
   detail: (id: number) => ["purchases", id] as const,
 };
@@ -123,6 +128,27 @@ export async function listPurchases() {
   return queryPurchases();
 }
 
+export async function listPurchasesPage(pageInput: number): Promise<PaginatedResult<Purchase>> {
+  const { page, pageSize, from, to } = getPageBounds(pageInput);
+  const { data, error, count } = await supabase
+    .from("purchases")
+    .select(purchaseSelect, { count: "exact" })
+    .order("purchase_date", { ascending: false })
+    .order("id", { ascending: false })
+    .range(from, to);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    data: ((data ?? []) as unknown as PurchaseRow[]).map(mapPurchase),
+    total: count ?? 0,
+    page,
+    pageSize,
+  };
+}
+
 export async function listPurchasesByVehicle(vehicleId: number) {
   return queryPurchases(vehicleId);
 }
@@ -130,8 +156,9 @@ export async function listPurchasesByVehicle(vehicleId: number) {
 async function queryPurchases(vehicleId?: number) {
   let query = supabase
     .from("purchases")
-    .select("id, supplier_id, vehicle_id, financial_transaction_id, total_value, purchase_date, status, notes, supplier:suppliers(id, person_id, supplier_type, active, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles(*)")
-    .order("purchase_date", { ascending: false });
+    .select(purchaseSelect)
+    .order("purchase_date", { ascending: false })
+    .order("id", { ascending: false });
 
   if (vehicleId != null) {
     query = query.eq("vehicle_id", vehicleId);
@@ -149,7 +176,9 @@ async function queryPurchases(vehicleId?: number) {
 export async function getPurchaseById(id: number) {
   const { data, error } = await supabase
     .from("purchases")
-    .select("id, supplier_id, vehicle_id, financial_transaction_id, total_value, purchase_date, status, notes, supplier:suppliers(id, person_id, supplier_type, active, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles(*)")
+    .select(
+      "id, supplier_id, vehicle_id, financial_transaction_id, total_value, purchase_date, status, notes, supplier:suppliers(id, person_id, supplier_type, active, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles(*)",
+    )
     .eq("id", id)
     .maybeSingle();
 
@@ -232,9 +261,7 @@ type PurchaseActionInput = {
   purchaseId: number;
 };
 
-type SupabaseAdminClient = Awaited<
-  typeof import("@/shared/supabase/server")
->["supabaseAdmin"];
+type SupabaseAdminClient = Awaited<typeof import("@/shared/supabase/server")>["supabaseAdmin"];
 
 async function applyCompletedPurchase({
   supabaseAdmin,
