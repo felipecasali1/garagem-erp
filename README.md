@@ -17,7 +17,7 @@ GaragemERP é um sistema ERP para garagens e revendas de veículos seminovos. O 
 
 Para executar o GaragemERP localmente, você precisa de:
 
-* Node.js 22 ou superior
+* Node.js 22.12.0 ou superior (a versão mínima também está em `.nvmrc`)
 * npm
 * Um projeto Supabase, que pode ser:
 
@@ -100,7 +100,7 @@ SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_SERVICE_KEY=
 ```
 
-Essas variáveis são utilizadas pelo código executado no servidor.
+`SUPABASE_URL` e `SUPABASE_SERVICE_KEY` são necessárias para iniciar o servidor de produção. `SUPABASE_PUBLISHABLE_KEY` é uma chave pública de compatibilidade; ela não substitui a chave de serviço.
 
 A `SUPABASE_SERVICE_KEY` fornece acesso privilegiado aos recursos do Supabase e é utilizada em operações que exigem permissões administrativas, como o gerenciamento de usuários do Supabase Auth.
 
@@ -111,20 +111,20 @@ VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
 ```
 
-Essas variáveis são utilizadas pelo cliente da aplicação executado no navegador.
+Essas variáveis são utilizadas pelo cliente executado no navegador. Em um build de produção, os valores `VITE_*` são incluídos nos arquivos JavaScript públicos e precisam estar definidos durante o build.
 
 A chave pública/anon pode ser utilizada no código do cliente conforme o modelo de segurança do Supabase e as políticas de Row Level Security (RLS) configuradas no banco de dados.
 
-> **Nunca exponha a ****`SUPABASE_SERVICE_KEY`**** no código do cliente ou em deployments públicos.**
+> **Nunca exponha a `SUPABASE_SERVICE_KEY` no código do cliente ou em deployments públicos.**
 >
 > A `SUPABASE_SERVICE_KEY` deve permanecer exclusivamente no ambiente do servidor.
 
 ## Setup Local
 
-Depois de configurar o Supabase, remoto ou local, instale as dependências:
+Depois de configurar o Supabase, remoto ou local, instale as dependências usando o fluxo npm do projeto:
 
 ```bash
-npm install
+npm ci
 ```
 
 Inicie o servidor de desenvolvimento:
@@ -140,6 +140,14 @@ Execute os testes automatizados:
 ```bash
 npm test
 ```
+
+Para validar o build e o servidor Node de produção, incluindo uma rota renderizada e seus arquivos estáticos:
+
+```bash
+npm run smoke:production
+```
+
+Esse smoke test usa as credenciais configuradas no `.env` e não altera dados no Supabase.
 
 Comandos úteis para executar testes específicos:
 
@@ -207,9 +215,9 @@ select public.bootstrap_internal_user(
 
 Por padrão, essa função cria os registros relacionados em:
 
-* `people`
-* `employees`
-* `users`
+- `people`
+- `employees`
+- `users`
 
 com acesso de administrador.
 
@@ -276,17 +284,24 @@ Node.js
 
 Nesta configuração, o Docker é utilizado para executar os serviços locais do Supabase.
 
-## Produção
+## Build e execução de produção
 
-A arquitetura de produção pode ser definida independentemente do ambiente de desenvolvimento.
+O alvo de produção implementado nesta fase é Node.js. Cloudflare/Wrangler não faz parte do build nem é necessário para executar a aplicação.
 
-É possível utilizar:
+Com as variáveis de ambiente configuradas e as migrations aplicadas, gere e inicie o build:
 
-* Frontend hospedado em uma plataforma de deploy compatível com TanStack Start
-* Supabase Cloud como infraestrutura de banco de dados e serviços
-* Ou uma infraestrutura própria com Supabase self-hosted, caso necessário
+```bash
+npm run build
+npm start
+```
 
-O uso do Supabase Local é destinado principalmente ao desenvolvimento e não deve ser confundido com uma infraestrutura de produção.
+O comando `start` serve os arquivos estáticos e as rotas renderizadas pelo TanStack Start. Por padrão, o servidor escuta em `0.0.0.0:3000`; configure `HOST` e `PORT` para alterar isso. Ele carrega `.env` se o arquivo existir, ou pode receber as variáveis diretamente do ambiente — como em um container.
+
+Para conferir a inicialização real pelo comando npm, execute `npm start` e abra `http://localhost:3000/login` no navegador. A página de login deve carregar junto com os arquivos JavaScript/CSS, sem erro de servidor.
+
+As variáveis públicas do Supabase devem estar disponíveis no build. `SUPABASE_URL` e `SUPABASE_SERVICE_KEY` devem estar disponíveis no processo Node em execução; a chave de serviço é sempre exclusiva do servidor.
+
+O smoke test automatizado pode ser executado com `npm run smoke:production`. A distribuição em Docker com o Supabase self-hosted será tratada nos tickets seguintes; VPS, domínio e HTTPS continuam fora desta fase.
 
 ## Variáveis de Ambiente e Segurança
 
