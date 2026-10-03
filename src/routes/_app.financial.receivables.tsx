@@ -1,6 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -40,16 +40,46 @@ import { brl, fmtDate } from "@/shared/lib/format";
 import {
   cancelFinancialTransaction,
   financialTransactionKeys,
+  getFinancialTransactionSummary,
   isManualFinancialTransaction,
-  listFinancialTransactions,
+  listFinancialTransactionsPage,
+  listRecentFinancialTransactions,
   markFinancialTransactionPaid,
   type FinancialTransactionWithLinks,
 } from "@/modules/financial/services/transactions";
+import { ListPagination } from "@/shared/components/list-pagination";
+import { DEFAULT_PAGE_SIZE, getPaginationState, normalizePage } from "@/shared/lib/pagination";
+import type { TransactionCategory, TransactionStatus } from "@/shared/types/domain";
 
 export const Route = createFileRoute("/_app/financial/receivables")({
   head: () => ({ meta: [{ title: "Contas a Receber | GaragemERP" }] }),
+  validateSearch: (search: {
+    page?: unknown;
+    q?: unknown;
+    status?: unknown;
+    category?: unknown;
+  }): {
+    page?: number;
+    q?: string;
+    status?: TransactionStatus;
+    category?: "vehicle_sale" | "other";
+  } => ({
+    page: normalizePage(search.page),
+    q: typeof search.q === "string" && search.q.trim() ? search.q.trim() : undefined,
+    status: transactionStatuses.includes(search.status as TransactionStatus)
+      ? (search.status as TransactionStatus)
+      : undefined,
+    category: receivableCategories.includes(
+      search.category as (typeof receivableCategories)[number],
+    )
+      ? (search.category as "vehicle_sale" | "other")
+      : undefined,
+  }),
   component: ReceivablesPage,
 });
+
+const transactionStatuses: TransactionStatus[] = ["pending", "overdue", "paid", "canceled"];
+const receivableCategories = ["vehicle_sale", "other"] as const;
 
 const categoryLabel: Record<string, string> = {
   vehicle_sale: "Venda de Veículo",
@@ -57,20 +87,61 @@ const categoryLabel: Record<string, string> = {
 };
 
 function ReceivablesPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [confirmPaidId, setConfirmPaidId] = useState<number | null>(null);
   const [confirmCancelId, setConfirmCancelId] = useState<number | null>(null);
+  const { page: rawPage, q, status: statusFilter, category: categoryFilter } = Route.useSearch();
+  const page = rawPage ?? 1;
+  const query = q ?? "";
+  const listFilters = {
+    page,
+    type: "income" as const,
+    search: q,
+    status: statusFilter,
+    category: categoryFilter as TransactionCategory | undefined,
+    order: "dueDate" as const,
+  };
   const {
-    data: transactions = [],
+    data: transactionsPage,
     isLoading,
     error,
   } = useQuery({
-    queryKey: financialTransactionKeys.all,
-    queryFn: listFinancialTransactions,
+    queryKey: financialTransactionKeys.list(listFilters),
+    queryFn: () => listFinancialTransactionsPage(listFilters),
   });
+  const { data: summary, isLoading: isSummaryLoading } = useQuery({
+    queryKey: financialTransactionKeys.summary("income"),
+    queryFn: () => getFinancialTransactionSummary("income"),
+  });
+  const { data: recentPaid = [] } = useQuery({
+    queryKey: financialTransactionKeys.recent("income"),
+    queryFn: () => listRecentFinancialTransactions("income"),
+  });
+
+  const receivables = transactionsPage?.data ?? [];
+  const total = transactionsPage?.total ?? 0;
+  const pageSize = transactionsPage?.pageSize ?? DEFAULT_PAGE_SIZE;
+  const { totalPages, displayPage, range } = getPaginationState(page, total, pageSize);
+  const hasFilters = Boolean(q || statusFilter || categoryFilter);
+
+  const updateSearch = (next: {
+    page: number;
+    q?: string;
+    status?: TransactionStatus;
+    category?: "vehicle_sale" | "other";
+  }) => {
+    void navigate({ to: "/financial/receivables", search: () => next });
+  };
+
+  useEffect(() => {
+    if (!transactionsPage || page <= totalPages) return;
+    void navigate({
+      to: "/financial/receivables",
+      replace: true,
+      search: () => ({ page: totalPages, q, status: statusFilter, category: categoryFilter }),
+    });
+  }, [categoryFilter, navigate, page, q, statusFilter, totalPages, transactionsPage]);
 
   const receiveMutation = useMutation({
     mutationFn: markFinancialTransactionPaid,
@@ -98,48 +169,10 @@ function ReceivablesPage() {
     },
   });
 
-  const receivables = useMemo(
-    () =>
-      transactions
-        .filter((transaction) => transaction.type === "income")
-        .sort((a, b) => {
-          const aDate = a.due_date ?? a.transaction_date;
-          const bDate = b.due_date ?? b.transaction_date;
-          return aDate.localeCompare(bDate);
-        }),
-    [transactions],
-  );
-
-  const filtered = useMemo(() => {
-    return receivables.filter((transaction) => {
-      if (statusFilter !== "all" && transaction.status !== statusFilter) return false;
-      if (categoryFilter !== "all" && transaction.category !== categoryFilter) return false;
-      if (
-        query &&
-        !`${transaction.description} ${transaction.related ?? ""}`
-          .toLowerCase()
-          .includes(query.toLowerCase())
-      ) {
-        return false;
-      }
-      return true;
-    });
-  }, [categoryFilter, query, receivables, statusFilter]);
-
-  const totalPending = receivables
-    .filter((receivable) => receivable.status === "pending")
-    .reduce((sum, receivable) => sum + receivable.amount, 0);
-  const totalOverdue = receivables
-    .filter((receivable) => receivable.status === "overdue")
-    .reduce((sum, receivable) => sum + receivable.amount, 0);
-  const totalPaid = receivables
-    .filter((receivable) => receivable.status === "paid")
-    .reduce((sum, receivable) => sum + receivable.amount, 0);
-
   const pieData = [
-    { name: "A receber", value: totalPending, color: "var(--warning)" },
-    { name: "Vencidas", value: totalOverdue, color: "var(--destructive)" },
-    { name: "Recebidas", value: totalPaid, color: "var(--success)" },
+    { name: "A receber", value: summary?.pendingAmount ?? 0, color: "var(--warning)" },
+    { name: "Vencidas", value: summary?.overdueAmount ?? 0, color: "var(--destructive)" },
+    { name: "Recebidas", value: summary?.paidAmount ?? 0, color: "var(--success)" },
   ].filter((entry) => entry.value > 0);
   const confirmPaidReceivable = receivables.find((receivable) => receivable.id === confirmPaidId);
   const confirmCancelReceivable = receivables.find(
@@ -150,7 +183,13 @@ function ReceivablesPage() {
     <div className="space-y-6 max-w-[1600px] mx-auto">
       <PageHeader
         title="Contas a Receber"
-        description="Acompanhe recebimentos, repasses e receitas pendentes"
+        description={
+          isLoading
+            ? "Carregando contas..."
+            : total === 0
+              ? "0 contas"
+              : `${range.from}–${range.to} de ${total} contas`
+        }
         action={
           <Button asChild variant="outline">
             <Link to="/financial">
@@ -171,24 +210,24 @@ function ReceivablesPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <KpiCard
           label="Vencidas"
-          value={isLoading ? "..." : brl(totalOverdue)}
+          value={isSummaryLoading ? "..." : brl(summary?.overdueAmount ?? 0)}
           accent="text-destructive bg-destructive/10"
           icon={AlertCircle}
-          sub={`${receivables.filter((receivable) => receivable.status === "overdue").length} contas`}
+          sub={`${summary?.overdueCount ?? 0} contas`}
         />
         <KpiCard
           label="A Receber"
-          value={isLoading ? "..." : brl(totalPending)}
+          value={isSummaryLoading ? "..." : brl(summary?.pendingAmount ?? 0)}
           accent="text-warning bg-warning/10"
           icon={Clock}
-          sub={`${receivables.filter((receivable) => receivable.status === "pending").length} contas`}
+          sub={`${summary?.pendingCount ?? 0} contas`}
         />
         <KpiCard
           label="Recebidas"
-          value={isLoading ? "..." : brl(totalPaid)}
+          value={isSummaryLoading ? "..." : brl(summary?.paidAmount ?? 0)}
           accent="text-success bg-success/10"
           icon={CheckCircle2}
-          sub={`${receivables.filter((receivable) => receivable.status === "paid").length} contas`}
+          sub={`${summary?.paidCount ?? 0} contas`}
         />
       </div>
 
@@ -202,10 +241,27 @@ function ReceivablesPage() {
                   placeholder="Buscar conta..."
                   className="pl-9"
                   value={query}
-                  onChange={(event) => setQuery(event.target.value)}
+                  onChange={(event) =>
+                    updateSearch({
+                      page: 1,
+                      q: event.target.value || undefined,
+                      status: statusFilter,
+                      category: categoryFilter,
+                    })
+                  }
                 />
               </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select
+                value={statusFilter ?? "all"}
+                onValueChange={(value) =>
+                  updateSearch({
+                    page: 1,
+                    q,
+                    status: value === "all" ? undefined : (value as TransactionStatus),
+                    category: categoryFilter,
+                  })
+                }
+              >
                 <SelectTrigger className="md:w-44">
                   <Filter className="h-3.5 w-3.5" />
                   <SelectValue placeholder="Status" />
@@ -218,7 +274,17 @@ function ReceivablesPage() {
                   <SelectItem value="canceled">Canceladas</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <Select
+                value={categoryFilter ?? "all"}
+                onValueChange={(value) =>
+                  updateSearch({
+                    page: 1,
+                    q,
+                    status: statusFilter,
+                    category: value === "all" ? undefined : (value as "vehicle_sale" | "other"),
+                  })
+                }
+              >
                 <SelectTrigger className="md:w-48">
                   <SelectValue placeholder="Categoria" />
                 </SelectTrigger>
@@ -233,43 +299,63 @@ function ReceivablesPage() {
               </Select>
             </div>
 
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Descrição</TableHead>
-                  <TableHead>Categoria</TableHead>
-                  <TableHead>Vencimento</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Valor</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
-                      Carregando contas...
-                    </TableCell>
+                    <TableHead>Descrição</TableHead>
+                    <TableHead>Categoria</TableHead>
+                    <TableHead>Vencimento</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Valor</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
                   </TableRow>
-                ) : filtered.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
-                      <HandCoins className="h-8 w-8 mx-auto mb-2 opacity-40" />
-                      Nenhuma conta encontrada com esses filtros
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filtered.map((receivable) => (
-                    <ReceivableRow
-                      key={receivable.id}
-                      receivable={receivable}
-                      onMarkPaid={() => setConfirmPaidId(receivable.id)}
-                      onCancel={() => setConfirmCancelId(receivable.id)}
-                    />
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                        Carregando contas...
+                      </TableCell>
+                    </TableRow>
+                  ) : receivables.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                        <HandCoins className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                        {hasFilters
+                          ? "Nenhuma conta encontrada com esses filtros"
+                          : "Nenhuma conta registrada ainda"}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    receivables.map((receivable) => (
+                      <ReceivableRow
+                        key={receivable.id}
+                        receivable={receivable}
+                        onMarkPaid={() => setConfirmPaidId(receivable.id)}
+                        onCancel={() => setConfirmCancelId(receivable.id)}
+                      />
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+            {!isLoading && !error && total > 0 && (
+              <ListPagination
+                page={displayPage}
+                total={total}
+                pageSize={pageSize}
+                className="border-t px-0 sm:px-2"
+                onPageChange={(nextPage) =>
+                  updateSearch({
+                    page: nextPage,
+                    q,
+                    status: statusFilter,
+                    category: categoryFilter,
+                  })
+                }
+              />
+            )}
           </CardContent>
         </Card>
 
@@ -309,10 +395,7 @@ function ReceivablesPage() {
             <div className="space-y-2 mt-4">
               {pieData.map((entry) => (
                 <div key={entry.name} className="flex items-center gap-2 text-sm">
-                  <span
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ background: entry.color }}
-                  />
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: entry.color }} />
                   <span className="text-muted-foreground flex-1">{entry.name}</span>
                   <span className="font-medium">{brl(entry.value)}</span>
                 </div>
@@ -322,19 +405,16 @@ function ReceivablesPage() {
             <div className="border-t border-border pt-4 mt-6">
               <h4 className="text-sm font-medium mb-3">Recebimentos recentes</h4>
               <div className="space-y-2 text-sm">
-                {receivables
-                  .filter((receivable) => receivable.status === "paid")
-                  .slice(0, 4)
-                  .map((receivable) => (
-                    <div key={receivable.id} className="flex items-center gap-2">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
-                      <span className="flex-1 truncate text-muted-foreground">
-                        {receivable.description}
-                      </span>
-                      <span className="text-xs">{brl(receivable.amount)}</span>
-                    </div>
-                  ))}
-                {receivables.filter((receivable) => receivable.status === "paid").length === 0 && (
+                {recentPaid.map((receivable) => (
+                  <div key={receivable.id} className="flex items-center gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
+                    <span className="flex-1 truncate text-muted-foreground">
+                      {receivable.description}
+                    </span>
+                    <span className="text-xs">{brl(receivable.amount)}</span>
+                  </div>
+                ))}
+                {recentPaid.length === 0 && (
                   <div className="text-xs text-muted-foreground">Nenhum recebimento registrado</div>
                 )}
               </div>
@@ -394,8 +474,7 @@ function ReceivableRow({
   onCancel: () => void;
 }) {
   const canMarkPaid = receivable.status === "pending" || receivable.status === "overdue";
-  const canCancel =
-    receivable.status !== "canceled" && isManualFinancialTransaction(receivable);
+  const canCancel = receivable.status !== "canceled" && isManualFinancialTransaction(receivable);
 
   return (
     <TableRow>
@@ -410,9 +489,7 @@ function ReceivableRow({
         <div className="text-xs text-muted-foreground">{receivable.related ?? "-"}</div>
       </TableCell>
       <TableCell>
-        <Badge variant="outline">
-          {categoryLabel[receivable.category] ?? receivable.category}
-        </Badge>
+        <Badge variant="outline">{categoryLabel[receivable.category] ?? receivable.category}</Badge>
       </TableCell>
       <TableCell className="text-sm text-muted-foreground">
         {receivable.due_date ? fmtDate(receivable.due_date) : fmtDate(receivable.transaction_date)}

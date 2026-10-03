@@ -7,6 +7,16 @@ import type {
   TransactionStatus,
   TransactionType,
 } from "@/shared/types/domain";
+import {
+  buildFinancialOverdueFilter,
+  buildFinancialSearchFilter,
+  financialListOrdering,
+} from "@/modules/financial/lib/build-financial-query";
+import {
+  summarizeFinancialTransactions,
+  type FinancialTransactionSummary,
+} from "@/modules/financial/lib/summarize-financial-transactions";
+import { getPageBounds, type PaginatedResult } from "@/shared/lib/pagination";
 
 const manualFinancialTransactionSchema = z.object({
   type: z.enum(["income", "expense"]),
@@ -39,6 +49,20 @@ type FinancialTransactionRow = {
   commission_id: number | null;
 };
 
+const financialTransactionSelect =
+  "id, type, category, status, amount, transaction_date, due_date, paid_at, description, related, sale_id, purchase_id, employee_id, commission_id";
+
+export type FinancialListFilters = {
+  page: number;
+  type?: TransactionType;
+  search?: string;
+  status?: TransactionStatus;
+  category?: TransactionCategory;
+  overdue?: boolean;
+  today?: string;
+  order?: "transactionDate" | "dueDate";
+};
+
 export type FinancialTransactionWithLinks = FinancialTransaction & {
   sale_id?: number;
   purchase_id?: number;
@@ -52,6 +76,9 @@ export function isManualFinancialTransaction(transaction: FinancialTransactionWi
 
 export const financialTransactionKeys = {
   all: ["financial-transactions"] as const,
+  list: (filters: FinancialListFilters) => ["financial-transactions", "list", filters] as const,
+  summary: (type: TransactionType) => ["financial-transactions", "summary", type] as const,
+  recent: (type: TransactionType) => ["financial-transactions", "recent", type] as const,
   detail: (id: number) => ["financial-transactions", id] as const,
 };
 
@@ -77,9 +104,7 @@ function mapFinancialTransaction(row: FinancialTransactionRow): FinancialTransac
 export async function listFinancialTransactions() {
   const { data, error } = await supabase
     .from("financial_transactions")
-    .select(
-      "id, type, category, status, amount, transaction_date, due_date, paid_at, description, related, sale_id, purchase_id, employee_id, commission_id",
-    )
+    .select(financialTransactionSelect)
     .order("transaction_date", { ascending: false })
     .order("id", { ascending: false });
 
@@ -90,12 +115,82 @@ export async function listFinancialTransactions() {
   return ((data ?? []) as FinancialTransactionRow[]).map(mapFinancialTransaction);
 }
 
+export async function listFinancialTransactionsPage(
+  filters: FinancialListFilters,
+): Promise<PaginatedResult<FinancialTransactionWithLinks>> {
+  const { page, pageSize, from, to } = getPageBounds(filters.page);
+  const search = filters.search?.trim();
+  let query = supabase
+    .from("financial_transactions")
+    .select(financialTransactionSelect, { count: "exact" });
+
+  if (filters.type) query = query.eq("type", filters.type);
+  if (filters.status) query = query.eq("status", filters.status);
+  if (filters.category) query = query.eq("category", filters.category);
+  if (search) query = query.or(buildFinancialSearchFilter(search));
+  if (filters.overdue) {
+    if (!filters.today) {
+      throw new Error("A data operacional é necessária para filtrar transações vencidas.");
+    }
+    query = query.or(buildFinancialOverdueFilter(filters.today));
+  }
+
+  const ordering =
+    filters.order === "dueDate"
+      ? financialListOrdering.dueDate
+      : financialListOrdering.transactionDate;
+  for (const criterion of ordering) {
+    query = query.order(criterion.column, {
+      ascending: criterion.ascending,
+      ...(criterion.nullsFirst == null ? {} : { nullsFirst: criterion.nullsFirst }),
+    });
+  }
+
+  const { data, error, count } = await query.range(from, to);
+  if (error) throw new Error(error.message);
+
+  return {
+    data: ((data ?? []) as FinancialTransactionRow[]).map(mapFinancialTransaction),
+    total: count ?? 0,
+    page,
+    pageSize,
+  };
+}
+
+export async function getFinancialTransactionSummary(
+  type: TransactionType,
+): Promise<FinancialTransactionSummary> {
+  const { data, error } = await supabase
+    .from("financial_transactions")
+    .select("amount, status")
+    .eq("type", type);
+
+  if (error) throw new Error(error.message);
+
+  return summarizeFinancialTransactions(
+    (data ?? []).map((row) => ({ amount: Number(row.amount), status: row.status })),
+  );
+}
+
+export async function listRecentFinancialTransactions(type: TransactionType) {
+  const { data, error } = await supabase
+    .from("financial_transactions")
+    .select(financialTransactionSelect)
+    .eq("type", type)
+    .eq("status", "paid")
+    .order("paid_at", { ascending: false, nullsFirst: false })
+    .order("id", { ascending: false })
+    .limit(4);
+
+  if (error) throw new Error(error.message);
+
+  return ((data ?? []) as FinancialTransactionRow[]).map(mapFinancialTransaction);
+}
+
 export async function getFinancialTransactionById(id: number) {
   const { data, error } = await supabase
     .from("financial_transactions")
-    .select(
-      "id, type, category, status, amount, transaction_date, due_date, paid_at, description, related, sale_id, purchase_id, employee_id, commission_id",
-    )
+    .select(financialTransactionSelect)
     .eq("id", id)
     .maybeSingle();
 

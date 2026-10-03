@@ -26,6 +26,8 @@
     "src/modules/vehicles/types.ts",
     "src/modules/vehicles/lib/normalize-vehicle-draft.ts",
     "src/modules/sales/lib/build-sale-search-filter.ts",
+    "src/modules/financial/lib/build-financial-query.ts",
+    "src/modules/financial/lib/summarize-financial-transactions.ts",
     "tests/unit/**/*.ts",
     "tests/integration/**/*.ts"
   ]

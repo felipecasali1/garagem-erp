@@ -1,6 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect } from "react";
 import { ArrowDownCircle, ArrowUpCircle } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -8,15 +8,20 @@ import { StatusBadge } from "@/shared/components/status-badge";
 import { brl, fmtDate } from "@/shared/lib/format";
 import {
   financialTransactionKeys,
-  listFinancialTransactions,
+  listFinancialTransactionsPage,
   type FinancialTransactionWithLinks,
 } from "@/modules/financial/services/transactions";
-import { isFinancialAlertTransaction } from "@/modules/alerts/lib/build-operational-alerts";
 import { useOperationalDate } from "@/modules/alerts/hooks/use-operational-date";
+import { ListPagination } from "@/shared/components/list-pagination";
+import { DEFAULT_PAGE_SIZE, getPaginationState, normalizePage } from "@/shared/lib/pagination";
 
 export const Route = createFileRoute("/_app/financial/transactions/")({
   head: () => ({ meta: [{ title: "Transações | GaragemERP" }] }),
-  validateSearch: (search: { alert?: unknown }): { alert?: "overdue" } => ({
+  validateSearch: (search: {
+    page?: unknown;
+    alert?: unknown;
+  }): { page?: number; alert?: "overdue" } => ({
+    page: normalizePage(search.page),
     alert: search.alert === "overdue" ? "overdue" : undefined,
   }),
   component: TransactionsPage,
@@ -32,28 +37,35 @@ const categoryLabel: Record<string, string> = {
 };
 
 function TransactionsPage() {
-  const { alert: alertFilter } = Route.useSearch();
+  const navigate = useNavigate();
+  const { page: rawPage, alert: alertFilter } = Route.useSearch();
+  const page = rawPage ?? 1;
   const today = useOperationalDate();
+  const overdue = alertFilter === "overdue";
   const {
-    data: transactions = [],
+    data: transactionsPage,
     isLoading,
     error,
   } = useQuery({
-    queryKey: financialTransactionKeys.all,
-    queryFn: listFinancialTransactions,
+    queryKey: financialTransactionKeys.list({ page, overdue, today }),
+    queryFn: () => listFinancialTransactionsPage({ page, overdue, today }),
   });
 
-  const visibleTransactions = useMemo(
-    () =>
-      alertFilter === "overdue"
-        ? transactions.filter((transaction) =>
-            isFinancialAlertTransaction(transaction, today),
-          )
-        : transactions,
-    [alertFilter, today, transactions],
-  );
+  const transactions = transactionsPage?.data ?? [];
+  const total = transactionsPage?.total ?? 0;
+  const pageSize = transactionsPage?.pageSize ?? DEFAULT_PAGE_SIZE;
+  const { totalPages, displayPage, range } = getPaginationState(page, total, pageSize);
 
-  const grouped = visibleTransactions.reduce<Record<string, FinancialTransactionWithLinks[]>>((acc, t) => {
+  useEffect(() => {
+    if (!transactionsPage || page <= totalPages) return;
+    void navigate({
+      to: "/financial/transactions",
+      replace: true,
+      search: () => ({ page: totalPages, alert: alertFilter }),
+    });
+  }, [alertFilter, navigate, page, totalPages, transactionsPage]);
+
+  const grouped = transactions.reduce<Record<string, FinancialTransactionWithLinks[]>>((acc, t) => {
     (acc[t.transaction_date] ||= []).push(t);
     return acc;
   }, {});
@@ -66,7 +78,9 @@ function TransactionsPage() {
         description={
           isLoading
             ? "Carregando lançamentos..."
-            : `${visibleTransactions.length} lançamentos financeiros${alertFilter === "overdue" ? " vencidos" : ""}`
+            : total === 0
+              ? `0 lançamentos financeiros${overdue ? " vencidos" : ""}`
+              : `${range.from}–${range.to} de ${total} lançamentos financeiros${overdue ? " vencidos" : ""}`
         }
       />
 
@@ -79,7 +93,7 @@ function TransactionsPage() {
               Falha ao carregar transações:{" "}
               {error instanceof Error ? error.message : "erro desconhecido"}
             </div>
-          ) : visibleTransactions.length === 0 ? (
+          ) : transactions.length === 0 ? (
             <div className="p-6 text-sm text-muted-foreground">
               {alertFilter === "overdue"
                 ? "Nenhuma transação financeira vencida encontrada."
@@ -133,6 +147,20 @@ function TransactionsPage() {
             </div>
           )}
         </CardContent>
+        {!isLoading && !error && total > 0 && (
+          <ListPagination
+            page={displayPage}
+            total={total}
+            pageSize={pageSize}
+            className="border-t px-6"
+            onPageChange={(nextPage) =>
+              void navigate({
+                to: "/financial/transactions",
+                search: () => ({ page: nextPage, alert: alertFilter }),
+              })
+            }
+          />
+        )}
       </Card>
     </div>
   );
