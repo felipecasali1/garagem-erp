@@ -19,59 +19,64 @@ Para executar o GaragemERP localmente, você precisa de:
 
 * Node.js 22.12.0 ou superior (a versão mínima também está em `.nvmrc`)
 * npm
+* Para o caminho principal, Docker Desktop ou outro runtime compatível com a API do Docker. Se optar pelo Supabase Cloud, Docker não é necessário.
 * Um projeto Supabase, que pode ser:
+  * **Supabase Local self-hosted** — caminho principal, executado localmente pela Supabase CLI e Docker
+  * **Supabase Cloud (remoto)** — alternativa opcional
 
-  * **Supabase Cloud (remoto)** — recomendado para desenvolvimento e utilizado no ambiente de desenvolvimento do projeto
-  * **Supabase Local** — opcional, executado localmente através da Supabase CLI e Docker
-
-> **Docker não é obrigatório para executar o GaragemERP.** Ele é necessário apenas caso você escolha utilizar uma instância local do Supabase.
+> Docker é necessário para usar o Supabase Local, mas não para executar a aplicação apontada para um projeto Cloud.
 
 ## Configuração do Supabase
 
-O projeto permite escolher entre utilizar um projeto **Supabase remoto** ou uma instância **Supabase Local**.
+O caminho recomendado para uma instalação reproduzível é o **Supabase Local self-hosted**. O Supabase Cloud continua disponível como alternativa.
 
-### Opção 1 — Supabase Cloud (recomendado)
+### Supabase Local self-hosted (principal)
 
-Esta é a opção recomendada para a maioria dos desenvolvedores e é a configuração utilizada durante o desenvolvimento do GaragemERP.
-
-Crie um projeto no [Supabase](https://supabase.com/) e utilize as credenciais fornecidas pelo projeto.
-
-O fluxo geral é:
-
-```text
-GaragemERP
-    │
-    │ API / Supabase SDK
-    ▼
-Supabase Cloud
-    ├── PostgreSQL
-    ├── Auth
-    └── outros serviços utilizados pela aplicação
-```
-
-### Opção 2 — Supabase Local
-
-Também é possível executar o ambiente do Supabase localmente para desenvolvimento.
-
-Para isso, é necessário instalar a [Supabase CLI](https://supabase.com/docs/guides/cli) e o [Docker](https://docs.docker.com/).
-
-Após instalar as ferramentas necessárias:
+Instale as dependências e inicie o ambiente:
 
 ```bash
-supabase start
+npm ci
+npm run supabase:start
 ```
 
-O Supabase CLI iniciará os serviços locais necessários utilizando Docker.
+Na primeira inicialização, o Docker baixa as imagens do stack Supabase e a CLI aplica automaticamente todas as migrations em `supabase/migrations`. Não é necessário vincular uma conta Supabase nem copiar credenciais de outra máquina.
 
-Para aplicar as migrations ao banco local:
+Este stack da CLI é para desenvolvimento e validação local; não é o pacote de produção nem deve receber tráfego público. A implantação self-hosted para VPS pertence à segunda fase.
+
+Obtenha as URLs e chaves locais:
 
 ```bash
-supabase db push
+npm run supabase:env
 ```
 
-Depois de executar `supabase start`, utilize as credenciais e URLs fornecidas pelo CLI para configurar o arquivo `.env`.
+Esse comando mostra as URLs e chaves geradas pela CLI. Para configurar manualmente o `.env` atual, use `API_URL` em `VITE_SUPABASE_URL` e `SUPABASE_URL`, `ANON_KEY` em `VITE_SUPABASE_ANON_KEY`, `PUBLISHABLE_KEY` em `SUPABASE_PUBLISHABLE_KEY` e `SERVICE_ROLE_KEY` em `SUPABASE_SERVICE_KEY`. Não versione `.env` nem compartilhe a saída do comando: `SERVICE_ROLE_KEY`/`SECRET_KEY` são privilegiadas e devem ficar apenas no servidor.
 
-> O uso do Supabase Local é opcional. Você pode rodar o GaragemERP utilizando um projeto Supabase Cloud.
+O ambiente publica portas somente em `127.0.0.1`; o comando de inicialização cria e verifica uma rede Docker com esse binding. Não exponha essa instância à rede pública.
+
+Os dados ficam em volumes Docker e persistem ao parar e iniciar novamente:
+
+```bash
+npm run supabase:stop
+npm run supabase:start
+```
+
+Para validar schema, autenticação e RLS no banco local:
+
+```bash
+npm run supabase:test
+```
+
+Esse teste cria dados temporários dentro de uma transação e os reverte ao terminar.
+
+> **Reset destrutivo:** `npx supabase db reset --local` apaga os dados do banco local e reaplica as migrations. Não faz parte do fluxo normal de inicialização.
+
+### Supabase Cloud (alternativa opcional)
+
+Crie um projeto no [Supabase](https://supabase.com/) e use as credenciais fornecidas pelo painel. As migrations podem ser aplicadas pelo fluxo de deploy de banco de dados escolhido para o projeto.
+
+O stack local e o projeto Cloud são ambientes separados: iniciar o Supabase Local não altera os valores de conexão da aplicação. Até a integração prevista no ticket #4, a aplicação continua usando as variáveis do `.env`; escolha as credenciais do ambiente desejado sem versionar esse arquivo.
+
+No modo de desenvolvimento, reinicie `npm run dev` depois de alterar essas variáveis. Em produção, `VITE_*` é incorporado ao bundle, portanto é necessário executar um novo build para trocar o destino.
 
 ## Ambiente
 
@@ -141,6 +146,12 @@ Execute os testes automatizados:
 npm test
 ```
 
+Com o Supabase Local iniciado, valide migrations e RLS no PostgreSQL:
+
+```bash
+npm run supabase:test
+```
+
 Para validar o build e o servidor Node de produção, incluindo uma rota renderizada e seus arquivos estáticos:
 
 ```bash
@@ -166,27 +177,7 @@ supabase/migrations
 
 O projeto pode utilizar tanto um banco Supabase remoto quanto uma instância Supabase Local.
 
-### Supabase Cloud
-
-Ao utilizar um projeto Supabase remoto, aplique as migrations utilizando a Supabase CLI ou o fluxo de deploy de banco de dados adotado pelo projeto.
-
-### Supabase Local
-
-Para utilizar o Supabase Local, inicie os serviços:
-
-```bash
-supabase start
-```
-
-Depois, aplique as migrations:
-
-```bash
-supabase db push
-```
-
-As credenciais necessárias para configurar o `.env` podem ser obtidas através do próprio CLI do Supabase.
-
-> Recomenda-se utilizar o Supabase Local quando for necessário trabalhar sem depender de uma conexão com o projeto remoto ou quando for desejável manter um ambiente de desenvolvimento completamente local.
+No Supabase Local, as migrations são aplicadas pela CLI ao iniciar o stack. Use `npm run supabase:test` para verificar a autorização/RLS localmente. Não execute `db reset` como etapa de setup: esse comando é destrutivo.
 
 ## Primeiro Usuário Interno
 
@@ -252,7 +243,7 @@ supabase/migrations
 
 O GaragemERP pode ser desenvolvido utilizando uma das seguintes configurações:
 
-### Supabase Cloud
+### Supabase Cloud (alternativa)
 
 ```text
 Node.js
@@ -263,9 +254,9 @@ Node.js
       Supabase Cloud
 ```
 
-Esta é a configuração recomendada e utilizada no desenvolvimento atual do projeto.
+É uma alternativa quando for necessário desenvolver conectado a um projeto remoto. O caminho principal do projeto é o Supabase Local.
 
-### Supabase Local
+### Supabase Local self-hosted (principal)
 
 ```text
 Node.js

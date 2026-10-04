@@ -11,6 +11,10 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "start": "node --env-file-if-exists=.env scripts/start.mjs",
+    "supabase:start": "node scripts/ensure-supabase-local-network.mjs && supabase start --network-id garagem-erp-local",
+    "supabase:stop": "supabase stop --network-id garagem-erp-local",
+    "supabase:env": "supabase status --output env --network-id garagem-erp-local",
+    "supabase:test": "supabase test db --local --network-id garagem-erp-local",
     "smoke:production": "npm run build && node --env-file-if-exists=.env tests/smoke/production-runtime.test.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -89,6 +93,7 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
     "prettier": "^3.7.3",
+    "supabase": "^2.119.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
     "vite": "^7.3.1"
