@@ -17,7 +17,7 @@ function normalizeSupabaseUrl(url: string) {
 const supabaseUrl = normalizeSupabaseUrl(
   getEnv("SUPABASE_URL") ?? getEnv("VITE_SUPABASE_URL") ?? "",
 );
-const serviceKey = getEnv("SUPABASE_SERVICE_KEY") ?? getEnv("VITE_SUPABASE_SERVICE_KEY") ?? "";
+const serviceKey = getEnv("SUPABASE_SERVICE_KEY") ?? "";
 
 if (!supabaseUrl) {
   throw new Error(
@@ -26,7 +26,9 @@ if (!supabaseUrl) {
 }
 
 if (!serviceKey) {
-  throw new Error("Missing Supabase service key. Define SUPABASE_SERVICE_KEY in your environment.");
+  throw new Error(
+    "Missing Supabase service key. Define SUPABASE_SERVICE_KEY in the server environment.",
+  );
 }
 
 export const supabaseAdmin = createClient(supabaseUrl, serviceKey);

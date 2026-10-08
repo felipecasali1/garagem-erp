@@ -4,25 +4,25 @@ GaragemERP é um sistema ERP para garagens e revendas de veículos seminovos. O 
 
 ## Stack
 
-* React 19
-* TanStack Start
-* TanStack Router
-* TanStack Query
-* Vite
-* TypeScript
-* Tailwind CSS
-* Supabase
+- React 19
+- TanStack Start
+- TanStack Router
+- TanStack Query
+- Vite
+- TypeScript
+- Tailwind CSS
+- Supabase
 
 ## Requisitos
 
 Para executar o GaragemERP localmente, você precisa de:
 
-* Node.js 22.12.0 ou superior (a versão mínima também está em `.nvmrc`)
-* npm
-* Para o caminho principal, Docker Desktop ou outro runtime compatível com a API do Docker. Se optar pelo Supabase Cloud, Docker não é necessário.
-* Um projeto Supabase, que pode ser:
-  * **Supabase Local self-hosted** — caminho principal, executado localmente pela Supabase CLI e Docker
-  * **Supabase Cloud (remoto)** — alternativa opcional
+- Node.js 22.12.0 ou superior (a versão mínima também está em `.nvmrc`)
+- npm
+- Para o caminho principal, Docker Desktop ou outro runtime compatível com a API do Docker. Se optar pelo Supabase Cloud, Docker não é necessário.
+- Um projeto Supabase, que pode ser:
+  - **Supabase Local self-hosted** — caminho principal, executado localmente pela Supabase CLI e Docker
+  - **Supabase Cloud (remoto)** — alternativa opcional
 
 > Docker é necessário para usar o Supabase Local, mas não para executar a aplicação apontada para um projeto Cloud.
 
@@ -74,9 +74,23 @@ Esse teste cria dados temporários dentro de uma transação e os reverte ao ter
 
 Crie um projeto no [Supabase](https://supabase.com/) e use as credenciais fornecidas pelo painel. As migrations podem ser aplicadas pelo fluxo de deploy de banco de dados escolhido para o projeto.
 
-O stack local e o projeto Cloud são ambientes separados: iniciar o Supabase Local não altera os valores de conexão da aplicação. Até a integração prevista no ticket #4, a aplicação continua usando as variáveis do `.env`; escolha as credenciais do ambiente desejado sem versionar esse arquivo.
+O stack local e o projeto Cloud são ambientes separados: iniciar o Supabase Local não altera os valores de conexão da aplicação. No fluxo manual, a aplicação usa as variáveis do `.env`; o setup integrado grava a seleção local em `.env.local`. Escolha as credenciais do ambiente desejado sem versionar esses arquivos.
 
 No modo de desenvolvimento, reinicie `npm run dev` depois de alterar essas variáveis. Em produção, `VITE_*` é incorporado ao bundle, portanto é necessário executar um novo build para trocar o destino.
+
+### Setup integrado local
+
+Para preparar o Supabase Local e a aplicação em um único fluxo, execute:
+
+```bash
+npm run setup:local
+```
+
+Esse comando valida Node.js, Docker, o daemon Docker e os recursos mínimos de CPU/memória; inicia o Supabase Local; confirma que Auth e PostgREST estão respondendo; grava as credenciais locais em `.env.local`; gera o build; inicia o servidor Node; e verifica a rota de login da aplicação. O arquivo `.env.local` é ignorado pelo Git e recebe permissões restritas no sistema operacional.
+
+Ao terminar, acesse `http://127.0.0.1:3000/login`. O próprio comando mostra o endereço do Supabase Studio e os passos para criar o primeiro usuário Auth e vinculá-lo ao `User` interno. `Ctrl+C` encerra apenas a aplicação e preserva os dados nos volumes Docker; use `npm run supabase:stop` quando quiser parar o Supabase.
+
+Esse fluxo usa a Supabase CLI para o stack local de desenvolvimento. Por isso, ele não cria um `docker-compose.yml` de produção e não deve ser exposto à internet. A configuração Docker Compose endurecida para uma VPS pertence à segunda fase do plano de implantação.
 
 ## Ambiente
 
@@ -138,6 +152,8 @@ Inicie o servidor de desenvolvimento:
 npm run dev
 ```
 
+Se o `setup:local` já tiver sido executado, o Vite encontra as variáveis locais em `.env.local` automaticamente. Para desenvolver com hot reload, mantenha o Supabase ativo e use `npm run dev` em vez do servidor de produção iniciado pelo setup integrado.
+
 A aplicação estará disponível no endereço informado pelo servidor de desenvolvimento.
 
 Execute os testes automatizados:
@@ -185,8 +201,8 @@ O login do GaragemERP utiliza o Supabase Auth em conjunto com o sistema interno 
 
 Para que um usuário possa acessar o sistema, é necessário existir:
 
-* um usuário no Supabase Auth (`auth.users`)
-* um usuário interno vinculado em `public.users`
+- um usuário no Supabase Auth (`auth.users`)
+- um usuário interno vinculado em `public.users`
 
 Para criar o primeiro administrador interno, primeiro crie um usuário no Supabase Auth com o e-mail desejado.
 
@@ -212,6 +228,14 @@ Por padrão, essa função cria os registros relacionados em:
 
 com acesso de administrador.
 
+Com o `.env.local` criado pelo setup, valide o fluxo completo do primeiro usuário:
+
+```bash
+npm run setup:verify-user
+```
+
+O comando solicita o e-mail e a senha somente em memória, confirma o login no Auth, verifica o vínculo com `public.users` e faz uma leitura autorizada de veículos. Para automações locais, `LOCAL_SETUP_USER_PASSWORD` pode fornecer a senha sem ser versionada.
+
 Depois que o primeiro administrador existir, novos usuários do sistema devem ser provisionados através do fluxo:
 
 ```text
@@ -222,16 +246,16 @@ Configurações > Usuários
 
 A aplicação é organizada em módulos relacionados às principais áreas do ERP, incluindo:
 
-* Dashboard
-* Veículos e estoque
-* Compras
-* Checklists de preparação
-* Clientes
-* Funcionários
-* Vendas
-* Comissões
-* Financeiro
-* Usuários e configurações
+- Dashboard
+- Veículos e estoque
+- Compras
+- Checklists de preparação
+- Clientes
+- Funcionários
+- Vendas
+- Comissões
+- Financeiro
+- Usuários e configurações
 
 A estrutura de dados e as alterações no banco são versionadas através das migrations localizadas em:
 

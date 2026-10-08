@@ -11,6 +11,8 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "start": "node --env-file-if-exists=.env scripts/start.mjs",
+    "setup:local": "node scripts/setup-local.mjs",
+    "setup:verify-user": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/verify-local-user.mjs",
     "supabase:start": "node scripts/ensure-supabase-local-network.mjs && supabase start --network-id garagem-erp-local",
     "supabase:stop": "supabase stop --network-id garagem-erp-local",
     "supabase:env": "supabase status --output env --network-id garagem-erp-local",
@@ -19,9 +21,9 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
-    "test:unit": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js",
+    "test:unit": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js tests/unit/local-setup.test.mjs",
     "test:integration": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/integration/*.test.js",
-    "test": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js .test-dist/tests/integration/*.test.js"
+    "test": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js tests/unit/local-setup.test.mjs .test-dist/tests/integration/*.test.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
