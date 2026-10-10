@@ -100,7 +100,7 @@ O comando de atualização atua sobre a versão do código que já está nesta c
 npm run update:local
 ```
 
-O comando identifica o commit atual, inicia o Supabase Local se necessário, aplica apenas migrations pendentes, confirma que todas as migrations do repositório estão aplicadas, gera o build e inicia temporariamente a aplicação em uma porta local para verificar `/login`, Auth e PostgREST. Ao final, encerra apenas esse processo temporário: não reseta nem para o banco e não remove volumes.
+O comando identifica o commit atual, inicia o Supabase Local se necessário, aplica apenas migrations pendentes, confirma que todas as migrations do repositório estão aplicadas, gera o build e inicia temporariamente a aplicação em uma porta local para verificar `/login`, Auth e PostgREST. Para manter a versão reproduzível, ele exige que o código executável esteja commitado; arquivos de consulta em `supabase/snippets/` não fazem parte do build e não bloqueiam a atualização. Ao final, encerra apenas esse processo temporário: não reseta nem para o banco e não remove volumes.
 
 Para verificar separadamente um ambiente já em execução, use:
 
@@ -108,7 +108,7 @@ Para verificar separadamente um ambiente já em execução, use:
 npm run healthcheck:local
 ```
 
-Esse comando verifica a aplicação na porta configurada em `PORT`, Auth, PostgREST e o histórico de migrations. Ele falha com uma mensagem de diagnóstico se algum componente estiver indisponível ou se houver migrations pendentes.
+Esse comando verifica a aplicação na porta configurada em `PORT` (por padrão, 3000), Auth, PostgREST e o histórico de migrations. Se não encontrar a aplicação nessa porta, também tenta `http://localhost:8080`, usada pelo servidor Vite em desenvolvimento. Para informar outro endereço local, defina `LOCAL_APP_URL`, por exemplo `LOCAL_APP_URL=http://localhost:8080`. O healthcheck falha com uma mensagem de diagnóstico se algum componente estiver indisponível ou se houver migrations pendentes.
 
 Há também um teste reproduzível contra o Supabase Local. Com o stack local ativo, execute:
 

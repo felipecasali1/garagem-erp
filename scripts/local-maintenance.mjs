@@ -138,11 +138,40 @@ function readMigrationHistory({ runCommand: execute, expectedMigrations }) {
   return validateAppliedMigrations(parsed, readExpectedMigrations(expectedMigrations));
 }
 
+function applicationCandidates(environment, defaultAppUrl, explicitAppUrl) {
+  const candidates = explicitAppUrl
+    ? [explicitAppUrl]
+    : environment.LOCAL_APP_URL?.trim()
+      ? [environment.LOCAL_APP_URL.trim()]
+      : [defaultAppUrl, "http://localhost:8080"];
+  return [...new Set(candidates)].map((url) => {
+    return isLoopbackUrl(url, "URL da aplicação").origin;
+  });
+}
+
+async function checkApplicationHealth(candidates, fetchImpl) {
+  const failures = [];
+  for (const baseUrl of candidates) {
+    try {
+      const response = await fetchImpl(`${baseUrl}/login`, { signal: timeoutSignal() });
+      if (response.ok) return true;
+      failures.push(`${baseUrl}: aplicação respondeu HTTP ${response.status}`);
+    } catch (error) {
+      failures.push(`${baseUrl}: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  throw new Error(
+    `Healthcheck da aplicação falhou: ${failures.join("; ")}. ` +
+      "Inicie npm run dev (porta 8080) ou npm run start (porta configurada em PORT), " +
+      "ou defina LOCAL_APP_URL.",
+  );
+}
+
 export async function runLocalHealthcheck(options = {}) {
   const environment = options.environment ?? process.env;
   const local = assertLocalEnvironment(environment);
-  const appUrl = options.appUrl ?? local.appUrl;
-  isLoopbackUrl(appUrl, "URL da aplicação");
+  const candidates = applicationCandidates(environment, local.appUrl, options.appUrl);
 
   const execute = options.runCommand ?? runCommand;
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -161,22 +190,7 @@ export async function runLocalHealthcheck(options = {}) {
     );
   }
 
-  let appResponse;
-  try {
-    appResponse = await fetchImpl(`${appUrl.replace(/\/+$/, "")}/login`, {
-      signal: timeoutSignal(),
-    });
-  } catch (error) {
-    throw new Error(
-      `Healthcheck da aplicação falhou: ${error instanceof Error ? error.message : error}. ` +
-        "Inicie a aplicação com npm run dev ou npm run start.",
-    );
-  }
-  if (!appResponse.ok) {
-    throw new Error(
-      `Healthcheck da aplicação falhou: aplicação respondeu HTTP ${appResponse.status}.`,
-    );
-  }
+  await checkApplicationHealth(candidates, fetchImpl);
 
   return {
     app: true,
@@ -202,15 +216,23 @@ export async function runLocalUpdate(options = {}) {
   assertSuccessfulCommand(versionResult, "Não foi possível identificar a versão local do código");
   const commit = versionResult.stdout.trim();
   if (!commit) throw new Error("O Git não informou a versão atual do código.");
-  const changesResult = execute("git", ["status", "--porcelain", "--untracked-files=normal"], {
+  const changesResult = execute("git", ["status", "--porcelain", "--untracked-files=all"], {
     stdio: "pipe",
   });
   assertSuccessfulCommand(changesResult, "Não foi possível verificar alterações locais do código");
-  const isDirty = Boolean(changesResult.stdout.trim());
-  const version = isDirty ? `${commit}-dirty` : commit;
-  log(
-    `Atualizando instalação local na versão ${version}${isDirty ? " (há alterações locais não commitadas)" : ""}.`,
-  );
+  const uncommittedCode = (changesResult.stdout ?? "")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .filter((entry) => !entry.slice(3).startsWith("supabase/snippets/"));
+  if (uncommittedCode.length > 0) {
+    const paths = uncommittedCode.map((entry) => entry.slice(3)).join(", ");
+    throw new Error(
+      "Para atualizar uma versão identificável, faça commit ou checkout do código primeiro. " +
+        `Alterações pendentes: ${paths}. Arquivos em supabase/snippets/ não fazem parte da versão executável.`,
+    );
+  }
+  const version = commit;
+  log(`Atualizando instalação local na versão ${version}.`);
 
   const startResult = execute(npmCommand, ["run", "supabase:start"], {
     env: { ...process.env, ...environment },

@@ -95,6 +95,30 @@ test("healthcheck identifica quando a aplicação não responde", async () => {
   );
 });
 
+test("healthcheck tenta a porta de desenvolvimento Vite após a porta configurada", async () => {
+  const checkedUrls = [];
+  const fetchImpl = async (url) => {
+    const parsedUrl = new URL(url);
+    if (parsedUrl.pathname === "/login") {
+      checkedUrls.push(parsedUrl.origin);
+      return parsedUrl.port === "8080"
+        ? new Response("login", { status: 200 })
+        : new Response("not found", { status: 404 });
+    }
+    return healthyFetch(url);
+  };
+
+  const result = await runLocalHealthcheck({
+    environment,
+    expectedMigrations,
+    runCommand: migrationCommandRunner(),
+    fetchImpl,
+  });
+
+  assert.equal(result.app, true);
+  assert.deepEqual(checkedUrls, ["http://127.0.0.1:3000", "http://localhost:8080"]);
+});
+
 test("atualização aplica migrations locais, gera build e valida o runtime resultante", async () => {
   const calls = [];
   let serverClosed = false;
@@ -104,7 +128,7 @@ test("atualização aplica migrations locais, gera build e valida o runtime resu
       return { status: 0, stdout: "abc1234\n", stderr: "" };
     }
     if (command === "git" && args.includes("--porcelain")) {
-      return { status: 0, stdout: "?? local-test.sql\n", stderr: "" };
+      return { status: 0, stdout: "?? supabase/snippets/local-test.sql\n", stderr: "" };
     }
     if (args.includes("list")) return { status: 0, stdout: migrationOutput, stderr: "" };
     return { status: 0, stdout: "", stderr: "" };
@@ -123,7 +147,7 @@ test("atualização aplica migrations locais, gera build e valida o runtime resu
     }),
   });
 
-  assert.equal(result.version, "abc1234-dirty");
+  assert.equal(result.version, "abc1234");
   assert.equal(result.health.app, true);
   assert.equal(serverClosed, true);
   assert.ok(calls.some((call) => call[0] === "npm" && call.includes("supabase:start")));
@@ -135,6 +159,27 @@ test("atualização aplica migrations locais, gera build e valida o runtime resu
   assert.ok(calls.some((call) => call[0] === "npm" && call.includes("build")));
   assert.ok(calls.some((call) => call[0] === "git" && call.includes("--short")));
   assert.ok(!calls.some((call) => call.includes("reset")));
+});
+
+test("atualização recusa código não commitado para manter uma versão identificável", async () => {
+  const calls = [];
+  const runCommand = (command, args) => {
+    calls.push([command, ...args]);
+    if (command === "git" && args.includes("rev-parse")) {
+      return { status: 0, stdout: "abc1234\n", stderr: "" };
+    }
+    if (command === "git" && args.includes("--porcelain")) {
+      return { status: 0, stdout: " M src/routes/index.tsx\n", stderr: "" };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+
+  await assert.rejects(
+    runLocalUpdate({ environment, runCommand }),
+    /faça commit ou checkout do código primeiro/,
+  );
+  assert.equal(calls.length, 2);
+  assert.ok(!calls.some((call) => call.includes("supabase:start")));
 });
 
 test("falha ao aplicar migrations impede build e healthcheck do runtime", async () => {
