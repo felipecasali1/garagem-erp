@@ -6,6 +6,7 @@ import { startProductionServer } from "./production-server.mjs";
 import { assertSupportedNodeVersion } from "./check-node-version.mjs";
 import {
   checkSupabaseHealth,
+  ensureDockerReady,
   getExpectedMigrations,
   parseMigrationStatus,
   redactSupabaseOutput,
@@ -233,6 +234,8 @@ export async function runLocalUpdate(options = {}) {
   }
   const version = commit;
   log(`Atualizando instalação local na versão ${version}.`);
+
+  ensureDockerReady({ runCommand: execute, log });
 
   const startResult = execute(npmCommand, ["run", "supabase:start"], {
     env: { ...process.env, ...environment },

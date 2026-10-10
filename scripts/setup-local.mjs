@@ -198,14 +198,16 @@ export function validateDockerInfo(info, options = {}) {
   };
 }
 
-function ensureDockerReady() {
-  const version = runCommand("docker", ["version", "--format", "{{.Server.Version}}"]);
+export function ensureDockerReady(options = {}) {
+  const execute = options.runCommand ?? runCommand;
+  const log = options.log ?? console.log;
+  const version = execute("docker", ["version", "--format", "{{.Server.Version}}"]);
   assertSuccessfulCommand(
     version,
     "Docker não está disponível. Instale/inicie o Docker e tente novamente",
   );
 
-  const infoResult = runCommand("docker", ["info", "--format", "{{json .}}"]);
+  const infoResult = execute("docker", ["info", "--format", "{{json .}}"]);
   assertSuccessfulCommand(
     infoResult,
     "O Docker está instalado, mas o daemon não está acessível. Inicie o Docker e tente novamente",
@@ -228,7 +230,7 @@ function ensureDockerReady() {
     );
   }
 
-  console.log(
+  log(
     `Docker disponível (${resources.cpus} CPUs, ${(resources.memoryBytes / 1024 ** 3).toFixed(1)} GB).`,
   );
 }

@@ -100,7 +100,7 @@ O comando de atualização atua sobre a versão do código que já está nesta c
 npm run update:local
 ```
 
-O comando identifica o commit atual, inicia o Supabase Local se necessário, aplica apenas migrations pendentes, confirma que todas as migrations do repositório estão aplicadas, gera o build e inicia temporariamente a aplicação em uma porta local para verificar `/login`, Auth e PostgREST. Para manter a versão reproduzível, ele exige que o código executável esteja commitado; arquivos de consulta em `supabase/snippets/` não fazem parte do build e não bloqueiam a atualização. Ao final, encerra apenas esse processo temporário: não reseta nem para o banco e não remove volumes.
+O comando identifica o commit atual, valida Node, variáveis locais, CLI, Docker, daemon e recursos mínimos do Docker; inicia o Supabase Local se necessário; espera Auth e PostgREST responderem; aplica apenas migrations pendentes; confirma que todas as migrations do repositório estão aplicadas; gera o build e inicia temporariamente a aplicação em uma porta local para verificar `/login`, Auth e PostgREST. Para manter a versão reproduzível, ele exige que o código executável esteja commitado; arquivos de consulta em `supabase/snippets/` não fazem parte do build e não bloqueiam a atualização. Ao final, encerra apenas esse processo temporário: não reseta nem para o banco e não remove volumes.
 
 Para verificar separadamente um ambiente já em execução, use:
 
@@ -109,6 +109,13 @@ npm run healthcheck:local
 ```
 
 Esse comando verifica a aplicação na porta configurada em `PORT` (por padrão, 3000), Auth, PostgREST e o histórico de migrations. Se não encontrar a aplicação nessa porta, também tenta `http://localhost:8080`, usada pelo servidor Vite em desenvolvimento. Para informar outro endereço local, defina `LOCAL_APP_URL`, por exemplo `LOCAL_APP_URL=http://localhost:8080`. O healthcheck falha com uma mensagem de diagnóstico se algum componente estiver indisponível ou se houver migrations pendentes.
+
+#### Se a atualização falhar
+
+- Se o preflight reclamar do Docker, inicie o daemon e confira se ele disponibiliza ao menos 2 CPUs e 4 GB de memória; depois rode `npm run update:local` novamente.
+- Se Auth ou PostgREST não ficarem saudáveis, confira `docker ps` e os logs dos serviços com `docker logs <nome-do-container>`. O fluxo para antes de aplicar migrations.
+- Se uma migration falhar, leia a mensagem do Postgres/Supabase e corrija a migration antes de tentar de novo. O build e o healthcheck final não são executados após essa falha; não use `db reset` para contorná-la.
+- Se o build ou o healthcheck final falhar, corrija o erro indicado e rode novamente. Migrations já aplicadas não são reaplicadas, e o comando não apaga nem recria os volumes.
 
 Há também um teste reproduzível contra o Supabase Local. Com o stack local ativo, execute:
 

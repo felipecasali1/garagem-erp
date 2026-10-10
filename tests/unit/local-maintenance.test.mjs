@@ -124,6 +124,13 @@ test("atualização aplica migrations locais, gera build e valida o runtime resu
   let serverClosed = false;
   const runCommand = (command, args) => {
     calls.push([command, ...args]);
+    if (command === "docker" && args[0] === "info") {
+      return {
+        status: 0,
+        stdout: JSON.stringify({ NCPU: 4, MemTotal: 8 * 1024 ** 3 }),
+        stderr: "",
+      };
+    }
     if (command === "git" && args.includes("rev-parse")) {
       return { status: 0, stdout: "abc1234\n", stderr: "" };
     }
@@ -186,6 +193,26 @@ test("atualização recusa código não commitado para manter uma versão identi
   assert.ok(!calls.some((call) => call.includes("supabase:start")));
 });
 
+test("Docker indisponível interrompe a atualização antes de iniciar o Supabase", async () => {
+  const calls = [];
+  const runCommand = (command, args) => {
+    calls.push([command, ...args]);
+    if (command === "git" && args.includes("rev-parse")) {
+      return { status: 0, stdout: "abc1234\n", stderr: "" };
+    }
+    if (command === "git" && args.includes("--porcelain")) {
+      return { status: 0, stdout: "", stderr: "" };
+    }
+    if (command === "docker" && args[0] === "version") {
+      return { status: 1, stdout: "", stderr: "docker unavailable" };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+
+  await assert.rejects(runLocalUpdate({ environment, runCommand }), /Docker não está disponível/);
+  assert.ok(!calls.some((call) => call.includes("supabase:start")));
+});
+
 test("falha ao aplicar migrations impede build e healthcheck do runtime", async () => {
   const calls = [];
   let appStarted = false;
@@ -193,6 +220,13 @@ test("falha ao aplicar migrations impede build e healthcheck do runtime", async 
     calls.push([command, ...args]);
     if (command === "git" && args.includes("rev-parse")) {
       return { status: 0, stdout: "abc1234\n", stderr: "" };
+    }
+    if (command === "docker" && args[0] === "info") {
+      return {
+        status: 0,
+        stdout: JSON.stringify({ NCPU: 4, MemTotal: 8 * 1024 ** 3 }),
+        stderr: "",
+      };
     }
     if (command === "git" && args.includes("--porcelain")) {
       return { status: 0, stdout: "", stderr: "" };

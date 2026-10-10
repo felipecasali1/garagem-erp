@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildLocalEnvironment,
+  ensureDockerReady,
   parseEnvOutput,
   redactSupabaseOutput,
   updateLocalEnvContent,
@@ -69,6 +70,30 @@ test("valida os recursos mínimos do Docker", () => {
   const result = validateDockerInfo({ NCPU: 1, MemTotal: 2 * 1024 ** 3 });
   assert.equal(result.valid, false);
   assert.equal(result.problems.length, 2);
+});
+
+test("confirma que Docker e daemon estão disponíveis antes do setup", () => {
+  const commands = [];
+  ensureDockerReady({
+    runCommand: (command, args) => {
+      commands.push([command, ...args]);
+      return {
+        status: 0,
+        stdout:
+          args[0] === "info" ? JSON.stringify({ NCPU: 4, MemTotal: 8 * 1024 ** 3 }) : "28.0.0",
+        stderr: "",
+      };
+    },
+    log: () => {},
+  });
+
+  assert.deepEqual(
+    commands.map((command) => command.slice(0, 2)),
+    [
+      ["docker", "version"],
+      ["docker", "info"],
+    ],
+  );
 });
 
 test("confirma que todas as migrations locais foram aplicadas", () => {
