@@ -100,7 +100,7 @@ O comando de atualização atua sobre a versão do código que já está nesta c
 npm run update:local
 ```
 
-O comando identifica o commit atual, valida Node, variáveis locais, CLI, Docker, daemon e recursos mínimos do Docker; inicia o Supabase Local se necessário; espera Auth e PostgREST responderem; aplica apenas migrations pendentes; confirma que todas as migrations do repositório estão aplicadas; gera o build e inicia temporariamente a aplicação em uma porta local para verificar `/login`, Auth e PostgREST. Para manter a versão reproduzível, ele exige que o código executável esteja commitado; arquivos de consulta em `supabase/snippets/` não fazem parte do build e não bloqueiam a atualização. Ao final, encerra apenas esse processo temporário: não reseta nem para o banco e não remove volumes.
+O comando identifica o commit atual e valida Node, variáveis locais, CLI, Docker, daemon e recursos mínimos. Depois inicia ou confirma o Supabase Local e espera Auth e PostgREST responderem. A CLI pode aplicar migrations pendentes como parte de `supabase start` quando o stack estava parado; em seguida, o comando executa `migration up` para aplicar qualquer migration que ainda esteja pendente e confirma o histórico completo. Por fim, gera o build e inicia temporariamente a aplicação em uma porta local para verificar `/login`, Auth e PostgREST. Para manter a versão reproduzível, exige que o código executável esteja commitado; arquivos de consulta em `supabase/snippets/` não fazem parte do build e não bloqueiam a atualização. Ao final, encerra apenas esse processo temporário: não reseta nem para o banco e não remove volumes.
 
 Para verificar separadamente um ambiente já em execução, use:
 
@@ -113,8 +113,8 @@ Esse comando verifica a aplicação na porta configurada em `PORT` (por padrão,
 #### Se a atualização falhar
 
 - Se o preflight reclamar do Docker, inicie o daemon e confira se ele disponibiliza ao menos 2 CPUs e 4 GB de memória; depois rode `npm run update:local` novamente.
-- Se Auth ou PostgREST não ficarem saudáveis, confira `docker ps` e os logs dos serviços com `docker logs <nome-do-container>`. O fluxo para antes de aplicar migrations.
-- Se uma migration falhar, leia a mensagem do Postgres/Supabase e corrija a migration antes de tentar de novo. O build e o healthcheck final não são executados após essa falha; não use `db reset` para contorná-la.
+- Se Auth ou PostgREST não ficarem saudáveis, confira `docker ps` e os logs dos serviços com `docker logs <nome-do-container>`. O fluxo para antes do build. Se o stack estava parado, a CLI pode ter aplicado migrations durante `supabase start` antes desse healthcheck.
+- Se uma migration falhar durante `supabase start` ou `migration up`, leia a mensagem do Postgres/Supabase e corrija a migration antes de tentar de novo. O fluxo interrompe antes do build e do healthcheck final; não use `db reset` para contornar a falha.
 - Se o build ou o healthcheck final falhar, corrija o erro indicado e rode novamente. Migrations já aplicadas não são reaplicadas, e o comando não apaga nem recria os volumes.
 
 Há também um teste reproduzível contra o Supabase Local. Com o stack local ativo, execute:

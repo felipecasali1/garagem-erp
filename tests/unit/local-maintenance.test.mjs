@@ -213,6 +213,47 @@ test("Docker indisponível interrompe a atualização antes de iniciar o Supabas
   assert.ok(!calls.some((call) => call.includes("supabase:start")));
 });
 
+test("falha ao iniciar Supabase interrompe o fluxo antes do healthcheck e do build", async () => {
+  const calls = [];
+  let fetchCalled = false;
+  const runCommand = (command, args) => {
+    calls.push([command, ...args]);
+    if (command === "git" && args.includes("rev-parse")) {
+      return { status: 0, stdout: "abc1234\n", stderr: "" };
+    }
+    if (command === "git" && args.includes("--porcelain")) {
+      return { status: 0, stdout: "", stderr: "" };
+    }
+    if (command === "docker" && args[0] === "info") {
+      return {
+        status: 0,
+        stdout: JSON.stringify({ NCPU: 4, MemTotal: 8 * 1024 ** 3 }),
+        stderr: "",
+      };
+    }
+    if (command === "npm" && args.includes("supabase:start")) {
+      return { status: 1, stdout: "", stderr: "migration failed during startup" };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+
+  await assert.rejects(
+    runLocalUpdate({
+      environment,
+      runCommand,
+      fetchImpl: async (url) => {
+        fetchCalled = true;
+        return healthyFetch(url);
+      },
+    }),
+    /Não foi possível iniciar o Supabase Local/,
+  );
+
+  assert.equal(fetchCalled, false);
+  assert.ok(!calls.some((call) => call.includes("build")));
+  assert.ok(!calls.some((call) => call.includes("migration") && call.includes("up")));
+});
+
 test("falha ao aplicar migrations impede build e healthcheck do runtime", async () => {
   const calls = [];
   let appStarted = false;
