@@ -273,7 +273,7 @@ function readSupabaseStatus() {
   return values;
 }
 
-function parseMigrationStatus(output) {
+export function parseMigrationStatus(output) {
   for (const line of output.split(/\r?\n/)) {
     try {
       const parsed = JSON.parse(line);
@@ -284,6 +284,12 @@ function parseMigrationStatus(output) {
   }
 
   throw new Error("A CLI do Supabase não retornou um histórico de migrations legível.");
+}
+
+export function getExpectedMigrations() {
+  return readdirSync(resolve(projectRoot, "supabase", "migrations"))
+    .map((filename) => /^(\d{14})_.*\.sql$/.exec(filename)?.[1])
+    .filter(Boolean);
 }
 
 export function validateAppliedMigrations(status, expectedMigrations) {
@@ -326,9 +332,7 @@ function verifyMigrations() {
   );
 
   const status = parseMigrationStatus(result.stdout);
-  const expected = readdirSync(resolve(projectRoot, "supabase", "migrations"))
-    .map((filename) => /^(\d{14})_.*\.sql$/.exec(filename)?.[1])
-    .filter(Boolean);
+  const expected = getExpectedMigrations();
   const validation = validateAppliedMigrations(status, expected);
   console.log(`Migrations verificadas (${validation.applied}).`);
 }

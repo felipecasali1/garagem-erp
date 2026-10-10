@@ -92,6 +92,32 @@ Ao terminar, acesse `http://127.0.0.1:3000/login`. O próprio comando mostra o e
 
 Esse fluxo usa a Supabase CLI para o stack local de desenvolvimento. Por isso, ele não cria um `docker-compose.yml` de produção e não deve ser exposto à internet. A configuração Docker Compose endurecida para uma VPS pertence à segunda fase do plano de implantação.
 
+### Atualizar e verificar o ambiente local
+
+O comando de atualização atua sobre a versão do código que já está nesta cópia do repositório; ele não executa `git pull` nem conecta ao Supabase Cloud. Depois de obter a versão desejada pelo Git — e executar `npm ci` se as dependências mudaram — rode:
+
+```bash
+npm run update:local
+```
+
+O comando identifica o commit atual, inicia o Supabase Local se necessário, aplica apenas migrations pendentes, confirma que todas as migrations do repositório estão aplicadas, gera o build e inicia temporariamente a aplicação em uma porta local para verificar `/login`, Auth e PostgREST. Ao final, encerra apenas esse processo temporário: não reseta nem para o banco e não remove volumes.
+
+Para verificar separadamente um ambiente já em execução, use:
+
+```bash
+npm run healthcheck:local
+```
+
+Esse comando verifica a aplicação na porta configurada em `PORT`, Auth, PostgREST e o histórico de migrations. Ele falha com uma mensagem de diagnóstico se algum componente estiver indisponível ou se houver migrations pendentes.
+
+Há também um teste reproduzível contra o Supabase Local. Com o stack local ativo, execute:
+
+```bash
+npm run test:local-update
+```
+
+O teste cria um registro fictício temporário, roda `update:local`, confirma que o registro continua no banco e o remove. Não executa `db reset`, não apaga os dados locais e não acessa um projeto remoto. No estado atual, sem migrations novas, a etapa de aplicação de migrations não altera o schema; ela só garante que versões futuras apliquem as que estiverem pendentes.
+
 ## Ambiente
 
 Copie o arquivo de exemplo de variáveis de ambiente:
