@@ -216,12 +216,12 @@ export async function runLocalUpdate(options = {}) {
   assertSuccessfulCommand(versionResult, "Não foi possível identificar a versão local do código");
   const commit = versionResult.stdout.trim();
   if (!commit) throw new Error("O Git não informou a versão atual do código.");
-  const changesResult = execute("git", ["status", "--porcelain", "--untracked-files=all"], {
+  const changesResult = execute("git", ["status", "--porcelain", "--untracked-files=all", "-z"], {
     stdio: "pipe",
   });
   assertSuccessfulCommand(changesResult, "Não foi possível verificar alterações locais do código");
   const uncommittedCode = (changesResult.stdout ?? "")
-    .split(/\r?\n/)
+    .split("\0")
     .filter(Boolean)
     .filter((entry) => !entry.slice(3).startsWith("supabase/snippets/"));
   if (uncommittedCode.length > 0) {

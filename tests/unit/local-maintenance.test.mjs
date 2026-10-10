@@ -128,7 +128,11 @@ test("atualização aplica migrations locais, gera build e valida o runtime resu
       return { status: 0, stdout: "abc1234\n", stderr: "" };
     }
     if (command === "git" && args.includes("--porcelain")) {
-      return { status: 0, stdout: "?? supabase/snippets/local-test.sql\n", stderr: "" };
+      return {
+        status: 0,
+        stdout: "?? supabase/snippets/Untitled query 246.sql\0",
+        stderr: "",
+      };
     }
     if (args.includes("list")) return { status: 0, stdout: migrationOutput, stderr: "" };
     return { status: 0, stdout: "", stderr: "" };
@@ -169,7 +173,7 @@ test("atualização recusa código não commitado para manter uma versão identi
       return { status: 0, stdout: "abc1234\n", stderr: "" };
     }
     if (command === "git" && args.includes("--porcelain")) {
-      return { status: 0, stdout: " M src/routes/index.tsx\n", stderr: "" };
+      return { status: 0, stdout: " M src/routes/index.tsx\0", stderr: "" };
     }
     return { status: 0, stdout: "", stderr: "" };
   };
