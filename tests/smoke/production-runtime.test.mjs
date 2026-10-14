@@ -17,7 +17,10 @@ test("accepts Node.js 22.12 and newer, and rejects earlier versions", () => {
 });
 
 test("reports the required Supabase server variables before startup", () => {
-  assert.throws(() => assertRuntimeConfiguration({}), /SUPABASE_URL and SUPABASE_SERVICE_KEY/);
+  assert.throws(
+    () => assertRuntimeConfiguration({}),
+    /SUPABASE_URL, SUPABASE_SERVICE_KEY, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY/,
+  );
 });
 
 test("production server renders a route and serves its built client assets", async (t) => {
@@ -43,6 +46,32 @@ test("production server renders a route and serves its built client assets", asy
   const scriptResponse = await server.fetch(new Request(new URL(assetPath, baseUrl)));
   assert.equal(scriptResponse.status, 200);
   assert.match(scriptResponse.headers.get("content-type") ?? "", /javascript/i);
+});
+
+test("production HTML provides Supabase browser settings from the runtime environment", async (t) => {
+  const server = await startProductionServer({
+    hostname: "127.0.0.1",
+    port: 0,
+    silent: true,
+    manual: true,
+  });
+  t.after(() => server.close());
+
+  const response = await server.fetch(new Request("http://garagem-erp.test/login"));
+  assert.equal(response.status, 200);
+
+  const html = await response.text();
+  const runtimeConfigIndex = html.indexOf("window.__GARAGEM_ERP_CONFIG__");
+  const appScriptIndex = html.indexOf('<script type="module"');
+
+  assert.notEqual(runtimeConfigIndex, -1, "The page should expose its public runtime config.");
+  assert.ok(
+    appScriptIndex === -1 || runtimeConfigIndex < appScriptIndex,
+    "The runtime config must execute before the application module.",
+  );
+  assert.ok(html.includes(process.env.VITE_SUPABASE_URL));
+  assert.ok(html.includes(process.env.VITE_SUPABASE_ANON_KEY));
+  assert.ok(!html.includes(process.env.SUPABASE_SERVICE_KEY));
 });
 
 test("production Node server accepts an HTTP request", async (t) => {
