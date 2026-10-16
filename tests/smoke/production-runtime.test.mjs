@@ -19,7 +19,20 @@ test("accepts Node.js 22.12 and newer, and rejects earlier versions", () => {
 test("reports the required Supabase server variables before startup", () => {
   assert.throws(
     () => assertRuntimeConfiguration({}),
-    /SUPABASE_URL, SUPABASE_SERVICE_KEY, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY/,
+    /SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_PUBLISHABLE_KEY, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY/,
+  );
+});
+
+test("requires a server publishable key instead of falling back to the browser key", () => {
+  assert.throws(
+    () =>
+      assertRuntimeConfiguration({
+        SUPABASE_URL: "https://supabase.example.test",
+        SUPABASE_SERVICE_KEY: "server-only",
+        VITE_SUPABASE_URL: "https://supabase.example.test",
+        VITE_SUPABASE_ANON_KEY: "browser-public",
+      }),
+    /SUPABASE_PUBLISHABLE_KEY/,
   );
 });
 

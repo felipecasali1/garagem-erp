@@ -10,6 +10,7 @@ export function assertRuntimeConfiguration(env = process.env) {
   const missing = [];
   if (!env.SUPABASE_URL?.trim()) missing.push("SUPABASE_URL");
   if (!env.SUPABASE_SERVICE_KEY?.trim()) missing.push("SUPABASE_SERVICE_KEY");
+  if (!env.SUPABASE_PUBLISHABLE_KEY?.trim()) missing.push("SUPABASE_PUBLISHABLE_KEY");
   if (!env.VITE_SUPABASE_URL?.trim()) missing.push("VITE_SUPABASE_URL");
   if (!env.VITE_SUPABASE_ANON_KEY?.trim()) missing.push("VITE_SUPABASE_ANON_KEY");
 
