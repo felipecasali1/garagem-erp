@@ -349,7 +349,7 @@ Para conferir a inicialização real pelo comando npm, execute `npm start` e abr
 
 As variáveis públicas do Supabase devem estar disponíveis no build. `SUPABASE_URL` e `SUPABASE_SERVICE_KEY` devem estar disponíveis no processo Node em execução; a chave de serviço é sempre exclusiva do servidor.
 
-O smoke test automatizado pode ser executado com `npm run smoke:production`. A distribuição em Docker com o Supabase self-hosted será tratada nos tickets seguintes; VPS, domínio e HTTPS continuam fora desta fase.
+O smoke test automatizado pode ser executado com `npm run smoke:production`. Para iniciar a distribuição local em Docker com Supabase self-hosted, use `npm run selfhosted:up`; veja [`docs/selfhosted-compose.md`](docs/selfhosted-compose.md). A implantação em VPS, domínio e HTTPS continua fora desta fase.
 
 ## Variáveis de Ambiente e Segurança
 
