@@ -19,18 +19,29 @@ Para executar o GaragemERP localmente, você precisa de:
 
 - Node.js 22.12.0 ou superior (a versão mínima também está em `.nvmrc`)
 - npm
-- Para o caminho principal, Docker Desktop ou outro runtime compatível com a API do Docker. Se optar pelo Supabase Cloud, Docker não é necessário.
-- Um projeto Supabase, que pode ser:
-  - **Supabase Local self-hosted** — caminho principal, executado localmente pela Supabase CLI e Docker
-  - **Supabase Cloud (remoto)** — alternativa opcional
+- Um projeto Supabase Cloud configurado no `.env` — caminho padrão para desenvolver
+- Docker apenas se quiser executar o Supabase Local via CLI ou o pacote self-hosted via Compose
 
-> Docker é necessário para usar o Supabase Local, mas não para executar a aplicação apontada para um projeto Cloud.
+> No desenvolvimento normal, `npm run dev` usa o Supabase Cloud do `.env`. Não é necessário iniciar Docker nem o Supabase Local.
 
 ## Configuração do Supabase
 
-O caminho recomendado para uma instalação reproduzível é o **Supabase Local self-hosted**. O Supabase Cloud continua disponível como alternativa.
+### Supabase Cloud (padrão para desenvolvimento)
 
-### Supabase Local self-hosted (principal)
+Crie ou use seu projeto no [Supabase](https://supabase.com/) e configure as credenciais do painel no `.env` (copie `.env.example` se ainda não tiver esse arquivo). As migrations podem ser aplicadas pelo fluxo de banco de dados escolhido para o projeto.
+
+Instale as dependências e inicie a aplicação:
+
+```bash
+npm ci
+npm run dev
+```
+
+Esse fluxo usa o Supabase Cloud configurado no `.env` e não requer Docker.
+
+### Supabase Local via CLI (opcional)
+
+O Supabase Local é uma opção separada para testes e validação local. Ele é executado pela Supabase CLI e Docker; não é necessário para o desenvolvimento diário com o Cloud e ainda não é o Compose de implantação.
 
 Instale as dependências e inicie o ambiente:
 
@@ -49,7 +60,7 @@ Obtenha as URLs e chaves locais:
 npm run supabase:env
 ```
 
-Esse comando mostra as URLs e chaves geradas pela CLI. Para configurar manualmente o `.env` atual, use `API_URL` em `VITE_SUPABASE_URL` e `SUPABASE_URL`, `ANON_KEY` em `VITE_SUPABASE_ANON_KEY`, `PUBLISHABLE_KEY` em `SUPABASE_PUBLISHABLE_KEY` e `SERVICE_ROLE_KEY` em `SUPABASE_SERVICE_KEY`. Não versione `.env` nem compartilhe a saída do comando: `SERVICE_ROLE_KEY`/`SECRET_KEY` são privilegiadas e devem ficar apenas no servidor.
+Esse comando mostra as URLs e chaves geradas pela CLI. O setup local salva esses valores em `.env.local`; não copie as chaves locais para o `.env` do Cloud. Não versione nem compartilhe a saída do comando: `SERVICE_ROLE_KEY`/`SECRET_KEY` são privilegiadas e devem ficar apenas no servidor.
 
 O ambiente publica portas somente em `127.0.0.1`; o comando de inicialização cria e verifica uma rede Docker com esse binding. Não exponha essa instância à rede pública.
 
@@ -70,15 +81,23 @@ Esse teste cria dados temporários dentro de uma transação e os reverte ao ter
 
 > **Reset destrutivo:** `npx supabase db reset --local` apaga os dados do banco local e reaplica as migrations. Não faz parte do fluxo normal de inicialização.
 
-### Supabase Cloud (alternativa opcional)
-
-Crie um projeto no [Supabase](https://supabase.com/) e use as credenciais fornecidas pelo painel. As migrations podem ser aplicadas pelo fluxo de deploy de banco de dados escolhido para o projeto.
-
-O stack local e o projeto Cloud são ambientes separados: iniciar o Supabase Local não altera os valores de conexão da aplicação. No fluxo manual, a aplicação usa as variáveis do `.env`; o setup integrado grava a seleção local em `.env.local`. Escolha as credenciais do ambiente desejado sem versionar esses arquivos.
+O stack local e o projeto Cloud são ambientes separados. `npm run dev` carrega `.env` explicitamente, então o `.env.local` criado pelo setup local não troca silenciosamente o destino do desenvolvimento normal. Para apontar a aplicação ao Supabase Local, use `npm run dev:local`, que carrega `.env.local` explicitamente. Os dois arquivos são ignorados pelo Git; não versione nem compartilhe suas credenciais.
 
 No modo de desenvolvimento, reinicie `npm run dev` depois de alterar essas variáveis. Em produção, `VITE_*` é incorporado ao bundle, portanto é necessário executar um novo build para trocar o destino.
 
-### Setup integrado local
+### Supabase self-hosted via Docker Compose
+
+Para iniciar a aplicação e o Supabase self-hosted sem instalar a Supabase CLI no host:
+
+```bash
+npm run selfhosted:up
+```
+
+O comando gera `.env.compose` separadamente, aplica as migrations versionadas e inicia o stack. A aplicação fica em `http://127.0.0.1:3101/login` e o Supabase Studio em `http://127.0.0.1:8000`. Use `npm run selfhosted:healthcheck` para verificar o ambiente e `npm run selfhosted:down` para parar os containers preservando o banco. Detalhes e diagnóstico estão em [`docs/selfhosted-compose.md`](docs/selfhosted-compose.md).
+
+Esse fluxo não lê o `.env` Cloud nem `.env.docker`; `npm run dev` permanece apontado ao Cloud. O Compose publica apenas portas de loopback e não expõe a porta do Postgres no host. Storage/fotos, Realtime e Edge Functions não fazem parte do stack inicial.
+
+### Supabase Local via CLI (opcional)
 
 Para preparar o Supabase Local e a aplicação em um único fluxo, execute:
 
@@ -90,7 +109,7 @@ Esse comando valida Node.js, Docker, o daemon Docker e os recursos mínimos de C
 
 Ao terminar, acesse `http://127.0.0.1:3000/login`. O próprio comando mostra o endereço do Supabase Studio e os passos para criar o primeiro usuário Auth e vinculá-lo ao `User` interno. `Ctrl+C` encerra apenas a aplicação e preserva os dados nos volumes Docker; use `npm run supabase:stop` quando quiser parar o Supabase.
 
-Esse fluxo usa a Supabase CLI para o stack local de desenvolvimento. Por isso, ele não cria um `docker-compose.yml` de produção e não deve ser exposto à internet. A configuração Docker Compose endurecida para uma VPS pertence à segunda fase do plano de implantação.
+Esse fluxo usa a Supabase CLI para testes e desenvolvimento local. Ele é independente do Docker Compose de distribuição local e não deve ser exposto à internet. A implantação em VPS, incluindo proxy e HTTPS, continua sendo uma fase posterior.
 
 ### Atualizar e verificar o ambiente local
 
@@ -173,7 +192,7 @@ A chave pública/anon pode ser utilizada no código do cliente conforme o modelo
 
 ## Setup Local
 
-Depois de configurar o Supabase, remoto ou local, instale as dependências usando o fluxo npm do projeto:
+Depois de configurar o Supabase Cloud no `.env`, instale as dependências usando o fluxo npm do projeto:
 
 ```bash
 npm ci
@@ -185,7 +204,7 @@ Inicie o servidor de desenvolvimento:
 npm run dev
 ```
 
-Se o `setup:local` já tiver sido executado, o Vite encontra as variáveis locais em `.env.local` automaticamente. Para desenvolver com hot reload, mantenha o Supabase ativo e use `npm run dev` em vez do servidor de produção iniciado pelo setup integrado.
+`npm run dev` usa as credenciais do Supabase Cloud em `.env`, mesmo que exista um `.env.local` com credenciais locais. Se quiser desenvolver contra o Supabase Local, inicie-o com `npm run supabase:start` e use `npm run dev:local`.
 
 A aplicação estará disponível no endereço informado pelo servidor de desenvolvimento.
 
@@ -224,9 +243,9 @@ As migrations do banco de dados ficam em:
 supabase/migrations
 ```
 
-O projeto pode utilizar tanto um banco Supabase remoto quanto uma instância Supabase Local.
+O projeto pode usar o Supabase Cloud para desenvolvimento normal, o Supabase Local via CLI para testes, ou o pacote Docker Compose para uma instalação self-hosted independente.
 
-No Supabase Local, as migrations são aplicadas pela CLI ao iniciar o stack. Use `npm run supabase:test` para verificar a autorização/RLS localmente. Não execute `db reset` como etapa de setup: esse comando é destrutivo.
+No Supabase Local via CLI, as migrations são aplicadas pela CLI ao iniciar o stack. O Compose usa um serviço próprio para aplicar migrations versionadas sem a CLI no host. Use `npm run supabase:test` para verificar a autorização/RLS no stack da CLI. Não execute `db reset` como etapa de setup: esse comando é destrutivo.
 
 ## Primeiro Usuário Interno
 
@@ -298,9 +317,9 @@ supabase/migrations
 
 ## Desenvolvimento
 
-O GaragemERP pode ser desenvolvido utilizando uma das seguintes configurações:
+O desenvolvimento normal usa o Supabase Cloud. O Supabase Local via CLI é uma opção para testes:
 
-### Supabase Cloud (alternativa)
+### Supabase Cloud (padrão)
 
 ```text
 Node.js
@@ -311,9 +330,9 @@ Node.js
       Supabase Cloud
 ```
 
-É uma alternativa quando for necessário desenvolver conectado a um projeto remoto. O caminho principal do projeto é o Supabase Local.
+`npm run dev` conecta ao projeto remoto configurado em `.env`.
 
-### Supabase Local self-hosted (principal)
+### Supabase Local via CLI (opcional)
 
 ```text
 Node.js
@@ -330,7 +349,7 @@ Node.js
     Supabase Local
 ```
 
-Nesta configuração, o Docker é utilizado para executar os serviços locais do Supabase.
+Nesta configuração, o Docker é utilizado para executar os serviços locais do Supabase. Use `npm run dev:local` para conectar a aplicação a esse stack.
 
 ## Build e execução de produção
 
