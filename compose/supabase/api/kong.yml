@@ -51,6 +51,7 @@ services:
             - Content-Type
             - apikey
             - X-Client-Info
+            - X-Supabase-Api-Version
             - X-Requested-With
             - Prefer
             - Range
@@ -106,6 +107,7 @@ services:
             - Content-Type
             - apikey
             - X-Client-Info
+            - X-Supabase-Api-Version
             - X-Requested-With
             - Prefer
             - Range

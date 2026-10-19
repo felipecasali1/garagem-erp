@@ -2,6 +2,7 @@
 set -eu
 
 : "${DATABASE_URL:?DATABASE_URL is required for the migration runner}"
+MIGRATIONS_DIR=${MIGRATIONS_DIR:-/migrations}
 
 psql -X "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE SCHEMA IF NOT EXISTS supabase_migrations;
@@ -13,7 +14,7 @@ CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
 SQL
 
 found_migrations=false
-for migration in /migrations/*.sql; do
+for migration in "$MIGRATIONS_DIR"/*.sql; do
   [ -f "$migration" ] || continue
   found_migrations=true
 

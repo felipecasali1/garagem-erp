@@ -6,7 +6,8 @@
   "scripts": {
     "preinstall": "node scripts/check-node-version.mjs",
     "prestart": "node scripts/check-node-version.mjs",
-    "dev": "vite dev",
+    "dev": "node --env-file=.env ./node_modules/vite/bin/vite.js dev",
+    "dev:local": "node --env-file=.env.local ./node_modules/vite/bin/vite.js dev",
     "build": "node --env-file-if-exists=.env scripts/check-build-env.mjs && vite build",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
@@ -27,9 +28,9 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
-    "test:unit": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js tests/unit/local-setup.test.mjs tests/unit/local-maintenance.test.mjs",
+    "test:unit": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js tests/unit/local-setup.test.mjs tests/unit/local-maintenance.test.mjs tests/unit/selfhosted-compose.test.mjs",
     "test:integration": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/integration/*.test.js",
-    "test": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js tests/unit/local-setup.test.mjs tests/unit/local-maintenance.test.mjs .test-dist/tests/integration/*.test.js"
+    "test": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js tests/unit/local-setup.test.mjs tests/unit/local-maintenance.test.mjs tests/unit/selfhosted-compose.test.mjs .test-dist/tests/integration/*.test.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
