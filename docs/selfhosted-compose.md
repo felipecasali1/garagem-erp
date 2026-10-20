@@ -1,6 +1,6 @@
 # Instalação local via Docker Compose
 
-Este fluxo sobe a aplicação e um Supabase self-hosted para uso local, sem depender da Supabase CLI no host. Ele não substitui o fluxo normal de desenvolvimento: `npm run dev` continua carregando o Supabase Cloud do `.env`; `npm run selfhosted:up` usa exclusivamente o arquivo local `.env.compose`.
+Este fluxo sobe a aplicação e um Supabase self-hosted para uso local pelo Docker Compose. Ele não substitui o fluxo normal de desenvolvimento: `npm run dev` continua carregando o Supabase Cloud do `.env`; `npm run selfhosted:up` usa exclusivamente o arquivo local `.env.compose`.
 
 ## Pré-requisitos
 
