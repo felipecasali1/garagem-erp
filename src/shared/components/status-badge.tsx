@@ -9,36 +9,36 @@ import type {
 } from "@/shared/types/domain";
 
 const vehicleMap: Record<VehicleStatus, { label: string; cls: string }> = {
-  evaluating: { label: "Em avaliação", cls: "bg-purple-500/15 text-purple-500 border-purple-500/30" },
-  available: { label: "Disponível", cls: "bg-success/15 text-success border-success/30" },
-  reserved: { label: "Reservado", cls: "bg-warning/15 text-warning border-warning/30" },
-  sold: { label: "Vendido", cls: "bg-info/15 text-info border-info/30" },
-  in_repair: { label: "Em preparação", cls: "bg-orange-500/15 text-orange-500 border-orange-500/30" },
-  archived: { label: "Arquivado", cls: "bg-muted text-muted-foreground border-border" },
+  evaluating: { label: "Em avaliação", cls: "bg-chart-5/15 text-chart-5" },
+  in_repair: { label: "Em preparação", cls: "bg-chart-3/15 text-chart-3" },
+  available: { label: "Disponível", cls: "bg-chart-1/15 text-chart-1" },
+  reserved: { label: "Reservado", cls: "bg-chart-4/15 text-chart-4" },
+  sold: { label: "Vendido", cls: "bg-chart-2/15 text-chart-2" },
+  archived: { label: "Arquivado", cls: "bg-muted text-muted-foreground" },
 };
 
 const saleMap: Record<SaleStatus, { label: string; cls: string }> = {
-  pending: { label: "Pendente", cls: "bg-warning/15 text-warning border-warning/30" },
-  completed: { label: "Concluída", cls: "bg-success/15 text-success border-success/30" },
-  canceled: { label: "Cancelada", cls: "bg-destructive/15 text-destructive border-destructive/30" },
+  pending: { label: "Pendente", cls: "bg-warning/15 text-warning" },
+  completed: { label: "Concluída", cls: "bg-success/15 text-success" },
+  canceled: { label: "Cancelada", cls: "bg-destructive/15 text-destructive" },
 };
 
 const txMap: Record<TransactionStatus, { label: string; cls: string }> = {
-  pending: { label: "Pendente", cls: "bg-warning/15 text-warning border-warning/30" },
-  paid: { label: "Pago", cls: "bg-success/15 text-success border-success/30" },
-  overdue: { label: "Vencido", cls: "bg-destructive/15 text-destructive border-destructive/30" },
-  canceled: { label: "Cancelado", cls: "bg-muted text-muted-foreground border-border" },
+  pending: { label: "Pendente", cls: "bg-warning/15 text-warning" },
+  paid: { label: "Pago", cls: "bg-success/15 text-success" },
+  overdue: { label: "Vencido", cls: "bg-destructive/15 text-destructive" },
+  canceled: { label: "Cancelado", cls: "bg-muted text-muted-foreground" },
 };
 
 const purchaseMap: Record<PurchaseStatus, { label: string; cls: string }> = {
-  pending: { label: "Pendente", cls: "bg-warning/15 text-warning border-warning/30" },
-  completed: { label: "Concluída", cls: "bg-success/15 text-success border-success/30" },
-  canceled: { label: "Cancelada", cls: "bg-destructive/15 text-destructive border-destructive/30" },
+  pending: { label: "Pendente", cls: "bg-warning/15 text-warning" },
+  completed: { label: "Concluída", cls: "bg-success/15 text-success" },
+  canceled: { label: "Cancelada", cls: "bg-destructive/15 text-destructive" },
 };
 
 const commissionMap: Record<CommissionStatus, { label: string; cls: string }> = {
-  pending: { label: "Pendente", cls: "bg-warning/15 text-warning border-warning/30" },
-  paid: { label: "Pago", cls: "bg-success/15 text-success border-success/30" },
+  pending: { label: "Pendente", cls: "bg-warning/15 text-warning" },
+  paid: { label: "Pago", cls: "bg-success/15 text-success" },
 };
 
 export function StatusBadge({
@@ -63,7 +63,10 @@ export function StatusBadge({
     cls: "bg-muted text-muted-foreground",
   };
   return (
-    <Badge variant="outline" className={cn("font-medium border", entry.cls)}>
+    <Badge
+      variant="outline"
+      className={cn("font-medium border-0", kind === "vehicle" && "rounded-sm", entry.cls)}
+    >
       {entry.label}
     </Badge>
   );

@@ -101,8 +101,10 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" className="border-sidebar-border">
       <SidebarHeader className="border-b border-sidebar-border">
-        <div className="flex items-center gap-2 px-2 py-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground font-display font-bold">
+        <div
+          className={`flex items-center py-2 ${collapsed ? "justify-center px-0" : "gap-2 px-2"}`}
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground font-display font-bold">
             G
           </div>
           {!collapsed && (
@@ -135,7 +137,7 @@ export function AppSidebar() {
                     <SidebarMenuItem key={item.url}>
                       <SidebarMenuButton asChild isActive={active} tooltip={item.title}>
                         <Link to={item.url}>
-                          <item.icon className="h-4 w-4" />
+                          <item.icon className="h-[18px] w-[18px]" />
                           <span>{item.title}</span>
                         </Link>
                       </SidebarMenuButton>
@@ -149,7 +151,9 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border">
-        <div className="flex items-center gap-2 px-2 py-2">
+        <div
+          className={`flex items-center py-2 ${collapsed ? "justify-center px-0" : "gap-2 px-2"}`}
+        >
           <Avatar className="h-8 w-8">
             <AvatarFallback className="bg-primary text-primary-foreground text-xs">
               {initials(displayName).slice(0, 2) || "GE"}

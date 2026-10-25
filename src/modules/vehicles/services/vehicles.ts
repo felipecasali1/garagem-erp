@@ -45,9 +45,9 @@ export type VehicleStatusCounts = Record<Vehicle["status"], number>;
 
 export const vehicleStatuses: Vehicle["status"][] = [
   "evaluating",
+  "in_repair",
   "available",
   "reserved",
-  "in_repair",
   "sold",
   "archived",
 ];

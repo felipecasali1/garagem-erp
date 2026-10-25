@@ -211,21 +211,18 @@ function ReceivablesPage() {
         <KpiCard
           label="Vencidas"
           value={isSummaryLoading ? "..." : brl(summary?.overdueAmount ?? 0)}
-          accent="text-destructive bg-destructive/10"
           icon={AlertCircle}
           sub={`${summary?.overdueCount ?? 0} contas`}
         />
         <KpiCard
           label="A Receber"
           value={isSummaryLoading ? "..." : brl(summary?.pendingAmount ?? 0)}
-          accent="text-warning bg-warning/10"
           icon={Clock}
           sub={`${summary?.pendingCount ?? 0} contas`}
         />
         <KpiCard
           label="Recebidas"
           value={isSummaryLoading ? "..." : brl(summary?.paidAmount ?? 0)}
-          accent="text-success bg-success/10"
           icon={CheckCircle2}
           sub={`${summary?.paidCount ?? 0} contas`}
         />
@@ -525,13 +522,11 @@ function ReceivableRow({
 function KpiCard({
   label,
   value,
-  accent,
   icon: Icon,
   sub,
 }: {
   label: string;
   value: string;
-  accent: string;
   icon: typeof TrendingUp;
   sub: string;
 }) {
@@ -540,7 +535,7 @@ function KpiCard({
       <CardContent className="p-5">
         <div className="flex items-start justify-between mb-2">
           <p className="text-xs text-muted-foreground">{label}</p>
-          <div className={`h-8 w-8 rounded-full flex items-center justify-center ${accent}`}>
+          <div className="h-8 w-8 rounded-full flex items-center justify-center bg-muted text-muted-foreground">
             <Icon className="h-4 w-4" />
           </div>
         </div>

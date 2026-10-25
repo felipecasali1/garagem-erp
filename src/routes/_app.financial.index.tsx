@@ -46,12 +46,32 @@ const quickActions: {
   kind: Exclude<QuickActionKind, null>;
   label: string;
   icon: typeof Plus;
-  accent: string;
+  iconAccent: string;
 }[] = [
-  { kind: "income", label: "Registrar Receita", icon: Plus, accent: "text-success" },
-  { kind: "expense", label: "Registrar Despesa", icon: Minus, accent: "text-destructive" },
-  { kind: "fixed_cost", label: "Registrar Custo Fixo", icon: Home, accent: "text-warning" },
-  { kind: "salary", label: "Pagar Salário", icon: UserCheck, accent: "text-info" },
+  {
+    kind: "income",
+    label: "Registrar Receita",
+    icon: Plus,
+    iconAccent: "bg-success/10 text-success",
+  },
+  {
+    kind: "expense",
+    label: "Registrar Despesa",
+    icon: Minus,
+    iconAccent: "bg-destructive/10 text-destructive",
+  },
+  {
+    kind: "fixed_cost",
+    label: "Registrar Custo Fixo",
+    icon: Home,
+    iconAccent: "bg-warning/10 text-warning",
+  },
+  {
+    kind: "salary",
+    label: "Pagar Salário",
+    icon: UserCheck,
+    iconAccent: "bg-blue-600/10 text-blue-600",
+  },
 ];
 
 function monthKey(date: string) {
@@ -133,31 +153,31 @@ function FinancialPage() {
       label: "Receita Recebida",
       value: brl(paidRevenue),
       icon: TrendingUp,
-      accent: "text-success bg-success/10",
+      iconAccent: "bg-success/10 text-success",
     },
     {
       label: "Despesas Pagas",
       value: brl(paidExpenses),
       icon: TrendingDown,
-      accent: "text-destructive bg-destructive/10",
+      iconAccent: "bg-destructive/10 text-destructive",
     },
     {
       label: "Resultado do Mês",
       value: brl(paidRevenue - paidExpenses),
       icon: Banknote,
-      accent: "text-info bg-info/10",
+      iconAccent: "bg-blue-600/10 text-blue-600",
     },
     {
       label: "A Receber",
       value: brl(pendingReceivables),
       icon: ArrowUpCircle,
-      accent: "text-warning bg-warning/10",
+      iconAccent: "bg-success/10 text-success",
     },
     {
       label: "A Pagar",
       value: brl(pendingPayables),
       icon: AlertCircle,
-      accent: "text-destructive bg-destructive/10",
+      iconAccent: "bg-destructive/10 text-destructive",
     },
   ];
   const monthlySeries = buildMonthlySeries(activeTransactions);
@@ -196,7 +216,7 @@ function FinancialPage() {
                 className="flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-muted/40 hover:border-primary/30 transition-all text-left cursor-pointer"
               >
                 <div
-                  className={`h-9 w-9 rounded-full bg-muted flex items-center justify-center ${quickAction.accent}`}
+                  className={`h-9 w-9 rounded-full flex items-center justify-center ${quickAction.iconAccent}`}
                 >
                   <quickAction.icon className="h-4 w-4" />
                 </div>
@@ -223,7 +243,7 @@ function FinancialPage() {
               <div className="flex items-start justify-between mb-2">
                 <p className="text-xs text-muted-foreground">{kpi.label}</p>
                 <div
-                  className={`h-8 w-8 rounded-full flex items-center justify-center ${kpi.accent}`}
+                  className={`h-8 w-8 rounded-full flex items-center justify-center ${kpi.iconAccent}`}
                 >
                   <kpi.icon className="h-4 w-4" />
                 </div>

@@ -14,6 +14,7 @@ import {
   Settings2,
   ShoppingCart,
   AlertTriangle,
+  Car,
 } from "lucide-react";
 import { useState } from "react";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -250,8 +251,8 @@ function VehicleDetail() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 overflow-hidden">
-          <div className="aspect-[16/9] bg-gradient-to-br from-muted to-muted/40 flex items-center justify-center text-8xl opacity-20">
-            🚗
+          <div className="aspect-[16/9] bg-gradient-to-br from-muted to-muted/40 flex items-center justify-center">
+            <Car className="h-24 w-24 text-neutral-400 dark:text-neutral-600" aria-hidden="true" />
           </div>
         </Card>
         <Card>

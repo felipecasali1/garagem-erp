@@ -12,6 +12,7 @@ import {
   Search,
   MoreHorizontal,
   Pencil,
+  Car,
 } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -287,7 +288,7 @@ function VehiclesPage() {
                     <EyeOff className="h-4 w-4 text-muted-foreground" />
                   )}
                 </button>
-                <div className="text-5xl opacity-20">🚗</div>
+                <Car className="h-16 w-16 text-neutral-400 dark:text-neutral-600" aria-hidden="true" />
               </div>
               <CardContent className="p-4 space-y-3">
                 <div>

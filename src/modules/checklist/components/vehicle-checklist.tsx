@@ -185,7 +185,7 @@ export function VehicleChecklist({
                 <h3 className="font-display font-semibold">Preparação do Veículo</h3>
                 {summary.readyForSale && (
                   <Badge
-                    className="bg-success/15 text-success border-success/30 border"
+                    className="gap-1 border-0 bg-success/15 text-success"
                     variant="outline"
                   >
                     <Sparkles className="h-3 w-3" /> Pronto para venda
@@ -193,7 +193,7 @@ export function VehicleChecklist({
                 )}
                 {summary.hasUrgent && (
                   <Badge
-                    className="bg-destructive/15 text-destructive border-destructive/30 border"
+                    className="border-0 bg-destructive/15 text-destructive"
                     variant="outline"
                   >
                     Urgente
@@ -218,16 +218,24 @@ export function VehicleChecklist({
               <span className="text-muted-foreground">Progresso</span>
               <span className="font-medium">{summary.progress}%</span>
             </div>
-            <Progress value={summary.progress} className="h-2" />
+            <Progress
+              value={summary.progress}
+              className="h-2 bg-success/20"
+              indicatorClassName="bg-success"
+            />
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-2 border-t border-border">
             <Stat label="Pendentes" value={String(summary.pending)} accent="text-warning" />
-            <Stat label="Em andamento" value={String(summary.inProgress)} accent="text-info" />
+            <Stat
+              label="Em andamento"
+              value={String(summary.inProgress)}
+              accent="text-muted-foreground"
+            />
             <Stat
               label="Aguardando peças"
               value={String(summary.waitingParts)}
-              accent="text-orange-500"
+              accent="text-warning"
             />
             <Stat label="Custo estimado" value={brl(summary.estimatedCost)} />
             <Stat label="Custo real" value={brl(summary.actualCost)} accent="text-foreground" />
@@ -356,10 +364,10 @@ export function VehicleChecklist({
                         >
                           {item.title}
                         </h4>
-                        <Badge variant="outline" className={cn("border", status.cls)}>
+                        <Badge variant="outline" className={cn("border-0", status.cls)}>
                           {status.label}
                         </Badge>
-                        <Badge variant="outline" className={cn("border", priority.cls)}>
+                        <Badge variant="outline" className={cn("border-0", priority.cls)}>
                           {priority.label}
                         </Badge>
                         <span className="text-xs text-muted-foreground">

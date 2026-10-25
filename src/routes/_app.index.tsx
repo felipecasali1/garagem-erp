@@ -47,11 +47,11 @@ export const Route = createFileRoute("/_app/")({
 });
 
 const inventoryColors: Record<string, string> = {
-  evaluating: "var(--warning)",
-  available: "var(--success)",
-  reserved: "var(--warning)",
-  sold: "var(--info)",
-  in_repair: "#f97316",
+  evaluating: "var(--chart-5)",
+  in_repair: "var(--chart-3)",
+  available: "var(--chart-1)",
+  reserved: "var(--chart-4)",
+  sold: "var(--chart-2)",
 };
 
 const periods = [
@@ -188,7 +188,7 @@ function Dashboard() {
     .reduce((sum, transaction) => sum + transaction.amount, 0);
 
   const inventoryData = (
-    ["evaluating", "available", "reserved", "sold", "in_repair"] as const
+    ["evaluating", "in_repair", "available", "reserved", "sold"] as const
   ).map((status) => ({
     name:
       status === "evaluating"
@@ -251,6 +251,12 @@ function Dashboard() {
       time: `${sale.sale_date}T12:00:00`,
       href: `/sales/${sale.id}`,
       icon: ShoppingBag,
+      iconAccent:
+        sale.status === "completed"
+          ? "bg-success/10 text-success"
+          : sale.status === "pending"
+            ? "bg-warning/10 text-warning"
+            : "bg-destructive/10 text-destructive",
     }));
     const financialActivity = visibleTransactions.map((transaction) => ({
       id: `transaction-${transaction.id}`,
@@ -258,6 +264,10 @@ function Dashboard() {
       time: `${transaction.transaction_date}T12:00:00`,
       href: `/financial/transactions/${transaction.id}`,
       icon: transaction.type === "income" ? TrendingUp : Wallet,
+      iconAccent:
+        transaction.type === "income"
+          ? "bg-success/10 text-success"
+          : "bg-destructive/10 text-destructive",
     }));
 
     return [...salesActivity, ...financialActivity]
@@ -285,8 +295,9 @@ function Dashboard() {
       sub: "Estoque pronto para venda",
       delta: `${filteredVehicles.filter((vehicle) => vehicle.status === "evaluating").length} em avaliação`,
       deltaType: "up" as const,
+      iconAccent: "bg-success/10 text-success",
+      deltaAccent: "text-success",
       icon: Car,
-      accent: "text-info bg-info/10",
     },
     {
       label: "Vendas no mês",
@@ -294,8 +305,9 @@ function Dashboard() {
       sub: brl(currentMonthRevenue),
       delta: `${visibleSales.filter((sale) => sale.status === "pending").length} pendente(s)`,
       deltaType: "up" as const,
+      iconAccent: "bg-blue-600/10 text-blue-600",
+      deltaAccent: "text-blue-600",
       icon: ShoppingBag,
-      accent: "text-success bg-success/10",
     },
     {
       label: "Receita recebida",
@@ -303,8 +315,9 @@ function Dashboard() {
       sub: `Pagamentos confirmados em ${currentMonthLabel}`,
       delta: `${visibleTransactions.filter((transaction) => transaction.type === "income" && transaction.status === "pending").length} a receber`,
       deltaType: "up" as const,
+      iconAccent: "bg-success/10 text-success",
+      deltaAccent: "text-success",
       icon: DollarSign,
-      accent: "text-success bg-success/10",
     },
     {
       label: "Despesas pagas",
@@ -312,8 +325,9 @@ function Dashboard() {
       sub: `Saídas confirmadas em ${currentMonthLabel}`,
       delta: `${visibleTransactions.filter((transaction) => transaction.type === "expense" && transaction.status === "pending").length} a pagar`,
       deltaType: "down" as const,
+      iconAccent: "bg-destructive/10 text-destructive",
+      deltaAccent: "text-destructive",
       icon: TrendingDown,
-      accent: "text-destructive bg-destructive/10",
     },
     {
       label: "Resultado do mês",
@@ -321,8 +335,9 @@ function Dashboard() {
       sub: "Entradas pagas menos saídas pagas",
       delta: `${visibleTransactions.filter((transaction) => transaction.status === "overdue").length} vencida(s)`,
       deltaType: "up" as const,
+      iconAccent: "bg-blue-600/10 text-blue-600",
+      deltaAccent: "text-blue-600",
       icon: TrendingUp,
-      accent: "text-warning bg-warning/10",
     },
   ];
 
@@ -342,25 +357,25 @@ function Dashboard() {
         {stats.map((stat) => (
           <Card key={stat.label} className="overflow-hidden">
             <CardContent className="p-5">
-              <div className="flex items-start justify-between">
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">{stat.label}</p>
-                  <p className="text-2xl font-display font-semibold tracking-tight">
-                    {loading ? "..." : stat.value}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{stat.sub}</p>
-                </div>
-                <div className={`h-10 w-10 rounded-full flex items-center justify-center ${stat.accent}`}>
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm text-muted-foreground">{stat.label}</p>
+                <div
+                  className={`h-10 w-10 shrink-0 rounded-full flex items-center justify-center ${stat.iconAccent}`}
+                >
                   <stat.icon className="h-5 w-5" />
                 </div>
               </div>
+              <p className="text-2xl font-display font-semibold tracking-tight">
+                {loading ? "..." : stat.value}
+              </p>
+              <p className="text-xs text-muted-foreground">{stat.sub}</p>
               <div className="flex items-center gap-1 mt-3 text-xs">
                 {stat.deltaType === "up" ? (
-                  <ArrowUpRight className="h-3.5 w-3.5 text-success" />
+                  <ArrowUpRight className={`h-3.5 w-3.5 ${stat.deltaAccent}`} />
                 ) : (
-                  <ArrowDownRight className="h-3.5 w-3.5 text-destructive" />
+                  <ArrowDownRight className={`h-3.5 w-3.5 ${stat.deltaAccent}`} />
                 )}
-                <span className={stat.deltaType === "up" ? "text-success" : "text-destructive"}>
+                <span className="text-muted-foreground">
                   {loading ? "..." : stat.delta}
                 </span>
               </div>
@@ -372,30 +387,30 @@ function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <PrepCard
           icon={Wrench}
-          accent="text-warning bg-warning/10"
           label="Veículos com pendências"
           value={loading ? "..." : prep.withPending.length}
+          iconAccent="bg-warning/10 text-warning"
           to="/vehicles"
         />
         <PrepCard
           icon={Sparkles}
-          accent="text-success bg-success/10"
           label="Prontos para venda"
           value={loading ? "..." : prep.ready.length}
+          iconAccent="bg-success/10 text-success"
           to="/vehicles"
         />
         <PrepCard
           icon={CheckCircle2}
-          accent="text-info bg-info/10"
           label="Em preparação"
           value={loading ? "..." : prep.inMaintenance.length}
+          iconAccent="bg-blue-600/10 text-blue-600"
           to="/vehicles"
         />
         <PrepCard
           icon={Wallet}
-          accent="text-orange-500 bg-orange-500/10"
           label="Custos de preparação"
           value={loading ? "..." : brl(prep.totalPrepCost)}
+          iconAccent="bg-destructive/10 text-destructive"
           to="/vehicles"
         />
       </div>
@@ -406,6 +421,14 @@ function Dashboard() {
             <div>
               <CardTitle className="text-base">Receita vs Despesas</CardTitle>
               <p className="text-xs text-muted-foreground mt-0.5">Transações persistidas por mês</p>
+              <div className="mt-2 flex items-center gap-4 text-[11px] text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-0.5 w-4 rounded-full bg-success" /> Receita
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-0.5 w-4 rounded-full bg-destructive" /> Despesas
+                </span>
+              </div>
             </div>
             <div className="flex gap-1 p-1 rounded-md bg-muted text-xs">
               {periods.map((entry) => (
@@ -421,15 +444,19 @@ function Dashboard() {
             </div>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={260}>
+            <ResponsiveContainer
+              className="dashboard-financial-chart"
+              width="100%"
+              height={260}
+            >
               <AreaChart data={chartData} margin={{ top: 5, right: 8, left: -10, bottom: 0 }}>
                 <defs>
                   <linearGradient id="receita" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--success)" stopOpacity={0.4} />
+                    <stop offset="0%" stopColor="var(--success)" stopOpacity={0.16} />
                     <stop offset="100%" stopColor="var(--success)" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="despesas" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--destructive)" stopOpacity={0.3} />
+                    <stop offset="0%" stopColor="var(--destructive)" stopOpacity={0.09} />
                     <stop offset="100%" stopColor="var(--destructive)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
@@ -459,19 +486,43 @@ function Dashboard() {
                 />
                 <Area
                   type="monotone"
-                  dataKey="receita"
-                  stroke="var(--success)"
-                  strokeWidth={2}
-                  fill="url(#receita)"
-                  name="Receita"
+                  dataKey="despesas"
+                  stroke="var(--destructive)"
+                  strokeWidth={2.5}
+                  fill="url(#despesas)"
+                  name="Despesas"
+                  dot={{
+                    r: 2.5,
+                    fill: "var(--destructive)",
+                    stroke: "var(--card)",
+                    strokeWidth: 1.5,
+                  }}
+                  activeDot={{
+                    r: 5,
+                    fill: "var(--destructive)",
+                    stroke: "var(--card)",
+                    strokeWidth: 2,
+                  }}
                 />
                 <Area
                   type="monotone"
-                  dataKey="despesas"
-                  stroke="var(--destructive)"
-                  strokeWidth={2}
-                  fill="url(#despesas)"
-                  name="Despesas"
+                  dataKey="receita"
+                  stroke="var(--success)"
+                  strokeWidth={2.5}
+                  fill="url(#receita)"
+                  name="Receita"
+                  dot={{
+                    r: 2.5,
+                    fill: "var(--success)",
+                    stroke: "var(--card)",
+                    strokeWidth: 1.5,
+                  }}
+                  activeDot={{
+                    r: 5,
+                    fill: "var(--success)",
+                    stroke: "var(--card)",
+                    strokeWidth: 2,
+                  }}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -601,8 +652,10 @@ function Dashboard() {
                     }}
                     className="flex w-full gap-3 text-left"
                   >
-                    <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
-                      <item.icon className="h-4 w-4 text-muted-foreground" />
+                    <div
+                      className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${item.iconAccent}`}
+                    >
+                      <item.icon className="h-4 w-4" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm">{item.label}</div>
@@ -618,7 +671,7 @@ function Dashboard() {
 
       <Card>
         <CardHeader className="flex flex-row items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-warning" />
+          <AlertTriangle className="h-4 w-4 text-blue-600" />
           <CardTitle className="text-base">Alertas Operacionais</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -640,7 +693,7 @@ function Dashboard() {
                   className={`h-2 w-2 rounded-full ${alert.severity === "critical" ? "bg-destructive" : "bg-warning"}`}
                 />
                 <span className="text-sm flex-1">{alert.label}</span>
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                <ChevronRight className="h-4 w-4 text-blue-600" />
               </button>
             ))
           )}
@@ -652,22 +705,24 @@ function Dashboard() {
 
 function PrepCard({
   icon: Icon,
-  accent,
   label,
   value,
+  iconAccent,
   to,
 }: {
   icon: React.ComponentType<{ className?: string }>;
-  accent: string;
   label: string;
   value: string | number;
+  iconAccent: string;
   to: string;
 }) {
   return (
     <Link to={to} className="block">
       <Card className="overflow-hidden hover:border-primary/40 transition-colors cursor-pointer">
         <CardContent className="p-5 flex items-center gap-4">
-          <div className={`h-10 w-10 rounded-full flex items-center justify-center ${accent}`}>
+          <div
+            className={`h-10 w-10 rounded-full flex items-center justify-center ${iconAccent}`}
+          >
             <Icon className="h-5 w-5" />
           </div>
           <div className="min-w-0">
