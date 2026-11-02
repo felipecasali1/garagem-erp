@@ -192,6 +192,44 @@ async function createAuthenticatedUser(index, role = "seller") {
   return { accessToken: loggedIn.data.access_token, employeeId: employee.id };
 }
 
+async function createAuthAccount(email, password, userMetadata = {}, appMetadata = {}) {
+  const created = await requestJson(`${apiBase.auth}/admin/users`, {
+    method: "POST",
+    admin: true,
+    body: {
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: userMetadata,
+      app_metadata: appMetadata,
+    },
+  });
+  assert.equal(
+    created.response.status,
+    200,
+    `Criação Auth falhou: ${JSON.stringify(created.data)}`,
+  );
+  return created.data;
+}
+
+async function createEmployeeWithoutUser(index, email) {
+  const person = await restInsert("people", {
+    name: `Funcionário de lifecycle ${index}`,
+    type: "individual",
+    email,
+  });
+  const employee = await restInsert("employees", {
+    person_id: person.id,
+    position: "Vendedor",
+    salary: 0,
+    commission_rate: 0,
+    commission_type: "fixed",
+    active: true,
+    hired_at: "2026-01-01",
+  });
+  return { person, employee };
+}
+
 async function createVehicle(index, status = "available") {
   return restInsert("vehicles", {
     plate: `TST${String(index).padStart(4, "0")}`,
@@ -355,6 +393,14 @@ async function callRpc(user, name, args) {
   });
 }
 
+async function callAdminRpc(name, args) {
+  return requestJson(`${apiBase.rest}/rpc/${name}`, {
+    method: "POST",
+    admin: true,
+    body: args,
+  });
+}
+
 function transitionSale(user, saleId, action, sale, payment, key = randomUUID()) {
   return callRpc(user, "transition_sale", {
     p_idempotency_key: key,
@@ -502,6 +548,218 @@ test(
     }
 
     const fixtures = await seedFixtures();
+
+    await t.test(
+      "User provisioning stays pending through Auth downtime and resumes once",
+      async () => {
+        const operationId = randomUUID();
+        const email = `user-lifecycle-${randomUUID()}@example.test`;
+        const password = `${randomSecret(12)}Aa1!`;
+        const { employee } = await createEmployeeWithoutUser("criação", email);
+        const arguments_ = {
+          p_operation_id: operationId,
+          p_employee_id: employee.id,
+          p_access_role: "seller",
+          p_is_admin: false,
+          p_active: true,
+        };
+
+        const pending = await callAdminRpc("begin_user_provisioning", arguments_);
+        assert.equal(pending.response.status, 200, JSON.stringify(pending.data));
+        assert.equal(pending.data.status, "pending");
+        assert.equal(pending.data.auth_user_id, null);
+
+        const prematureCompletion = await callAdminRpc("complete_user_provisioning", {
+          p_operation_id: operationId,
+          p_auth_user_id: randomUUID(),
+        });
+        assert.equal(prematureCompletion.response.ok, false);
+
+        const authUser = await createAuthAccount(
+          email,
+          password,
+          {
+            name: "Funcionário de lifecycle criação",
+          },
+          {
+            garagem_erp_provision_operation_id: operationId,
+          },
+        );
+        const resumed = await callAdminRpc("begin_user_provisioning", arguments_);
+        assert.equal(resumed.response.status, 200, JSON.stringify(resumed.data));
+        assert.equal(resumed.data.operation_id, operationId);
+        assert.equal(resumed.data.status, "pending");
+
+        const linkedAuth = await callAdminRpc("record_user_auth_provisioned", {
+          p_operation_id: operationId,
+          p_auth_user_id: authUser.id,
+        });
+        assert.equal(linkedAuth.response.ok, true, JSON.stringify(linkedAuth.data));
+        const completed = await callAdminRpc("complete_user_provisioning", {
+          p_operation_id: operationId,
+          p_auth_user_id: authUser.id,
+        });
+        assert.equal(completed.response.status, 200, JSON.stringify(completed.data));
+        const userId = completed.data;
+
+        const replay = await callAdminRpc("begin_user_provisioning", arguments_);
+        assert.equal(replay.response.status, 200, JSON.stringify(replay.data));
+        assert.equal(replay.data.status, "completed");
+        assert.equal(replay.data.result_user_id, userId);
+
+        const internalUsers = await requestJson(
+          `${apiBase.rest}/users?select=id,auth_user_id,employee_id&employee_id=eq.${employee.id}`,
+          { admin: true },
+        );
+        assert.equal(internalUsers.response.status, 200, JSON.stringify(internalUsers.data));
+        assert.equal(internalUsers.data.length, 1);
+        assert.equal(internalUsers.data[0].auth_user_id, authUser.id);
+
+        const removalId = randomUUID();
+        const beginRemoval = await callAdminRpc("begin_user_removal", {
+          p_operation_id: removalId,
+          p_user_id: userId,
+        });
+        assert.equal(beginRemoval.response.status, 200, JSON.stringify(beginRemoval.data));
+        assert.equal(beginRemoval.data.auth_user_id, authUser.id);
+
+        const suspended = await requestJson(`${apiBase.rest}/users?id=eq.${userId}&select=active`, {
+          admin: true,
+        });
+        assert.equal(suspended.data[0].active, false);
+
+        const prematureRemoval = await callAdminRpc("complete_user_removal", {
+          p_operation_id: removalId,
+        });
+        assert.equal(prematureRemoval.response.ok, false);
+
+        const deletedAuth = await requestJson(`${apiBase.auth}/admin/users/${authUser.id}`, {
+          method: "DELETE",
+          admin: true,
+        });
+        assert.equal(deletedAuth.response.ok, true, JSON.stringify(deletedAuth.data));
+        const completedRemoval = await callAdminRpc("complete_user_removal", {
+          p_operation_id: removalId,
+        });
+        assert.equal(completedRemoval.response.ok, true, JSON.stringify(completedRemoval.data));
+
+        const removedUsers = await requestJson(`${apiBase.rest}/users?select=id&id=eq.${userId}`, {
+          admin: true,
+        });
+        assert.equal(removedUsers.data.length, 0);
+        const removalReplay = await callAdminRpc("begin_user_removal", {
+          p_operation_id: removalId,
+          p_user_id: userId,
+        });
+        assert.equal(removalReplay.response.status, 200, JSON.stringify(removalReplay.data));
+        assert.equal(removalReplay.data.status, "completed");
+
+        const lostResponseRetry = await callAdminRpc("begin_user_removal", {
+          p_operation_id: randomUUID(),
+          p_user_id: userId,
+        });
+        assert.equal(
+          lostResponseRetry.response.status,
+          200,
+          JSON.stringify(lostResponseRetry.data),
+        );
+        assert.equal(lostResponseRetry.data.operation_id, removalId);
+        assert.equal(lostResponseRetry.data.status, "completed");
+      },
+    );
+
+    await t.test(
+      "Employee deactivation suspends User and reactivation leaves it suspended",
+      async () => {
+        const email = `employee-status-${randomUUID()}@example.test`;
+        const { person, employee } = await createEmployeeWithoutUser("status", email);
+        const authUser = await createAuthAccount(email, `${randomSecret(12)}Aa1!`);
+        const user = await restInsert("users", {
+          auth_user_id: authUser.id,
+          person_id: person.id,
+          employee_id: employee.id,
+          access_role: "seller",
+          active: true,
+        });
+
+        const deactivated = await callRpc(fixtures.managerUser, "set_employee_active_status", {
+          p_employee_id: employee.id,
+          p_active: false,
+        });
+        assert.equal(deactivated.response.ok, true, JSON.stringify(deactivated.data));
+
+        const suspendedUser = await requestJson(
+          `${apiBase.rest}/users?id=eq.${user.id}&select=active`,
+          { admin: true },
+        );
+        assert.equal(suspendedUser.data[0].active, false);
+
+        const directReactivation = await requestJson(`${apiBase.rest}/users?id=eq.${user.id}`, {
+          method: "PATCH",
+          token: fixtures.managerUser.accessToken,
+          body: { active: true },
+        });
+        assert.equal(directReactivation.response.ok, false);
+
+        const blockedReactivation = await callAdminRpc("set_system_user_active", {
+          p_user_id: user.id,
+          p_active: true,
+        });
+        assert.equal(blockedReactivation.response.ok, false);
+
+        const reactivatedEmployee = await callRpc(
+          fixtures.managerUser,
+          "set_employee_active_status",
+          { p_employee_id: employee.id, p_active: true },
+        );
+        assert.equal(
+          reactivatedEmployee.response.ok,
+          true,
+          JSON.stringify(reactivatedEmployee.data),
+        );
+
+        const stillSuspendedUser = await requestJson(
+          `${apiBase.rest}/users?id=eq.${user.id}&select=active`,
+          { admin: true },
+        );
+        assert.equal(stillSuspendedUser.data[0].active, false);
+
+        const explicitlyActivated = await callAdminRpc("set_system_user_active", {
+          p_user_id: user.id,
+          p_active: true,
+        });
+        assert.equal(
+          explicitlyActivated.response.ok,
+          true,
+          JSON.stringify(explicitlyActivated.data),
+        );
+        const activeUser = await requestJson(
+          `${apiBase.rest}/users?id=eq.${user.id}&select=active`,
+          { admin: true },
+        );
+        assert.equal(activeUser.data[0].active, true);
+      },
+    );
+
+    await t.test(
+      "An Auth-only account cannot read protected system data without an internal User",
+      async () => {
+        const email = `unlinked-auth-${randomUUID()}@example.test`;
+        const password = `${randomSecret(12)}Aa1!`;
+        await createAuthAccount(email, password);
+        const login = await requestJson(`${apiBase.auth}/token?grant_type=password`, {
+          method: "POST",
+          body: { email, password },
+        });
+        assert.equal(login.response.status, 200, JSON.stringify(login.data));
+
+        const users = await requestJson(`${apiBase.rest}/users?select=id`, {
+          token: login.data.access_token,
+        });
+        assert.equal(users.response.status, 200, JSON.stringify(users.data));
+        assert.deepEqual(users.data, []);
+      },
+    );
 
     await t.test(
       "Person, multiple business roles and primary Address commit once on retry",

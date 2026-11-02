@@ -28,16 +28,6 @@ type UserRow = {
   } | null;
 };
 
-type EmployeeForAccessRow = {
-  id: number;
-  person_id: number;
-  person: {
-    id: number;
-    name: string;
-    email: string | null;
-  } | null;
-};
-
 export type SystemUserRecord = {
   id: number;
   person_id: number;
@@ -59,6 +49,7 @@ export const userKeys = {
 };
 
 export type CreateSystemUserInput = {
+  operationId: string;
   password: string;
   role: EmployeeAccessRole;
   active?: boolean;
@@ -66,9 +57,12 @@ export type CreateSystemUserInput = {
   employeeId: number;
 };
 
-function normalizeText(value?: string | null) {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
+async function requireAccessToken() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw new Error(error.message);
+  const accessToken = data.session?.access_token;
+  if (!accessToken) throw new Error("Sua sessão expirou. Entre novamente para continuar.");
+  return accessToken;
 }
 
 export async function listSystemUsers() {
@@ -105,6 +99,8 @@ export async function listSystemUsers() {
 const createSystemUserServer = createServerFn({ method: "POST" })
   .inputValidator(
     z.object({
+      accessToken: z.string().min(1),
+      operationId: z.string().uuid(),
       password: z.string().min(8),
       role: z.enum(["admin", "manager", "seller", "financial"]),
       active: z.boolean().optional(),
@@ -113,160 +109,52 @@ const createSystemUserServer = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/shared/supabase/server");
-
-    const { data: employeeData, error: employeeError } = await supabaseAdmin
-      .from("employees")
-      .select("id, person_id, person:people(id, name, email)")
-      .eq("id", data.employeeId)
-      .maybeSingle();
-
-    if (employeeError) {
-      throw new Error(employeeError.message);
-    }
-
-    const employee = employeeData as unknown as EmployeeForAccessRow | null;
-
-    if (!employee?.person) {
-      throw new Error("Funcionário não encontrado para criar acesso.");
-    }
-
-    const email = normalizeText(employee.person.email);
-    if (!email) {
-      throw new Error("Cadastre um e-mail antes de criar o acesso desse funcionário.");
-    }
-
-    const { data: existingUser, error: existingUserError } = await supabaseAdmin
-      .from("users")
-      .select("id")
-      .or(`person_id.eq.${employee.person_id},employee_id.eq.${data.employeeId}`)
-      .maybeSingle();
-
-    if (existingUserError) {
-      throw new Error(existingUserError.message);
-    }
-
-    if (existingUser) {
-      throw new Error("Esse funcionário já possui acesso ao sistema.");
-    }
-
-    const { data: authResult, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password: data.password,
-      email_confirm: true,
-      user_metadata: { name: employee.person.name },
-    });
-
-    if (authError) {
-      throw new Error(authError.message);
-    }
-
-    if (!authResult.user) {
-      throw new Error("Falha ao criar o usuário de autenticação.");
-    }
-
-    const { data: userId, error: insertError } = await supabaseAdmin
-      .from("users")
-      .insert({
-        auth_user_id: authResult.user.id,
-        person_id: employee.person_id,
-        employee_id: employee.id,
-        access_role: data.role,
-        is_admin: data.isAdmin ?? data.role === "admin",
-        active: data.active ?? true,
-        email_verified_at: new Date().toISOString(),
-        invited_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single();
-
-    if (insertError) {
-      await supabaseAdmin.auth.admin.deleteUser(authResult.user.id);
-      throw new Error(insertError.message);
-    }
-
-    if (!userId) {
-      await supabaseAdmin.auth.admin.deleteUser(authResult.user.id);
-      throw new Error("Falha ao criar usuário.");
-    }
-
-    if (data.active === false) {
-      const { error: updateError } = await supabaseAdmin
-        .from("users")
-        .update({ active: false })
-        .eq("id", userId.id);
-      if (updateError) {
-        throw new Error(updateError.message);
-      }
-    }
-
-    return userId.id;
+    const { createSystemUserForCaller } = await import("@/modules/users/services/users.server");
+    return createSystemUserForCaller(data);
   });
 
 const setSystemUserActiveServer = createServerFn({ method: "POST" })
   .inputValidator(
     z.object({
-      id: z.number(),
+      accessToken: z.string().min(1),
+      id: z.number().int().positive(),
       active: z.boolean(),
     }),
   )
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/shared/supabase/server");
-    const { error } = await supabaseAdmin
-      .from("users")
-      .update({ active: data.active })
-      .eq("id", data.id);
-    if (error) {
-      throw new Error(error.message);
-    }
+    const { setSystemUserActiveForCaller } = await import("@/modules/users/services/users.server");
+    return setSystemUserActiveForCaller(data);
   });
 
 export async function createSystemUser(input: CreateSystemUserInput) {
-  return createSystemUserServer({ data: input });
+  return createSystemUserServer({ data: { ...input, accessToken: await requireAccessToken() } });
 }
 
 export async function setSystemUserActive(id: number, active: boolean) {
-  return setSystemUserActiveServer({ data: { id, active } });
+  return setSystemUserActiveServer({
+    data: { accessToken: await requireAccessToken(), id, active },
+  });
 }
 
 const deleteSystemUserServer = createServerFn({ method: "POST" })
   .inputValidator(
     z.object({
+      accessToken: z.string().min(1),
+      operationId: z.string().uuid(),
       id: z.number().int().positive(),
     }),
   )
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/shared/supabase/server");
-
-    const { data: user, error: lookupError } = await supabaseAdmin
-      .from("users")
-      .select("id, auth_user_id")
-      .eq("id", data.id)
-      .maybeSingle();
-
-    if (lookupError) {
-      throw new Error(lookupError.message);
-    }
-
-    if (!user) {
-      throw new Error("Usuário não encontrado.");
-    }
-
-    const { error: deleteError } = await supabaseAdmin.from("users").delete().eq("id", data.id);
-    if (deleteError) {
-      throw new Error(deleteError.message);
-    }
-
-    if (user.auth_user_id) {
-      const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(
-        user.auth_user_id,
-      );
-      if (authDeleteError) {
-        throw new Error(authDeleteError.message);
-      }
-    }
+    const { deleteSystemUserForCaller } = await import("@/modules/users/services/users.server");
+    return deleteSystemUserForCaller(data);
   });
 
 export async function deleteSystemUser(id: number) {
-  return deleteSystemUserServer({ data: { id } });
+  return deleteSystemUserServer({
+    data: {
+      accessToken: await requireAccessToken(),
+      operationId: crypto.randomUUID(),
+      id,
+    },
+  });
 }

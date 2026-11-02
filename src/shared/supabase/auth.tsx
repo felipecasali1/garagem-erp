@@ -27,6 +27,9 @@ type SystemUserProfile = {
   auth_user_id: string | null;
   person_id: number;
   employee_id: number | null;
+  employee: {
+    active: boolean;
+  } | null;
   person: {
     name: string;
   } | null;
@@ -52,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data, error } = await supabase
       .from("users")
       .select(
-        "id, active, access_role, is_admin, auth_user_id, person_id, employee_id, person:people(name)",
+        "id, active, access_role, is_admin, auth_user_id, person_id, employee_id, person:people(name), employee:employees(active)",
       )
       .eq("auth_user_id", nextSession.user.id)
       .maybeSingle();
@@ -84,9 +87,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const employee = Array.isArray(data.employee) ? (data.employee[0] ?? null) : data.employee;
+    if (data.employee_id != null && !employee?.active) {
+      setAccessError("O funcionário vinculado está desativado. Fale com um administrador.");
+      await supabase.auth.signOut();
+      setSession(null);
+      setProfile(null);
+      setLoading(false);
+      return;
+    }
+
     const profile = {
       ...data,
-      person: Array.isArray(data.person) ? data.person[0] ?? null : data.person,
+      person: Array.isArray(data.person) ? (data.person[0] ?? null) : data.person,
+      employee,
     } as unknown as SystemUserProfile;
 
     setProfile(profile);

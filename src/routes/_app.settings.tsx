@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Users, Sparkles, Plus, Trash2, Shield, Loader2 } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
@@ -456,8 +456,7 @@ function AccessoriesTab() {
     },
   });
   const statusMutation = useMutation({
-    mutationFn: ({ id, active }: { id: number; active: boolean }) =>
-      setAccessoryActive(id, active),
+    mutationFn: ({ id, active }: { id: number; active: boolean }) => setAccessoryActive(id, active),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: accessoryKeys.all });
       await queryClient.invalidateQueries({ queryKey: accessoryKeys.active });
@@ -597,6 +596,7 @@ function NewUserDialog() {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<EmployeeAccessRole>("seller");
   const [active, setActive] = useState(true);
+  const operationIds = useRef(new Map<string, string>());
   const createMutation = useMutation({
     mutationFn: createSystemUser,
     onSuccess: async () => {
@@ -618,6 +618,7 @@ function NewUserDialog() {
     setPassword("");
     setRole("seller");
     setActive(true);
+    operationIds.current.clear();
   };
 
   const submit = () => {
@@ -636,7 +637,15 @@ function NewUserDialog() {
       return;
     }
 
+    const operationKey = JSON.stringify({ employeeId: selectedEmployee.id, role, active });
+    let operationId = operationIds.current.get(operationKey);
+    if (!operationId) {
+      operationId = crypto.randomUUID();
+      operationIds.current.set(operationKey, operationId);
+    }
+
     createMutation.mutate({
+      operationId,
       employeeId: selectedEmployee.id,
       password,
       role,
