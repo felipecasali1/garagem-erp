@@ -1,6 +1,7 @@
 import { supabase } from "@/shared/supabase/client";
 import { summarizeChecklist } from "@/modules/checklist/lib/summarize-checklist";
 import type { ChecklistItem, ChecklistSummary } from "@/modules/checklist/types";
+import { StaleRecordError } from "@/shared/lib/stale-record";
 
 type ChecklistRow = {
   id: string;
@@ -72,7 +73,6 @@ function toChecklistPayload(input: ChecklistWriteInput) {
 function toChecklistPatch(patch: Partial<ChecklistItem>) {
   const payload: Record<string, unknown> = {};
 
-  if ("vehicle_id" in patch) payload.vehicle_id = patch.vehicle_id;
   if ("title" in patch) payload.title = patch.title?.trim();
   if ("description" in patch) payload.description = patch.description?.trim() || null;
   if ("category" in patch) payload.category = patch.category;
@@ -91,55 +91,44 @@ function toChecklistPatch(patch: Partial<ChecklistItem>) {
   return payload;
 }
 
-async function unwrapSingle<T>(
-  response: PromiseLike<{ data: unknown; error: { message: string } | null }>,
-): Promise<T> {
-  const { data, error } = await response;
-  if (error) {
-    throw new Error(error.message);
-  }
-  if (!data) {
-    throw new Error("Registro nao encontrado.");
-  }
-  return data as T;
-}
-
-async function assertVehicleChecklistEditable(vehicleId: number) {
-  const { data, error } = await supabase
-    .from("vehicles")
-    .select("id, status")
-    .eq("id", vehicleId)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-  if (!data) {
-    throw new Error("Veiculo nao encontrado.");
-  }
-  if (data.status === "sold") {
-    throw new Error("Checklist de veiculo vendido fica bloqueado para preservar historico.");
-  }
-}
-
-async function assertChecklistItemEditable(id: string) {
+async function getChecklistItem(id: string): Promise<ChecklistItem | null> {
   const { data, error } = await supabase
     .from("vehicle_checklist_items")
-    .select("vehicle_id, vehicles(status)")
+    .select("*")
     .eq("id", id)
     .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? mapChecklistItem(data as ChecklistRow) : null;
+}
 
+async function unwrapChecklistRpc(
+  response: PromiseLike<{
+    data: unknown;
+    error: { message: string } | null;
+  }>,
+  itemId?: string,
+) {
+  const { data, error } = await response;
   if (error) {
+    if (error.message.includes("STALE_RECORD:") && itemId) {
+      let current: ChecklistItem | null = null;
+      try {
+        current = await getChecklistItem(itemId);
+      } catch {
+        // The row may have been removed after the version check failed.
+      }
+      throw new StaleRecordError(
+        "Outra pessoa alterou este item do checklist. Compare o status e os custos atuais com o seu rascunho antes de continuar.",
+        current,
+      );
+    }
+    if (error.message.includes("VEHICLE_HAS_OPEN_PREPARATION:")) {
+      throw new Error("Conclua ou cancele as tarefas pendentes antes de disponibilizar o veículo.");
+    }
     throw new Error(error.message);
   }
-  if (!data) {
-    throw new Error("Item de checklist nao encontrado.");
-  }
-
-  const vehicle = Array.isArray(data.vehicles) ? data.vehicles[0] : data.vehicles;
-  if (vehicle?.status === "sold") {
-    throw new Error("Checklist de veiculo vendido fica bloqueado para preservar historico.");
-  }
+  if (!data) throw new Error("Item de checklist não encontrado.");
+  return mapChecklistItem(data as ChecklistRow);
 }
 
 export async function listChecklist(vehicleId?: number) {
@@ -160,40 +149,31 @@ export async function listChecklist(vehicleId?: number) {
 }
 
 export async function createChecklistItem(input: ChecklistWriteInput) {
-  await assertVehicleChecklistEditable(input.vehicle_id);
-
-  const data = await unwrapSingle<ChecklistRow>(
-    supabase.from("vehicle_checklist_items").insert(toChecklistPayload(input)).select("*").single(),
+  return unwrapChecklistRpc(
+    supabase.rpc("create_vehicle_checklist_item", {
+      p_vehicle_id: input.vehicle_id,
+      p_item: toChecklistPayload(input),
+    }),
   );
-  return mapChecklistItem(data);
 }
 
-export async function updateChecklistItem(id: string, patch: Partial<ChecklistItem>) {
-  await assertChecklistItemEditable(id);
-
-  const data = await unwrapSingle<ChecklistRow>(
-    supabase
-      .from("vehicle_checklist_items")
-      .update(toChecklistPatch(patch))
-      .eq("id", id)
-      .select("*")
-      .single(),
+export async function updateChecklistItem(
+  id: string,
+  patch: Partial<ChecklistItem>,
+  expectedUpdatedAt: string,
+) {
+  return unwrapChecklistRpc(
+    supabase.rpc("update_vehicle_checklist_item", {
+      p_item_id: id,
+      p_expected_updated_at: expectedUpdatedAt,
+      p_changes: toChecklistPatch(patch),
+    }),
+    id,
   );
-  return mapChecklistItem(data);
 }
 
-export async function cancelChecklistItem(id: string) {
-  await assertChecklistItemEditable(id);
-
-  const data = await unwrapSingle<ChecklistRow>(
-    supabase
-      .from("vehicle_checklist_items")
-      .update({ status: "cancelled" })
-      .eq("id", id)
-      .select("*")
-      .single(),
-  );
-  return mapChecklistItem(data);
+export async function cancelChecklistItem(id: string, expectedUpdatedAt: string) {
+  return updateChecklistItem(id, { status: "cancelled" }, expectedUpdatedAt);
 }
 
 export function summarize(list: ChecklistItem[]): ChecklistSummary {

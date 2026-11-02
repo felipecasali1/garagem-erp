@@ -9,15 +9,15 @@ import test from "node:test";
 
 const projectRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const composeFile = join(projectRoot, "docker-compose.yml");
-const overrideFile = join(projectRoot, "compose/supabase/sale-test.override.yml");
-const projectName = `garagem-sale-test-${randomBytes(5).toString("hex")}`;
+const overrideFile = join(projectRoot, "compose/supabase/postgrest-test.override.yml");
+const projectName = `garagem-postgrest-test-${randomBytes(5).toString("hex")}`;
 const apiBase = {};
 const config = {};
 
 function dockerEnvironment() {
   const environment = { ...process.env };
   for (const name of Object.keys(environment)) {
-    if (name.startsWith("GARAGEM_LOCAL_") || name.startsWith("GARAGEM_SALES_TEST_")) {
+    if (name.startsWith("GARAGEM_LOCAL_") || name.startsWith("GARAGEM_POSTGREST_TEST_")) {
       delete environment[name];
     }
   }
@@ -192,7 +192,7 @@ async function createAuthenticatedUser(index, role = "seller") {
   return { accessToken: loggedIn.data.access_token, employeeId: employee.id };
 }
 
-async function createVehicle(index) {
+async function createVehicle(index, status = "available") {
   return restInsert("vehicles", {
     plate: `TST${String(index).padStart(4, "0")}`,
     brand: "Toyota",
@@ -205,8 +205,8 @@ async function createVehicle(index) {
     current_mileage: 100,
     cost_price: 50000,
     sale_price: 65000,
-    published: true,
-    status: "available",
+    published: status === "available",
+    status,
   });
 }
 
@@ -259,13 +259,41 @@ async function authenticatedRows(user, table, query) {
   return data;
 }
 
+async function callRpc(user, name, args) {
+  return requestJson(`${apiBase.rest}/rpc/${name}`, {
+    method: "POST",
+    token: user.accessToken,
+    body: args,
+  });
+}
+
+function checklistItem(vehicleId) {
+  return {
+    p_vehicle_id: vehicleId,
+    p_item: {
+      title: "Preparar veículo para venda",
+      description: null,
+      category: "inspection",
+      status: "pending",
+      priority: "medium",
+      estimated_cost: 100,
+      actual_cost: 0,
+      due_date: null,
+      completion_date: null,
+      responsible_employee_id: null,
+      notes: null,
+      attachments: [],
+    },
+  };
+}
+
 test(
-  "create Sale reserves the Vehicle atomically and safely handles concurrent retries",
+  "sale and vehicle preparation writes remain safe through PostgREST",
   { timeout: 600_000 },
   async (t) => {
-    if (process.env.GARAGEM_SALES_TEST_INNER === "1") {
-      config.anonKey = process.env.GARAGEM_SALES_TEST_ANON_KEY;
-      config.serviceKey = process.env.GARAGEM_SALES_TEST_SERVICE_KEY;
+    if (process.env.GARAGEM_POSTGREST_TEST_INNER === "1") {
+      config.anonKey = process.env.GARAGEM_POSTGREST_TEST_ANON_KEY;
+      config.serviceKey = process.env.GARAGEM_POSTGREST_TEST_SERVICE_KEY;
       apiBase.auth = "http://auth:9999";
       apiBase.rest = "http://rest:3000";
     } else {
@@ -279,7 +307,7 @@ test(
       });
 
       await initializeDisposableCompose();
-      const output = compose(["run", "--rm", "--no-deps", "sales-integration"]);
+      const output = compose(["run", "--rm", "--no-deps", "postgrest-integration"]);
       process.stdout.write(`${output}\n`);
       return;
     }
@@ -479,5 +507,211 @@ test(
       );
       assert.equal(result.response.status, 403, JSON.stringify(result.data));
     });
+
+    await t.test(
+      "opening and reopening work returns an available Vehicle to preparation",
+      async () => {
+        const user = fixtures.users[0];
+        const vehicle = await createVehicle(6);
+        const created = await callRpc(
+          user,
+          "create_vehicle_checklist_item",
+          checklistItem(vehicle.id),
+        );
+        assert.equal(created.response.status, 200, JSON.stringify(created.data));
+        const item = created.data;
+        let [currentVehicle] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=id,status,published,updated_at&id=eq.${vehicle.id}`,
+        );
+        assert.equal(currentVehicle.status, "in_repair");
+        assert.equal(currentVehicle.published, false);
+
+        const completed = await callRpc(user, "update_vehicle_checklist_item", {
+          p_item_id: item.id,
+          p_expected_updated_at: item.updated_at,
+          p_changes: { status: "completed", completion_date: "2026-11-02" },
+        });
+        assert.equal(completed.response.status, 200, JSON.stringify(completed.data));
+        const finished = await callRpc(user, "finish_vehicle_preparation", {
+          p_vehicle_id: vehicle.id,
+          p_expected_updated_at: currentVehicle.updated_at,
+        });
+        assert.equal(finished.response.status, 200, JSON.stringify(finished.data));
+        currentVehicle = finished.data;
+        assert.equal(currentVehicle.status, "available");
+
+        const reopened = await callRpc(user, "update_vehicle_checklist_item", {
+          p_item_id: item.id,
+          p_expected_updated_at: completed.data.updated_at,
+          p_changes: { status: "pending", completion_date: null },
+        });
+        assert.equal(reopened.response.status, 200, JSON.stringify(reopened.data));
+        const [reopenedVehicle] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=id,status,published&id=eq.${vehicle.id}`,
+        );
+        assert.equal(reopenedVehicle.status, "in_repair");
+        assert.equal(reopenedVehicle.published, false);
+
+        const bypassFinish = await requestJson(`${apiBase.rest}/vehicles?id=eq.${vehicle.id}`, {
+          method: "PATCH",
+          admin: true,
+          body: { status: "available", published: false },
+        });
+        assert.equal(bypassFinish.response.ok, false, JSON.stringify(bypassFinish.data));
+      },
+    );
+
+    await t.test("stale Vehicle and ChecklistItem writes are rejected", async () => {
+      const user = fixtures.users[0];
+      const vehicle = await createVehicle(7);
+      const [loadedVehicle] = await authenticatedRows(
+        user,
+        "vehicles",
+        `select=id,status,cost_price,updated_at&id=eq.${vehicle.id}`,
+      );
+      const firstSave = await callRpc(user, "update_vehicle_with_version", {
+        p_vehicle_id: vehicle.id,
+        p_expected_updated_at: loadedVehicle.updated_at,
+        p_changes: { cost_price: 51000 },
+      });
+      assert.equal(firstSave.response.status, 200, JSON.stringify(firstSave.data));
+      const staleSave = await callRpc(user, "update_vehicle_with_version", {
+        p_vehicle_id: vehicle.id,
+        p_expected_updated_at: loadedVehicle.updated_at,
+        p_changes: { cost_price: 52000 },
+      });
+      assert.equal(staleSave.response.status, 409, JSON.stringify(staleSave.data));
+      assert.match(JSON.stringify(staleSave.data), /STALE_RECORD/i);
+      const [storedVehicle] = await authenticatedRows(
+        user,
+        "vehicles",
+        `select=id,cost_price&id=eq.${vehicle.id}`,
+      );
+      assert.equal(Number(storedVehicle.cost_price), 51000);
+
+      const created = await callRpc(
+        user,
+        "create_vehicle_checklist_item",
+        checklistItem(vehicle.id),
+      );
+      assert.equal(created.response.status, 200, JSON.stringify(created.data));
+      const firstItemSave = await callRpc(user, "update_vehicle_checklist_item", {
+        p_item_id: created.data.id,
+        p_expected_updated_at: created.data.updated_at,
+        p_changes: { status: "in_progress", actual_cost: 50 },
+      });
+      assert.equal(firstItemSave.response.status, 200, JSON.stringify(firstItemSave.data));
+      const staleItemSave = await callRpc(user, "update_vehicle_checklist_item", {
+        p_item_id: created.data.id,
+        p_expected_updated_at: created.data.updated_at,
+        p_changes: { status: "completed", actual_cost: 900 },
+      });
+      assert.equal(staleItemSave.response.status, 409, JSON.stringify(staleItemSave.data));
+      const [storedItem] = await authenticatedRows(
+        user,
+        "vehicle_checklist_items",
+        `select=id,status,actual_cost&id=eq.${created.data.id}`,
+      );
+      assert.equal(storedItem.status, "in_progress");
+      assert.equal(Number(storedItem.actual_cost), 50);
+    });
+
+    await t.test("finishing preparation and opening a task serialize on the Vehicle", async () => {
+      const user = fixtures.users[0];
+      const vehicle = await createVehicle(8, "in_repair");
+      const [loadedVehicle] = await authenticatedRows(
+        user,
+        "vehicles",
+        `select=id,status,updated_at&id=eq.${vehicle.id}`,
+      );
+      const [finish, openTask] = await Promise.all([
+        callRpc(user, "finish_vehicle_preparation", {
+          p_vehicle_id: vehicle.id,
+          p_expected_updated_at: loadedVehicle.updated_at,
+        }),
+        callRpc(user, "create_vehicle_checklist_item", checklistItem(vehicle.id)),
+      ]);
+      assert.ok(
+        finish.response.ok || finish.response.status === 409,
+        `Finalização inesperada: ${JSON.stringify(finish.data)}`,
+      );
+      assert.equal(openTask.response.status, 200, JSON.stringify(openTask.data));
+
+      const [storedVehicle] = await authenticatedRows(
+        user,
+        "vehicles",
+        `select=id,status,published&id=eq.${vehicle.id}`,
+      );
+      const openItems = await authenticatedRows(
+        user,
+        "vehicle_checklist_items",
+        `select=id,status&vehicle_id=eq.${vehicle.id}&status=not.in.(completed,cancelled)`,
+      );
+      assert.equal(openItems.length, 1);
+      assert.notEqual(storedVehicle.status, "available");
+      assert.equal(storedVehicle.published, false);
+    });
+
+    await t.test("financial-only users cannot create preparation ChecklistItems", async () => {
+      const vehicle = await createVehicle(9);
+      const result = await callRpc(
+        fixtures.unauthorizedUser,
+        "create_vehicle_checklist_item",
+        checklistItem(vehicle.id),
+      );
+      assert.equal(result.response.status, 403, JSON.stringify(result.data));
+    });
+
+    await t.test(
+      "direct checklist inserts synchronize readiness while stale updates stay blocked",
+      async () => {
+        const user = fixtures.users[0];
+        const vehicle = await createVehicle(10);
+        const [loadedVehicle] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=id,cost_price&id=eq.${vehicle.id}`,
+        );
+        const directVehicleUpdate = await requestJson(
+          `${apiBase.rest}/vehicles?id=eq.${vehicle.id}`,
+          {
+            method: "PATCH",
+            token: user.accessToken,
+            body: { cost_price: 1 },
+          },
+        );
+        assert.equal(
+          directVehicleUpdate.response.ok,
+          false,
+          JSON.stringify(directVehicleUpdate.data),
+        );
+
+        const itemInput = checklistItem(vehicle.id);
+        const directItemInsert = await requestJson(`${apiBase.rest}/vehicle_checklist_items`, {
+          method: "POST",
+          token: user.accessToken,
+          body: { vehicle_id: vehicle.id, ...itemInput.p_item },
+        });
+        assert.equal(directItemInsert.response.status, 201, JSON.stringify(directItemInsert.data));
+        const directItemUpdate = await requestJson(
+          `${apiBase.rest}/vehicle_checklist_items?id=eq.${directItemInsert.data[0].id}`,
+          { method: "PATCH", token: user.accessToken, body: { status: "completed" } },
+        );
+        assert.equal(directItemUpdate.response.ok, false, JSON.stringify(directItemUpdate.data));
+
+        const [storedVehicle] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=id,cost_price,status,published&id=eq.${vehicle.id}`,
+        );
+        assert.equal(Number(storedVehicle.cost_price), Number(loadedVehicle.cost_price));
+        assert.equal(storedVehicle.status, "in_repair");
+        assert.equal(storedVehicle.published, false);
+      },
+    );
   },
 );

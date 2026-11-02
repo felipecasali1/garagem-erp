@@ -203,6 +203,7 @@ function mapVehicle(row: VehicleRow): Vehicle {
     sale_price: Number(row.sale_price),
     published: row.published,
     status: row.status,
+    updated_at: row.updated_at,
     image: row.image ?? undefined,
     notes: row.notes ?? undefined,
     accessories: [],

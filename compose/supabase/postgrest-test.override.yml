@@ -14,13 +14,13 @@ services:
       - ./supabase/tests/database/sale-reservation-fixture.sql:/fixtures/sale-reservation.sql:ro,z
     networks: [backend]
 
-  sales-integration:
+  postgrest-integration:
     image: node:22-bookworm-slim
-    command: [--test, /tests/sale-reservation.compose.test.mjs]
+    command: [--test, /tests/postgrest-concurrency.compose.test.mjs]
     environment:
-      GARAGEM_SALES_TEST_INNER: "1"
-      GARAGEM_SALES_TEST_ANON_KEY: ${GARAGEM_LOCAL_ANON_KEY:-}
-      GARAGEM_SALES_TEST_SERVICE_KEY: ${GARAGEM_LOCAL_SERVICE_ROLE_KEY:-}
+      GARAGEM_POSTGREST_TEST_INNER: "1"
+      GARAGEM_POSTGREST_TEST_ANON_KEY: ${GARAGEM_LOCAL_ANON_KEY:-}
+      GARAGEM_POSTGREST_TEST_SERVICE_KEY: ${GARAGEM_LOCAL_SERVICE_ROLE_KEY:-}
     volumes:
-      - ./tests/integration/sale-reservation.compose.test.mjs:/tests/sale-reservation.compose.test.mjs:ro,z
+      - ./tests/integration/postgrest-concurrency.compose.test.mjs:/tests/postgrest-concurrency.compose.test.mjs:ro,z
     networks: [backend]

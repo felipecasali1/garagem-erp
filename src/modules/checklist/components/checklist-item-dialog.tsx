@@ -1,4 +1,4 @@
-import { useEffect, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -36,6 +36,8 @@ import {
   updateChecklistItem,
 } from "@/modules/checklist";
 import { employeeKeys, listActiveEmployees } from "@/modules/employees/services/employees";
+import { StaleRecordError } from "@/shared/lib/stale-record";
+import { vehicleKeys } from "@/modules/vehicles/services/vehicles";
 
 const schema = z.object({
   title: z.string().trim().min(2, "Título obrigatório").max(120),
@@ -68,6 +70,45 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
+function itemToFormValues(item?: ChecklistItem | null): FormValues {
+  return {
+    title: item?.title ?? "",
+    description: item?.description ?? "",
+    category: item?.category ?? "mechanical",
+    status: item?.status ?? "pending",
+    priority: item?.priority ?? "medium",
+    estimated_cost: item?.estimated_cost ?? 0,
+    actual_cost: item?.actual_cost ?? 0,
+    due_date: item?.due_date,
+    responsible_employee_id: item?.responsible_employee_id
+      ? String(item.responsible_employee_id)
+      : undefined,
+    notes: item?.notes ?? "",
+  };
+}
+
+function toChecklistChanges(values: FormValues, item?: ChecklistItem | null) {
+  return {
+    title: values.title,
+    description: values.description || undefined,
+    category: values.category,
+    status: values.status,
+    priority: values.priority,
+    estimated_cost: Number(values.estimated_cost) || 0,
+    actual_cost: Number(values.actual_cost) || 0,
+    due_date: values.due_date || undefined,
+    completion_date:
+      values.status === "completed"
+        ? (item?.completion_date ?? new Date().toISOString().slice(0, 10))
+        : undefined,
+    responsible_employee_id: values.responsible_employee_id
+      ? Number(values.responsible_employee_id)
+      : undefined,
+    notes: values.notes || undefined,
+    attachments: item?.attachments ?? [],
+  };
+}
+
 export function ChecklistItemDialog({
   open,
   onOpenChange,
@@ -95,6 +136,9 @@ export function ChecklistItemDialog({
     },
   });
   const queryClient = useQueryClient();
+  const [baseItem, setBaseItem] = useState(item ?? null);
+  const [expectedUpdatedAt, setExpectedUpdatedAt] = useState(item?.updated_at ?? null);
+  const [conflict, setConflict] = useState<{ current: ChecklistItem | null } | null>(null);
   const { data: employees = [] } = useQuery({
     queryKey: employeeKeys.active,
     queryFn: listActiveEmployees,
@@ -102,6 +146,7 @@ export function ChecklistItemDialog({
   const invalidateChecklist = async () => {
     await queryClient.invalidateQueries({ queryKey: checklistKeys.all });
     await queryClient.invalidateQueries({ queryKey: checklistKeys.byVehicle(vehicleId) });
+    await queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
   };
   const createMutation = useMutation({
     mutationFn: createChecklistItem,
@@ -115,70 +160,51 @@ export function ChecklistItemDialog({
     },
   });
   const updateMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: Partial<ChecklistItem> }) =>
-      updateChecklistItem(id, payload),
+    mutationFn: ({
+      id,
+      payload,
+      version,
+    }: {
+      id: string;
+      payload: Partial<ChecklistItem>;
+      version: string;
+    }) => updateChecklistItem(id, payload, version),
     onSuccess: async () => {
       await invalidateChecklist();
       toast.success("Item atualizado");
       onOpenChange(false);
     },
     onError: (error) => {
+      if (error instanceof StaleRecordError) {
+        setConflict({ current: error.current as ChecklistItem | null });
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Falha ao atualizar item.");
     },
   });
 
   useEffect(() => {
     if (open) {
-      form.reset({
-        title: item?.title ?? "",
-        description: item?.description ?? "",
-        category: (item?.category ?? "mechanical") as ChecklistCategory,
-        status: (item?.status ?? "pending") as ChecklistStatus,
-        priority: (item?.priority ?? "medium") as ChecklistPriority,
-        estimated_cost: item?.estimated_cost ?? 0,
-        actual_cost: item?.actual_cost ?? 0,
-        due_date: item?.due_date,
-        responsible_employee_id: item?.responsible_employee_id
-          ? String(item.responsible_employee_id)
-          : undefined,
-        notes: item?.notes ?? "",
-      });
+      form.reset(itemToFormValues(item));
+      setBaseItem(item ?? null);
+      setExpectedUpdatedAt(item?.updated_at ?? null);
+      setConflict(null);
     }
-  }, [open, item, form]);
+  }, [open, item?.id, form, item]);
 
   const submit = form.handleSubmit((values) => {
-    const payload = {
-      vehicle_id: vehicleId,
-      title: values.title,
-      description: values.description || undefined,
-      category: values.category,
-      status: values.status,
-      priority: values.priority,
-      estimated_cost: Number(values.estimated_cost) || 0,
-      actual_cost: Number(values.actual_cost) || 0,
-      due_date: values.due_date || undefined,
-      responsible_employee_id: values.responsible_employee_id
-        ? Number(values.responsible_employee_id)
-        : undefined,
-      notes: values.notes || undefined,
-      attachments: item?.attachments ?? [],
-    };
+    const payload = toChecklistChanges(values, baseItem);
     if (item) {
+      if (!expectedUpdatedAt) return;
       updateMutation.mutate({
         id: item.id,
-        payload: {
-          ...payload,
-          completion_date:
-            values.status === "completed"
-              ? (item.completion_date ?? new Date().toISOString().slice(0, 10))
-              : undefined,
-        },
+        payload,
+        version: expectedUpdatedAt,
       });
     } else {
       createMutation.mutate({
+        vehicle_id: vehicleId,
         ...payload,
-        completion_date:
-          values.status === "completed" ? new Date().toISOString().slice(0, 10) : undefined,
         attachments: [],
       });
     }
@@ -195,6 +221,57 @@ export function ChecklistItemDialog({
         <DialogHeader>
           <DialogTitle>{item ? "Editar item" : "Novo item de checklist"}</DialogTitle>
         </DialogHeader>
+        {conflict && (
+          <div className="space-y-3 rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
+            <div className="font-medium">Este item mudou enquanto você o editava</div>
+            {conflict.current ? (
+              <>
+                <p className="text-muted-foreground">
+                  Status atual: <strong>{STATUS_META[conflict.current.status].label}</strong> ·
+                  Custo estimado: <strong>R$ {conflict.current.estimated_cost.toFixed(2)}</strong> ·
+                  Custo real: <strong>R$ {conflict.current.actual_cost.toFixed(2)}</strong>
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      form.reset(itemToFormValues(conflict.current));
+                      setBaseItem(conflict.current);
+                      setExpectedUpdatedAt(conflict.current?.updated_at ?? null);
+                      setConflict(null);
+                    }}
+                  >
+                    Carregar versão atual
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      if (!item || !conflict.current) return;
+                      const current = conflict.current;
+                      void form.handleSubmit((values) => {
+                        setConflict(null);
+                        updateMutation.mutate({
+                          id: item.id,
+                          payload: toChecklistChanges(values, current),
+                          version: current.updated_at,
+                        });
+                      })();
+                      setBaseItem(current);
+                      setExpectedUpdatedAt(current.updated_at);
+                    }}
+                  >
+                    Reaplicar meu rascunho
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <p className="text-muted-foreground">
+                O registro foi removido. Seu rascunho permanece aberto, mas não pode ser reaplicado.
+              </p>
+            )}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
             <Label>

@@ -21,6 +21,8 @@ import { Input } from "@/shared/components/ui/input";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { brl } from "@/shared/lib/format";
 import { toast } from "sonner";
+import { StaleRecordError } from "@/shared/lib/stale-record";
+import { StaleRecordConflictDialog } from "@/shared/components/stale-record-conflict-dialog";
 import { useOperationalDate } from "@/modules/alerts/hooks/use-operational-date";
 import {
   countVehiclesByStatus,
@@ -44,7 +46,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/shared/components/ui/table";
-import type { VehicleStatus } from "@/shared/types/domain";
+import type { Vehicle, VehicleStatus } from "@/shared/types/domain";
+import { vehicleStatusLabel } from "@/modules/vehicles/lib/vehicle-status-label";
 
 export const Route = createFileRoute("/_app/vehicles/")({
   head: () => ({ meta: [{ title: "Veículos | GaragemERP" }] }),
@@ -82,6 +85,10 @@ const statusOptions = vehicleStatuses;
 
 function VehiclesPage() {
   const [view, setView] = useState<"grid" | "table">("grid");
+  const [publicationConflict, setPublicationConflict] = useState<{
+    current: Vehicle | null;
+    published: boolean;
+  } | null>(null);
   const { page: rawPage, q, status: statusFilter, alert: alertFilter } = Route.useSearch();
   const page = rawPage ?? 1;
   const today = useOperationalDate();
@@ -131,13 +138,20 @@ function VehiclesPage() {
   }, [alertFilter, navigate, page, q, statusFilter, vehiclesPage]);
 
   const publishMutation = useMutation({
-    mutationFn: ({ id, published }: { id: number; published: boolean }) =>
-      setVehiclePublished(id, published),
+    mutationFn: ({ id, published, version }: { id: number; published: boolean; version: string }) =>
+      setVehiclePublished(id, published, version),
     onSuccess: (vehicle) => {
       queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
     },
-    onError: (mutationError) => {
+    onError: (mutationError, variables) => {
+      if (mutationError instanceof StaleRecordError) {
+        setPublicationConflict({
+          current: mutationError.current as Vehicle | null,
+          published: variables.published,
+        });
+        return;
+      }
       toast.error(
         mutationError instanceof Error ? mutationError.message : "Falha ao atualizar publicação.",
       );
@@ -270,7 +284,11 @@ function VehiclesPage() {
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    publishMutation.mutate({ id: v.id, published: !v.published });
+                    publishMutation.mutate({
+                      id: v.id,
+                      published: !v.published,
+                      version: v.updated_at,
+                    });
                   }}
                   disabled={!v.published && v.status !== "available"}
                   className="absolute top-3 right-3 h-8 w-8 rounded-full bg-background/80 backdrop-blur flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
@@ -288,7 +306,10 @@ function VehiclesPage() {
                     <EyeOff className="h-4 w-4 text-muted-foreground" />
                   )}
                 </button>
-                <Car className="h-16 w-16 text-neutral-400 dark:text-neutral-600" aria-hidden="true" />
+                <Car
+                  className="h-16 w-16 text-neutral-400 dark:text-neutral-600"
+                  aria-hidden="true"
+                />
               </div>
               <CardContent className="p-4 space-y-3">
                 <div>
@@ -381,7 +402,11 @@ function VehiclesPage() {
                         variant="ghost"
                         onClick={(e) => {
                           e.stopPropagation();
-                          publishMutation.mutate({ id: v.id, published: !v.published });
+                          publishMutation.mutate({
+                            id: v.id,
+                            published: !v.published,
+                            version: v.updated_at,
+                          });
                         }}
                         disabled={!v.published && v.status !== "available"}
                         aria-label={v.published ? `Despublicar ${v.plate}` : `Publicar ${v.plate}`}
@@ -435,6 +460,43 @@ function VehiclesPage() {
         total={total}
         pageSize={vehiclesPage?.pageSize}
         onPageChange={(nextPage) => updateSearch({ page: nextPage, q, status: statusFilter })}
+      />
+      <StaleRecordConflictDialog
+        open={publicationConflict !== null}
+        onOpenChange={(open) => !open && setPublicationConflict(null)}
+        title="Veículo alterado por outra pessoa"
+        description="A publicação não foi alterada porque os dados do veículo mudaram. Confira a versão atual antes de continuar."
+        currentSummary={
+          publicationConflict?.current
+            ? [
+                `${publicationConflict.current.brand} ${publicationConflict.current.model} · ${publicationConflict.current.plate}`,
+                `Status: ${vehicleStatusLabel(publicationConflict.current.status)}`,
+                `Custo: ${brl(publicationConflict.current.cost_price)}`,
+              ]
+            : undefined
+        }
+        draftSummary={
+          publicationConflict
+            ? [
+                `Publicação solicitada: ${publicationConflict.published ? "publicar" : "despublicar"}`,
+              ]
+            : undefined
+        }
+        canReapply={Boolean(publicationConflict?.current)}
+        onReload={() => {
+          const current = publicationConflict?.current;
+          if (current) queryClient.setQueryData(vehicleKeys.detail(current.id), current);
+          void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
+        }}
+        onReapply={() => {
+          const conflict = publicationConflict;
+          if (!conflict?.current) return;
+          publishMutation.mutate({
+            id: conflict.current.id,
+            published: conflict.published,
+            version: conflict.current.updated_at,
+          });
+        }}
       />
     </div>
   );

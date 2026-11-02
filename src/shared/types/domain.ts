@@ -85,6 +85,7 @@ export interface Vehicle {
   sale_price: number;
   published: boolean;
   status: VehicleStatus;
+  updated_at: string;
   image?: string;
   accessories?: string[];
   notes?: string;

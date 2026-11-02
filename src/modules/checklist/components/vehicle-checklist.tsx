@@ -64,6 +64,9 @@ import {
 import { employeeKeys, listEmployees } from "@/modules/employees/services/employees";
 import { ChecklistItemDialog } from "./checklist-item-dialog";
 import { toast } from "sonner";
+import { StaleRecordError } from "@/shared/lib/stale-record";
+import { StaleRecordConflictDialog } from "@/shared/components/stale-record-conflict-dialog";
+import { vehicleKeys } from "@/modules/vehicles/services/vehicles";
 
 const STATUS_ICON: Record<ChecklistStatus, React.ComponentType<{ className?: string }>> = {
   pending: Circle,
@@ -92,33 +95,64 @@ export function VehicleChecklist({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ChecklistItem | null>(null);
   const [confirmCancel, setConfirmCancel] = useState<ChecklistItem | null>(null);
+  const [conflict, setConflict] = useState<{
+    current: ChecklistItem | null;
+    intendedStatus?: ChecklistStatus;
+    cancel: boolean;
+  } | null>(null);
   const invalidateChecklist = async () => {
     await queryClient.invalidateQueries({ queryKey: checklistKeys.all });
     await queryClient.invalidateQueries({ queryKey: checklistKeys.byVehicle(vehicleId) });
+    await queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
   };
   const statusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: ChecklistStatus }) =>
-      updateChecklistItem(id, {
-        status,
-        completion_date:
-          status === "completed" ? new Date().toISOString().slice(0, 10) : undefined,
-      }),
+    mutationFn: ({
+      item,
+      status,
+      version,
+    }: {
+      item: ChecklistItem;
+      status: ChecklistStatus;
+      version: string;
+    }) =>
+      updateChecklistItem(
+        item.id,
+        {
+          status,
+          completion_date:
+            status === "completed" ? new Date().toISOString().slice(0, 10) : undefined,
+        },
+        version,
+      ),
     onSuccess: async (_item, variables) => {
       await invalidateChecklist();
       toast.success(`Status atualizado para "${STATUS_META[variables.status].label}"`);
     },
-    onError: (error) => {
+    onError: (error, variables) => {
+      if (error instanceof StaleRecordError) {
+        setConflict({
+          current: error.current as ChecklistItem | null,
+          intendedStatus: variables.status,
+          cancel: false,
+        });
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Falha ao atualizar o status.");
     },
   });
   const cancelMutation = useMutation({
-    mutationFn: cancelChecklistItem,
+    mutationFn: ({ item, version }: { item: ChecklistItem; version: string }) =>
+      cancelChecklistItem(item.id, version),
     onSuccess: async () => {
       await invalidateChecklist();
       toast.success("Item cancelado");
       setConfirmCancel(null);
     },
     onError: (error) => {
+      if (error instanceof StaleRecordError) {
+        setConflict({ current: error.current as ChecklistItem | null, cancel: true });
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Falha ao cancelar item.");
     },
   });
@@ -154,12 +188,12 @@ export function VehicleChecklist({
 
   const setStatus = (item: ChecklistItem, status: ChecklistStatus) => {
     if (readOnly) return;
-    statusMutation.mutate({ id: item.id, status });
+    statusMutation.mutate({ item, status, version: item.updated_at });
   };
 
   const remove = () => {
     if (!confirmCancel) return;
-    cancelMutation.mutate(confirmCancel.id);
+    cancelMutation.mutate({ item: confirmCancel, version: confirmCancel.updated_at });
   };
 
   return (
@@ -184,18 +218,12 @@ export function VehicleChecklist({
                 <Wrench className="h-4 w-4 text-muted-foreground" />
                 <h3 className="font-display font-semibold">Preparação do Veículo</h3>
                 {summary.readyForSale && (
-                  <Badge
-                    className="gap-1 border-0 bg-success/15 text-success"
-                    variant="outline"
-                  >
+                  <Badge className="gap-1 border-0 bg-success/15 text-success" variant="outline">
                     <Sparkles className="h-3 w-3" /> Pronto para venda
                   </Badge>
                 )}
                 {summary.hasUrgent && (
-                  <Badge
-                    className="border-0 bg-destructive/15 text-destructive"
-                    variant="outline"
-                  >
+                  <Badge className="border-0 bg-destructive/15 text-destructive" variant="outline">
                     Urgente
                   </Badge>
                 )}
@@ -483,6 +511,52 @@ export function VehicleChecklist({
         onOpenChange={setDialogOpen}
         vehicleId={vehicleId}
         item={editing}
+      />
+
+      <StaleRecordConflictDialog
+        open={conflict !== null}
+        onOpenChange={(open) => !open && setConflict(null)}
+        title="Item alterado por outra pessoa"
+        description={
+          conflict?.current
+            ? "A alteração rápida não foi aplicada para preservar a edição mais recente. Revise o status e os custos atuais antes de continuar."
+            : "O item foi removido. Atualize o checklist para conferir o estado atual."
+        }
+        currentSummary={
+          conflict?.current
+            ? [
+                `Status: ${STATUS_META[conflict.current.status].label}`,
+                `Custo estimado: ${brl(conflict.current.estimated_cost)}`,
+                `Custo real: ${brl(conflict.current.actual_cost)}`,
+              ]
+            : undefined
+        }
+        draftSummary={
+          conflict?.intendedStatus
+            ? [`Alteração solicitada: ${STATUS_META[conflict.intendedStatus].label}`]
+            : conflict?.cancel
+              ? ["Alteração solicitada: cancelar item"]
+              : undefined
+        }
+        canReapply={Boolean(conflict?.current)}
+        onReload={() => {
+          setConflict(null);
+          void invalidateChecklist();
+        }}
+        onReapply={() => {
+          const current = conflict?.current;
+          if (!current || !conflict) return;
+          if (conflict.cancel) {
+            cancelMutation.mutate({ item: current, version: current.updated_at });
+          } else if (conflict.intendedStatus) {
+            statusMutation.mutate({
+              item: current,
+              status: conflict.intendedStatus,
+              version: current.updated_at,
+            });
+          }
+          setConflict(null);
+        }}
       />
 
       <AlertDialog open={!!confirmCancel} onOpenChange={(v) => !v && setConfirmCancel(null)}>

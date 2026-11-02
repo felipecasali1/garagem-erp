@@ -35,6 +35,7 @@ const vehicle: Vehicle = {
   sale_price: 65000,
   published: true,
   status: "available",
+  updated_at: "2026-11-02T00:00:00.000Z",
   accessories: [],
 };
 

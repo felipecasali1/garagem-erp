@@ -4,6 +4,7 @@ import type { VehicleDraft } from "@/modules/vehicles/types";
 import { normalizeVehicleDraft } from "@/modules/vehicles/lib/normalize-vehicle-draft";
 import { currentOperationalDate } from "@/modules/alerts/lib/current-operational-date";
 import { DEFAULT_PAGE_SIZE, normalizePage, type PaginatedResult } from "@/shared/lib/pagination";
+import { StaleRecordError } from "@/shared/lib/stale-record";
 
 type VehicleRow = {
   id: number;
@@ -23,6 +24,7 @@ type VehicleRow = {
   sale_price: number;
   published: boolean;
   status: Vehicle["status"];
+  updated_at: string;
   image: string | null;
   notes: string | null;
   vehicle_accessories?: Array<{
@@ -78,6 +80,7 @@ function mapVehicle(row: VehicleRow): Vehicle {
     sale_price: Number(row.sale_price),
     published: row.published,
     status: row.status,
+    updated_at: row.updated_at,
     image: row.image ?? undefined,
     notes: row.notes ?? undefined,
     accessories:
@@ -92,10 +95,6 @@ function toVehiclePayload(draft: VehicleDraft) {
   return normalizeVehicleDraft(draft);
 }
 
-function isSaleManagedStatus(status: Vehicle["status"]) {
-  return status === "reserved" || status === "sold";
-}
-
 async function unwrapSingle<T>(
   response: PromiseLike<{ data: unknown; error: { message: string } | null }>,
 ): Promise<T> {
@@ -107,6 +106,36 @@ async function unwrapSingle<T>(
     throw new Error("Registro nao encontrado.");
   }
   return data as T;
+}
+
+async function unwrapVehicleRpc(
+  response: PromiseLike<{
+    data: unknown;
+    error: { message: string; code?: string } | null;
+  }>,
+  vehicleId: number,
+) {
+  const { data, error } = await response;
+  if (error) {
+    if (error.message.includes("STALE_RECORD:")) {
+      let current: Vehicle | null = null;
+      try {
+        current = await getVehicleById(vehicleId);
+      } catch {
+        // The stale record may have been removed after the failed write.
+      }
+      throw new StaleRecordError(
+        "Outra pessoa alterou este veículo enquanto você o editava. Compare os dados atuais com o seu rascunho antes de escolher como continuar.",
+        current,
+      );
+    }
+    if (error.message.includes("VEHICLE_HAS_OPEN_PREPARATION:")) {
+      throw new Error("Conclua ou cancele as tarefas pendentes antes de disponibilizar o veículo.");
+    }
+    throw new Error(error.message);
+  }
+  if (!data) throw new Error("Veículo não encontrado.");
+  return getVehicleById(vehicleId);
 }
 
 function isMissingVehicleAccessoryActiveColumn(error: { message: string } | null) {
@@ -238,11 +267,11 @@ async function createVehicleChecklist(vehicleId: number, checklist: VehicleDraft
     return;
   }
 
-  const { error: insertError } = await supabase
+  const { error } = await supabase
     .from("vehicle_checklist_items")
     .insert(checklist.map((item) => toChecklistPayload(item, vehicleId)));
-  if (insertError) {
-    throw new Error(insertError.message);
+  if (error) {
+    throw new Error(error.message);
   }
 }
 
@@ -381,84 +410,51 @@ export async function createVehicle(draft: VehicleDraft) {
   return getVehicleById(data.id);
 }
 
-export async function updateVehicle(id: number, draft: VehicleDraft) {
-  const currentVehicle = await getVehicleById(id);
-  if (currentVehicle.status === "sold") {
-    throw new Error("Veiculo vendido nao pode ter dados operacionais alterados.");
-  }
-
-  const payload = {
-    ...toVehiclePayload(draft),
-    status: currentVehicle.status,
-    published: currentVehicle.status === "available" ? draft.published : false,
-  };
-
-  await unwrapSingle<{ id: number }>(
-    supabase.from("vehicles").update(payload).eq("id", id).select("id").single(),
+export async function updateVehicle(id: number, draft: VehicleDraft, expectedUpdatedAt: string) {
+  const { status: _status, ...changes } = toVehiclePayload(draft);
+  await unwrapVehicleRpc(
+    supabase.rpc("update_vehicle_with_version", {
+      p_vehicle_id: id,
+      p_expected_updated_at: expectedUpdatedAt,
+      p_changes: changes,
+    }),
+    id,
   );
   await syncVehicleAccessories(id, draft.accessories);
   return getVehicleById(id);
 }
 
-export async function archiveVehicle(id: number) {
-  const currentVehicle = await getVehicleById(id);
-  if (isSaleManagedStatus(currentVehicle.status)) {
-    throw new Error("Veículos reservados ou vendidos não devem ser arquivados manualmente.");
-  }
-
-  await unwrapSingle<{ id: number }>(
-    supabase
-      .from("vehicles")
-      .update({ published: false, status: "archived" })
-      .eq("id", id)
-      .select("id")
-      .single(),
+export async function archiveVehicle(id: number, expectedUpdatedAt: string) {
+  return unwrapVehicleRpc(
+    supabase.rpc("archive_vehicle_with_version", {
+      p_vehicle_id: id,
+      p_expected_updated_at: expectedUpdatedAt,
+    }),
+    id,
   );
-  return getVehicleById(id);
 }
 
-export async function setVehiclePublished(id: number, published: boolean) {
-  if (published) {
-    const vehicle = await getVehicleById(id);
-    if (vehicle.status !== "available") {
-      throw new Error("Apenas veículos disponíveis podem ser publicados.");
-    }
-  }
-
-  await unwrapSingle<{ id: number }>(
-    supabase.from("vehicles").update({ published }).eq("id", id).select("id").single(),
+export async function setVehiclePublished(
+  id: number,
+  published: boolean,
+  expectedUpdatedAt: string,
+) {
+  return unwrapVehicleRpc(
+    supabase.rpc("set_vehicle_published_with_version", {
+      p_vehicle_id: id,
+      p_expected_updated_at: expectedUpdatedAt,
+      p_published: published,
+    }),
+    id,
   );
-  return getVehicleById(id);
 }
 
-export async function finishVehiclePreparation(id: number) {
-  const vehicle = await getVehicleById(id);
-  if (vehicle.status !== "in_repair") {
-    throw new Error("Apenas veículos em preparação podem ser finalizados.");
-  }
-
-  const { data: pendingItems, error: checklistError } = await supabase
-    .from("vehicle_checklist_items")
-    .select("id")
-    .eq("vehicle_id", id)
-    .not("status", "in", "(completed,cancelled)")
-    .limit(1);
-  if (checklistError) {
-    throw new Error(checklistError.message);
-  }
-
-  if ((pendingItems ?? []).length > 0) {
-    throw new Error("Conclua ou cancele os itens pendentes antes de finalizar a preparação.");
-  }
-
-  await unwrapSingle<{ id: number }>(
-    supabase
-      .from("vehicles")
-      .update({ status: "available", published: false })
-      .eq("id", id)
-      .select("id")
-      .single(),
+export async function finishVehiclePreparation(id: number, expectedUpdatedAt: string) {
+  return unwrapVehicleRpc(
+    supabase.rpc("finish_vehicle_preparation", {
+      p_vehicle_id: id,
+      p_expected_updated_at: expectedUpdatedAt,
+    }),
+    id,
   );
-
-  return getVehicleById(id);
 }

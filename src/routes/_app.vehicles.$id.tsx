@@ -35,6 +35,10 @@ import {
   vehicleKeys,
 } from "@/modules/vehicles/services/vehicles";
 import { toast } from "sonner";
+import { StaleRecordError } from "@/shared/lib/stale-record";
+import { StaleRecordConflictDialog } from "@/shared/components/stale-record-conflict-dialog";
+import type { Vehicle } from "@/shared/types/domain";
+import { vehicleStatusLabel } from "@/modules/vehicles/lib/vehicle-status-label";
 
 export const Route = createFileRoute("/_app/vehicles/$id")({
   head: () => ({ meta: [{ title: "Detalhe do Veículo | GaragemERP" }] }),
@@ -63,6 +67,11 @@ function VehicleDetail() {
   const queryClient = useQueryClient();
   const [confirmFinishPreparation, setConfirmFinishPreparation] = useState(false);
   const [activeTab, setActiveTab] = useState("info");
+  const [conflict, setConflict] = useState<{
+    current: Vehicle | null;
+    action: "publish" | "finish";
+    published?: boolean;
+  } | null>(null);
   const {
     data: vehicle,
     isLoading,
@@ -83,20 +92,28 @@ function VehicleDetail() {
     enabled: Number.isFinite(numericId),
   });
   const publishMutation = useMutation({
-    mutationFn: ({ published }: { published: boolean }) =>
-      setVehiclePublished(numericId, published),
+    mutationFn: ({ published, version }: { published: boolean; version: string }) =>
+      setVehiclePublished(numericId, published, version),
     onSuccess: (nextVehicle) => {
       queryClient.setQueryData(vehicleKeys.detail(nextVehicle.id), nextVehicle);
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
     },
-    onError: (mutationError) => {
+    onError: (mutationError, variables) => {
+      if (mutationError instanceof StaleRecordError) {
+        setConflict({
+          current: mutationError.current as Vehicle | null,
+          action: "publish",
+          published: variables.published,
+        });
+        return;
+      }
       toast.error(
         mutationError instanceof Error ? mutationError.message : "Falha ao atualizar publicação.",
       );
     },
   });
   const finishPreparationMutation = useMutation({
-    mutationFn: () => finishVehiclePreparation(numericId),
+    mutationFn: (version: string) => finishVehiclePreparation(numericId, version),
     onSuccess: async (nextVehicle) => {
       queryClient.setQueryData(vehicleKeys.detail(nextVehicle.id), nextVehicle);
       await queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
@@ -104,11 +121,22 @@ function VehicleDetail() {
       setConfirmFinishPreparation(false);
       toast.success("Preparação finalizada");
     },
-    onError: (mutationError) => {
+    onError: async (mutationError) => {
+      if (mutationError instanceof StaleRecordError) {
+        setConflict({ current: mutationError.current as Vehicle | null, action: "finish" });
+        return;
+      }
+      if (
+        mutationError instanceof Error &&
+        mutationError.message.includes("Conclua ou cancele as tarefas pendentes")
+      ) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: checklistKeys.byVehicle(numericId) }),
+          queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(numericId) }),
+        ]);
+      }
       toast.error(
-        mutationError instanceof Error
-          ? mutationError.message
-          : "Falha ao finalizar preparação.",
+        mutationError instanceof Error ? mutationError.message : "Falha ao finalizar preparação.",
       );
     },
   });
@@ -199,7 +227,9 @@ function VehicleDetail() {
           </Button>
         )}
         <Button
-          onClick={() => publishMutation.mutate({ published: !vehicle.published })}
+          onClick={() =>
+            publishMutation.mutate({ published: !vehicle.published, version: vehicle.updated_at })
+          }
           disabled={!vehicle.published && vehicle.status !== "available"}
         >
           {vehicle.published ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -431,7 +461,53 @@ function VehicleDetail() {
         }
         confirmDisabled={finishPreparationMutation.isPending}
         confirmVariant="default"
-        onConfirm={() => finishPreparationMutation.mutate()}
+        onConfirm={() => finishPreparationMutation.mutate(vehicle.updated_at)}
+      />
+      <StaleRecordConflictDialog
+        open={conflict !== null}
+        onOpenChange={(open) => !open && setConflict(null)}
+        title="Veículo alterado por outra pessoa"
+        description={
+          conflict?.current
+            ? "A ação foi interrompida porque o veículo mudou desde que esta tela foi carregada. Confira o status e o custo antes de continuar."
+            : "O veículo foi removido ou mudou. Atualize a página antes de tentar novamente."
+        }
+        currentSummary={
+          conflict?.current
+            ? [
+                `${conflict.current.brand} ${conflict.current.model} · ${conflict.current.plate}`,
+                `Status: ${vehicleStatusLabel(conflict.current.status)}`,
+                `Custo: ${brl(conflict.current.cost_price)}`,
+              ]
+            : undefined
+        }
+        draftSummary={
+          conflict?.action === "publish"
+            ? [`Publicação solicitada: ${conflict.published ? "publicar" : "despublicar"}`]
+            : conflict?.action === "finish"
+              ? ["Ação solicitada: finalizar preparação"]
+              : undefined
+        }
+        canReapply={Boolean(conflict?.current)}
+        onReload={() => {
+          const current = conflict?.current;
+          if (current) queryClient.setQueryData(vehicleKeys.detail(current.id), current);
+          void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
+          void queryClient.invalidateQueries({ queryKey: checklistKeys.byVehicle(numericId) });
+        }}
+        onReapply={() => {
+          const currentConflict = conflict;
+          const current = currentConflict?.current;
+          if (!current || !currentConflict) return;
+          if (currentConflict.action === "publish") {
+            publishMutation.mutate({
+              published: Boolean(currentConflict.published),
+              version: current.updated_at,
+            });
+          } else {
+            finishPreparationMutation.mutate(current.updated_at);
+          }
+        }}
       />
     </div>
   );

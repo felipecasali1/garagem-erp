@@ -100,6 +100,7 @@ function mapVehicle(row: VehicleRow): Vehicle {
     sale_price: Number(row.sale_price),
     published: row.published,
     status: row.status,
+    updated_at: row.updated_at,
     image: row.image ?? undefined,
     notes: row.notes ?? undefined,
     accessories: [],
@@ -209,7 +210,7 @@ const createPurchaseServer = createServerFn({ method: "POST" })
 
     const { data: vehicle, error: vehicleError } = await supabaseAdmin
       .from("vehicles")
-      .select("id, brand, model, plate, status")
+      .select("id, brand, model, plate, status, updated_at")
       .eq("id", data.vehicleId)
       .maybeSingle();
     if (vehicleError) {
@@ -229,7 +230,7 @@ const createPurchaseServer = createServerFn({ method: "POST" })
         vehicle_id: data.vehicleId,
         total_value: data.totalValue,
         purchase_date: data.purchaseDate,
-        status: data.status,
+        status: data.status === "completed" ? "pending" : data.status,
         notes: normalizeText(data.notes),
       })
       .select("id")
@@ -274,7 +275,7 @@ async function applyCompletedPurchase({
 }: {
   supabaseAdmin: SupabaseAdminClient;
   purchaseId: number;
-  vehicle: { brand: string; model: string; plate: string | null };
+  vehicle: { brand: string; model: string; plate: string | null; updated_at: string };
   vehicleId: number;
   totalValue: number;
   purchaseDate: string;
@@ -292,16 +293,24 @@ async function applyCompletedPurchase({
 
   const nextVehicleStatus = (checklistItems ?? []).length > 0 ? "in_repair" : "available";
 
-  const { error: vehicleUpdateError } = await supabaseAdmin
+  const { data: updatedVehicle, error: vehicleUpdateError } = await supabaseAdmin
     .from("vehicles")
     .update({
       cost_price: totalValue,
       status: nextVehicleStatus,
       published: false,
     })
-    .eq("id", vehicleId);
+    .eq("id", vehicleId)
+    .eq("updated_at", vehicle.updated_at)
+    .select("id")
+    .maybeSingle();
   if (vehicleUpdateError) {
     throw new Error(vehicleUpdateError.message);
+  }
+  if (!updatedVehicle) {
+    throw new Error(
+      "O veículo mudou enquanto a compra era concluída. Atualize os dados e tente novamente.",
+    );
   }
 
   let nextFinancialTransactionId = financialTransactionId;
@@ -365,7 +374,7 @@ const completePurchaseServer = createServerFn({ method: "POST" })
 
     const { data: vehicle, error: vehicleError } = await supabaseAdmin
       .from("vehicles")
-      .select("id, brand, model, plate")
+      .select("id, brand, model, plate, updated_at")
       .eq("id", purchase.vehicle_id)
       .maybeSingle();
     if (vehicleError) {

@@ -22,10 +22,7 @@ import { StatusBadge } from "@/shared/components/status-badge";
 import { DEFAULT_ACCESSORIES } from "@/shared/lib/accessories";
 import { brl } from "@/shared/lib/format";
 import { PlateInput } from "@/shared/components/form/field-inputs";
-import {
-  accessoryKeys,
-  listActiveAccessories,
-} from "@/modules/settings/services/accessories";
+import { accessoryKeys, listActiveAccessories } from "@/modules/settings/services/accessories";
 import type { VehicleDraft } from "@/modules/vehicles/types";
 import {
   archiveVehicle,
@@ -34,11 +31,39 @@ import {
   vehicleKeys,
 } from "@/modules/vehicles/services/vehicles";
 import { VehicleChecklist } from "@/modules/checklist/components/vehicle-checklist";
+import { StaleRecordError } from "@/shared/lib/stale-record";
+import { StaleRecordConflictDialog } from "@/shared/components/stale-record-conflict-dialog";
+import type { Vehicle } from "@/shared/types/domain";
+import { vehicleStatusLabel } from "@/modules/vehicles/lib/vehicle-status-label";
 
 export const Route = createFileRoute("/_app/vehicles/edit/$id")({
   head: () => ({ meta: [{ title: "Editar Veículo | GaragemERP" }] }),
   component: EditVehicle,
 });
+
+function vehicleToDraft(vehicle: Vehicle): VehicleDraft {
+  return {
+    plate: vehicle.plate,
+    chassis: vehicle.chassis ?? "",
+    vin: vehicle.vin ?? "",
+    brand: vehicle.brand,
+    model: vehicle.model,
+    version: vehicle.version ?? "",
+    color: vehicle.color,
+    fuel_type: vehicle.fuel_type,
+    transmission: vehicle.transmission,
+    current_mileage: vehicle.current_mileage,
+    manufacture_year: vehicle.manufacture_year,
+    model_year: vehicle.model_year,
+    cost_price: vehicle.cost_price,
+    sale_price: vehicle.sale_price,
+    published: vehicle.published,
+    status: vehicle.status,
+    notes: vehicle.notes ?? "",
+    accessories: vehicle.accessories ?? [],
+    checklist: [],
+  };
+}
 
 function EditVehicle() {
   const { id } = Route.useParams();
@@ -63,6 +88,11 @@ function EditVehicle() {
       ? catalogAccessories.map((accessory) => accessory.name)
       : DEFAULT_ACCESSORIES;
   const [draft, setDraft] = useState<VehicleDraft | null>(null);
+  const [baselineUpdatedAt, setBaselineUpdatedAt] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<{
+    current: Vehicle | null;
+    action: "save" | "archive";
+  } | null>(null);
   const [customAcc, setCustomAcc] = useState("");
   const [confirmArchiveOpen, setConfirmArchiveOpen] = useState(false);
   const [confirmAccessoryRemove, setConfirmAccessoryRemove] = useState<string | null>(null);
@@ -92,31 +122,18 @@ function EditVehicle() {
 
   useEffect(() => {
     if (!v) return;
-    setDraft({
-      plate: v.plate,
-      chassis: v.chassis ?? "",
-      vin: v.vin ?? "",
-      brand: v.brand,
-      model: v.model,
-      version: v.version ?? "",
-      color: v.color,
-      fuel_type: v.fuel_type,
-      transmission: v.transmission,
-      current_mileage: v.current_mileage,
-      manufacture_year: v.manufacture_year,
-      model_year: v.model_year,
-      cost_price: v.cost_price,
-      sale_price: v.sale_price,
-      published: v.published,
-      status: v.status,
-      notes: v.notes ?? "",
-      accessories: v.accessories ?? [],
-      checklist: [],
-    });
+    setDraft((current) => current ?? vehicleToDraft(v));
+    setBaselineUpdatedAt((current) => current ?? v.updated_at);
   }, [v]);
 
   const updateMutation = useMutation({
-    mutationFn: (nextDraft: VehicleDraft) => updateVehicle(numericId, nextDraft),
+    mutationFn: ({
+      nextDraft,
+      expectedUpdatedAt,
+    }: {
+      nextDraft: VehicleDraft;
+      expectedUpdatedAt: string;
+    }) => updateVehicle(numericId, nextDraft, expectedUpdatedAt),
     onSuccess: (vehicle) => {
       queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
@@ -124,13 +141,17 @@ function EditVehicle() {
       void navigate({ to: "/vehicles/$id", params: { id } });
     },
     onError: (mutationError) => {
+      if (mutationError instanceof StaleRecordError) {
+        setConflict({ current: mutationError.current as Vehicle | null, action: "save" });
+        return;
+      }
       toast.error(
         mutationError instanceof Error ? mutationError.message : "Falha ao salvar alterações.",
       );
     },
   });
   const archiveMutation = useMutation({
-    mutationFn: () => archiveVehicle(numericId),
+    mutationFn: (expectedUpdatedAt: string) => archiveVehicle(numericId, expectedUpdatedAt),
     onSuccess: (vehicle) => {
       queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
@@ -138,6 +159,10 @@ function EditVehicle() {
       void navigate({ to: "/vehicles" });
     },
     onError: (mutationError) => {
+      if (mutationError instanceof StaleRecordError) {
+        setConflict({ current: mutationError.current as Vehicle | null, action: "archive" });
+        return;
+      }
       toast.error(
         mutationError instanceof Error ? mutationError.message : "Falha ao arquivar veículo.",
       );
@@ -206,7 +231,8 @@ function EditVehicle() {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    updateMutation.mutate(draft);
+    if (!baselineUpdatedAt) return;
+    updateMutation.mutate({ nextDraft: draft, expectedUpdatedAt: baselineUpdatedAt });
   };
   const isEvaluation = draft.status === "evaluating";
   const isSaleManagedStatus = draft.status === "reserved" || draft.status === "sold";
@@ -295,7 +321,7 @@ function EditVehicle() {
         confirmDisabled={archiveMutation.isPending}
         onConfirm={() => {
           setConfirmArchiveOpen(false);
-          archiveMutation.mutate();
+          if (baselineUpdatedAt) archiveMutation.mutate(baselineUpdatedAt);
         }}
       />
       <ConfirmActionDialog
@@ -319,6 +345,48 @@ function EditVehicle() {
               : current,
           );
           toast.success("Acessório removido");
+        }}
+      />
+
+      <StaleRecordConflictDialog
+        open={conflict !== null}
+        onOpenChange={(open) => !open && setConflict(null)}
+        description={
+          conflict?.current
+            ? "O salvamento foi interrompido para evitar sobrescrever uma alteração mais recente. Escolha carregar a versão atual ou reaplicar explicitamente sua alteração."
+            : "O registro mudou ou foi removido. Seu rascunho continua nesta tela; atualize os dados antes de tentar novamente."
+        }
+        currentSummary={
+          conflict?.current
+            ? [
+                `${conflict.current.brand} ${conflict.current.model} · ${conflict.current.plate}`,
+                `Status: ${vehicleStatusLabel(conflict.current.status)}`,
+                `Custo: ${brl(conflict.current.cost_price)}`,
+              ]
+            : undefined
+        }
+        draftSummary={
+          draft
+            ? [`Status: ${vehicleStatusLabel(draft.status)}`, `Custo: ${brl(draft.cost_price)}`]
+            : undefined
+        }
+        canReapply={Boolean(conflict?.current)}
+        onReload={() => {
+          const current = conflict?.current;
+          if (!current) return;
+          setDraft(vehicleToDraft(current));
+          setBaselineUpdatedAt(current.updated_at);
+          queryClient.setQueryData(vehicleKeys.detail(current.id), current);
+        }}
+        onReapply={() => {
+          const currentConflict = conflict;
+          const current = currentConflict?.current;
+          if (!current || !draft || !currentConflict) return;
+          if (currentConflict.action === "archive") {
+            archiveMutation.mutate(current.updated_at);
+          } else {
+            updateMutation.mutate({ nextDraft: draft, expectedUpdatedAt: current.updated_at });
+          }
         }}
       />
 
@@ -511,15 +579,7 @@ function EditVehicle() {
   );
 }
 
-function ReadonlyField({
-  label,
-  value,
-  money,
-}: {
-  label: string;
-  value: string;
-  money?: boolean;
-}) {
+function ReadonlyField({ label, value, money }: { label: string; value: string; money?: boolean }) {
   return (
     <div>
       <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>

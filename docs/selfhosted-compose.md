@@ -37,6 +37,16 @@ O comando de parada remove os containers e a rede, mas preserva o volume `garage
 
 As portas da aplicação e do gateway são publicadas apenas em `127.0.0.1`; o Postgres não publica porta no host. Dentro da rede Docker, a aplicação usa `http://api-gw:8000`. O navegador usa `http://127.0.0.1:8000`. O `.env` Cloud e `.env.docker` não são lidos pelo Compose. Se alterar as portas em `.env.compose`, as URLs internas e os redirecionamentos são derivados delas.
 
+## Validar concorrência de preparação
+
+```bash
+npm run test:integration:vehicle-preparation
+```
+
+O teste inicia um projeto Compose descartável, aplica as migrations e executa cenários de venda e preparação com requisições autenticadas ao PostgREST. Ele remove o projeto e o volume temporários ao terminar e não usa `.env.compose`, as credenciais Cloud nem o volume da instalação local.
+
+`npm run test:integration:sales` permanece como alias de compatibilidade e executa a mesma suíte combinada.
+
 Este recorte inclui Postgres, Auth, PostgREST, Studio, gateway e aplicação. Storage de arquivos/fotos, Realtime, Edge Functions, pooler e observabilidade não são iniciados porque não são usados pelo escopo atual do ERP. As imagens de Supabase estão fixadas na versão da configuração self-hosted `v0.8.3` (commit `bc27d2661edd09a5d0b8d76ce33da6d4071a756e`). Os pequenos arquivos de bootstrap do banco e do gateway são adaptações da configuração oficial Supabase, licenciada sob Apache-2.0.
 
 ## Diagnóstico
