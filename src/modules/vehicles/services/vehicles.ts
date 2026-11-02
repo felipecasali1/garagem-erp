@@ -167,112 +167,16 @@ function applyVehicleListFilters<
   return nextQuery;
 }
 
-function toChecklistPayload(item: VehicleDraft["checklist"][number], vehicleId: number) {
+function toChecklistPayload(item: VehicleDraft["checklist"][number]) {
   return {
-    vehicle_id: vehicleId,
     title: item.title.trim(),
+    description: null,
     category: item.category,
-    status: "pending" as const,
     priority: item.priority,
     estimated_cost: item.estimated_cost,
-    actual_cost: 0,
     due_date: item.due_date ?? null,
-    attachments: [],
+    notes: null,
   };
-}
-
-async function syncVehicleAccessories(vehicleId: number, accessories: string[]) {
-  const normalized = [...new Set(accessories.map((name) => name.trim()).filter(Boolean))];
-
-  const { error: deactivateError } = await supabase
-    .from("vehicle_accessories")
-    .update({ active: false })
-    .eq("vehicle_id", vehicleId);
-  if (deactivateError) {
-    throw new Error(deactivateError.message);
-  }
-
-  if (normalized.length === 0) {
-    return;
-  }
-
-  const { data: existingAccessories, error: existingError } = await supabase
-    .from("accessories")
-    .select("id, name")
-    .in("name", normalized);
-  if (existingError) {
-    throw new Error(existingError.message);
-  }
-
-  const existingByName = new Map(existingAccessories.map((item) => [item.name, item.id]));
-  const missingNames = normalized.filter((name) => !existingByName.has(name));
-
-  if (missingNames.length > 0) {
-    const { data: insertedAccessories, error: insertAccessoriesError } = await supabase
-      .from("accessories")
-      .insert(missingNames.map((name) => ({ name })))
-      .select("id, name");
-    if (insertAccessoriesError) {
-      throw new Error(insertAccessoriesError.message);
-    }
-
-    for (const accessory of insertedAccessories) {
-      existingByName.set(accessory.name, accessory.id);
-    }
-  }
-
-  const desiredAccessoryIds = normalized
-    .map((name) => existingByName.get(name))
-    .filter((id): id is number => typeof id === "number");
-
-  const { data: existingLinks, error: existingLinksError } = await supabase
-    .from("vehicle_accessories")
-    .select("id, accessory_id")
-    .eq("vehicle_id", vehicleId)
-    .in("accessory_id", desiredAccessoryIds);
-  if (existingLinksError) {
-    throw new Error(existingLinksError.message);
-  }
-
-  const existingLinkIds = new Set(existingLinks.map((entry) => entry.accessory_id));
-  const linksToCreate = desiredAccessoryIds
-    .filter((accessoryId) => !existingLinkIds.has(accessoryId))
-    .map((accessoryId) => ({
-      vehicle_id: vehicleId,
-      accessory_id: accessoryId,
-      active: true,
-    }));
-
-  const idsToReactivate = existingLinks.map((entry) => entry.id);
-  if (idsToReactivate.length > 0) {
-    const { error: reactivateError } = await supabase
-      .from("vehicle_accessories")
-      .update({ active: true })
-      .in("id", idsToReactivate);
-    if (reactivateError) {
-      throw new Error(reactivateError.message);
-    }
-  }
-
-  if (linksToCreate.length > 0) {
-    const { error: linkError } = await supabase.from("vehicle_accessories").insert(linksToCreate);
-    if (linkError) {
-      throw new Error(linkError.message);
-    }
-  }
-}
-
-async function createVehicleChecklist(vehicleId: number, checklist: VehicleDraft["checklist"]) {
-  if (checklist.length === 0) {
-    return;
-  }
-
-  const { error } = await supabase
-    .from("vehicle_checklist_items")
-    .insert(checklist.map((item) => toChecklistPayload(item, vehicleId)));
-  if (error) {
-    throw new Error(error.message);
-  }
 }
 
 export async function listVehicles() {
@@ -395,32 +299,36 @@ export async function getVehicleById(id: number) {
   return mapVehicle(data);
 }
 
-export async function createVehicle(draft: VehicleDraft) {
-  const payload = {
-    ...toVehiclePayload(draft),
-    status: "evaluating" as const,
-    published: false,
-  };
-
-  const data = await unwrapSingle<{ id: number }>(
-    supabase.from("vehicles").insert(payload).select("id").single(),
+export async function createVehicle(draft: VehicleDraft, idempotencyKey: string) {
+  const { status: _status, published: _published, ...vehicle } = toVehiclePayload(draft);
+  const vehicleId = await unwrapSingle<number>(
+    supabase.rpc("create_vehicle_configuration", {
+      p_idempotency_key: idempotencyKey,
+      p_vehicle: vehicle,
+      p_accessories: draft.accessories,
+      p_checklist_items: draft.checklist.map(toChecklistPayload),
+    }),
   );
-  await syncVehicleAccessories(data.id, draft.accessories);
-  await createVehicleChecklist(data.id, draft.checklist);
-  return getVehicleById(data.id);
+  return getVehicleById(vehicleId);
 }
 
-export async function updateVehicle(id: number, draft: VehicleDraft, expectedUpdatedAt: string) {
+export async function updateVehicle(
+  id: number,
+  draft: VehicleDraft,
+  expectedUpdatedAt: string,
+  idempotencyKey: string,
+) {
   const { status: _status, ...changes } = toVehiclePayload(draft);
   await unwrapVehicleRpc(
-    supabase.rpc("update_vehicle_with_version", {
+    supabase.rpc("update_vehicle_configuration", {
+      p_idempotency_key: idempotencyKey,
       p_vehicle_id: id,
       p_expected_updated_at: expectedUpdatedAt,
       p_changes: changes,
+      p_accessories: draft.accessories,
     }),
     id,
   );
-  await syncVehicleAccessories(id, draft.accessories);
   return getVehicleById(id);
 }
 

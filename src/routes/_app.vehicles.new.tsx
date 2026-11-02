@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Save, Plus, X, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -9,14 +9,17 @@ import { Label } from "@/shared/components/ui/label";
 import { Textarea } from "@/shared/components/ui/textarea";
 import { Badge } from "@/shared/components/ui/badge";
 import { DatePicker } from "@/shared/components/ui/date-picker";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/components/ui/select";
 import { toast } from "sonner";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { DEFAULT_ACCESSORIES } from "@/shared/lib/accessories";
-import {
-  accessoryKeys,
-  listActiveAccessories,
-} from "@/modules/settings/services/accessories";
+import { accessoryKeys, listActiveAccessories } from "@/modules/settings/services/accessories";
 import { PlateInput } from "@/shared/components/form/field-inputs";
 import {
   CATEGORY_LABEL,
@@ -66,6 +69,7 @@ function NewVehicle() {
     checklist: [],
   });
   const [customAcc, setCustomAcc] = useState("");
+  const createAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const [confirmAccessoryRemove, setConfirmAccessoryRemove] = useState<string | null>(null);
   const [confirmChecklistRemove, setConfirmChecklistRemove] = useState<string | null>(null);
   const patchVehicleDraft = (patch: Partial<VehicleDraft>) =>
@@ -125,8 +129,12 @@ function NewVehicle() {
   const isEvaluation = vehicleDraft.status === "evaluating";
 
   const createMutation = useMutation({
-    mutationFn: createVehicle,
-    onSuccess: (vehicle) => {
+    mutationFn: ({ draft, idempotencyKey }: { draft: VehicleDraft; idempotencyKey: string }) =>
+      createVehicle(draft, idempotencyKey),
+    onSuccess: (vehicle, variables) => {
+      if (createAttemptRef.current?.key === variables.idempotencyKey) {
+        createAttemptRef.current = null;
+      }
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
       queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
       toast.success("Avaliação de veículo cadastrada");
@@ -139,7 +147,11 @@ function NewVehicle() {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    createMutation.mutate(vehicleDraft);
+    const fingerprint = JSON.stringify(vehicleDraft);
+    if (createAttemptRef.current?.fingerprint !== fingerprint) {
+      createAttemptRef.current = { fingerprint, key: crypto.randomUUID() };
+    }
+    createMutation.mutate({ draft: vehicleDraft, idempotencyKey: createAttemptRef.current.key });
   };
 
   return (

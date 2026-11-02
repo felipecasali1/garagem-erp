@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Archive, ArrowLeft, Plus, Save, X } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -89,6 +89,7 @@ function EditVehicle() {
       : DEFAULT_ACCESSORIES;
   const [draft, setDraft] = useState<VehicleDraft | null>(null);
   const [baselineUpdatedAt, setBaselineUpdatedAt] = useState<string | null>(null);
+  const updateAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const [conflict, setConflict] = useState<{
     current: Vehicle | null;
     action: "save" | "archive";
@@ -126,15 +127,32 @@ function EditVehicle() {
     setBaselineUpdatedAt((current) => current ?? v.updated_at);
   }, [v]);
 
+  const createUpdateCommand = (nextDraft: VehicleDraft, expectedUpdatedAt: string) => {
+    const fingerprint = JSON.stringify({ nextDraft, expectedUpdatedAt });
+    if (updateAttemptRef.current?.fingerprint !== fingerprint) {
+      updateAttemptRef.current = { fingerprint, key: crypto.randomUUID() };
+    }
+    return {
+      nextDraft,
+      expectedUpdatedAt,
+      idempotencyKey: updateAttemptRef.current.key,
+    };
+  };
+
   const updateMutation = useMutation({
     mutationFn: ({
       nextDraft,
       expectedUpdatedAt,
+      idempotencyKey,
     }: {
       nextDraft: VehicleDraft;
       expectedUpdatedAt: string;
-    }) => updateVehicle(numericId, nextDraft, expectedUpdatedAt),
-    onSuccess: (vehicle) => {
+      idempotencyKey: string;
+    }) => updateVehicle(numericId, nextDraft, expectedUpdatedAt, idempotencyKey),
+    onSuccess: (vehicle, variables) => {
+      if (updateAttemptRef.current?.key === variables.idempotencyKey) {
+        updateAttemptRef.current = null;
+      }
       queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
       toast.success("Alterações salvas");
@@ -232,7 +250,7 @@ function EditVehicle() {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!baselineUpdatedAt) return;
-    updateMutation.mutate({ nextDraft: draft, expectedUpdatedAt: baselineUpdatedAt });
+    updateMutation.mutate(createUpdateCommand(draft, baselineUpdatedAt));
   };
   const isEvaluation = draft.status === "evaluating";
   const isSaleManagedStatus = draft.status === "reserved" || draft.status === "sold";
@@ -385,7 +403,7 @@ function EditVehicle() {
           if (currentConflict.action === "archive") {
             archiveMutation.mutate(current.updated_at);
           } else {
-            updateMutation.mutate({ nextDraft: draft, expectedUpdatedAt: current.updated_at });
+            updateMutation.mutate(createUpdateCommand(draft, current.updated_at));
           }
         }}
       />

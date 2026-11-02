@@ -403,6 +403,43 @@ function checklistItem(vehicleId) {
   };
 }
 
+function vehicleConfigurationArguments(index, key = randomUUID(), overrides = {}) {
+  return {
+    p_idempotency_key: key,
+    p_vehicle: {
+      plate: `CFG${String(index).padStart(4, "0")}`,
+      chassis: null,
+      vin: null,
+      brand: "Honda",
+      model: `Civic Configuração ${index}`,
+      version: null,
+      color: "Preto",
+      fuel_type: "flex",
+      transmission: "automatic",
+      current_mileage: 100,
+      manufacture_year: 2024,
+      model_year: 2025,
+      cost_price: 50000,
+      sale_price: 65000,
+      image: null,
+      notes: null,
+    },
+    p_accessories: ["Teto solar", `Acessório ${index}`],
+    p_checklist_items: [
+      {
+        title: `Inspeção inicial ${index}`,
+        description: null,
+        category: "inspection",
+        priority: "medium",
+        estimated_cost: 100,
+        due_date: null,
+        notes: null,
+      },
+    ],
+    ...overrides,
+  };
+}
+
 test(
   "sale and vehicle preparation writes remain safe through PostgREST",
   { timeout: 600_000 },
@@ -1505,6 +1542,163 @@ test(
       );
       assert.equal(result.response.status, 403, JSON.stringify(result.data));
     });
+
+    await t.test(
+      "Vehicle configuration creation is atomic and idempotent across Accessories and ChecklistItems",
+      async () => {
+        const user = fixtures.users[0];
+        const args = vehicleConfigurationArguments(1);
+        const [first, retry] = await Promise.all([
+          callRpc(user, "create_vehicle_configuration", args),
+          callRpc(user, "create_vehicle_configuration", args),
+        ]);
+
+        assert.equal(first.response.status, 200, JSON.stringify(first.data));
+        assert.equal(retry.response.status, 200, JSON.stringify(retry.data));
+        assert.equal(retry.data, first.data);
+
+        const vehicleId = first.data;
+        const vehicles = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=id,status,published&plate=eq.${args.p_vehicle.plate}`,
+        );
+        const links = await authenticatedRows(
+          user,
+          "vehicle_accessories",
+          `select=id,active,accessory_id&vehicle_id=eq.${vehicleId}`,
+        );
+        const checklist = await authenticatedRows(
+          user,
+          "vehicle_checklist_items",
+          `select=id,title,status&vehicle_id=eq.${vehicleId}`,
+        );
+
+        assert.equal(vehicles.length, 1);
+        assert.equal(vehicles[0].id, vehicleId);
+        assert.equal(vehicles[0].status, "in_repair");
+        assert.equal(vehicles[0].published, false);
+        assert.equal(links.length, 2);
+        assert.ok(links.every((link) => link.active));
+        assert.equal(checklist.length, 1);
+        assert.equal(checklist[0].status, "pending");
+
+        const reusedKeyWithDifferentConfiguration = await callRpc(
+          user,
+          "create_vehicle_configuration",
+          {
+            ...args,
+            p_vehicle: { ...args.p_vehicle, model: "Outro modelo" },
+          },
+        );
+        assert.equal(reusedKeyWithDifferentConfiguration.response.status, 409);
+
+        const unchangedChecklist = await authenticatedRows(
+          user,
+          "vehicle_checklist_items",
+          `select=id&vehicle_id=eq.${vehicleId}`,
+        );
+        assert.equal(unchangedChecklist.length, 1);
+      },
+    );
+
+    await t.test(
+      "a failed initial ChecklistItem leaves no partial Vehicle or Accessory",
+      async () => {
+        const user = fixtures.users[0];
+        const args = vehicleConfigurationArguments(2, randomUUID(), {
+          p_accessories: ["Acessório deve sofrer rollback"],
+          p_checklist_items: [
+            {
+              title: "Categoria inválida",
+              category: "not_a_checklist_category",
+              priority: "medium",
+              estimated_cost: 100,
+            },
+          ],
+        });
+        const failed = await callRpc(user, "create_vehicle_configuration", args);
+        assert.equal(failed.response.ok, false, JSON.stringify(failed.data));
+
+        const vehicles = await requestJson(
+          `${apiBase.rest}/vehicles?select=id&plate=eq.${args.p_vehicle.plate}`,
+          { admin: true },
+        );
+        const accessories = await requestJson(
+          `${apiBase.rest}/accessories?select=id&name=eq.${encodeURIComponent(args.p_accessories[0])}`,
+          { admin: true },
+        );
+        assert.equal(vehicles.response.status, 200, JSON.stringify(vehicles.data));
+        assert.equal(accessories.response.status, 200, JSON.stringify(accessories.data));
+        assert.equal(vehicles.data.length, 0);
+        assert.equal(accessories.data.length, 0);
+      },
+    );
+
+    await t.test(
+      "Vehicle edits replay once and stale edits leave Accessories unchanged",
+      async () => {
+        const user = fixtures.users[0];
+        const vehicle = await createVehicle(64);
+        const [loaded] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=id,sale_price,updated_at&id=eq.${vehicle.id}`,
+        );
+        const args = {
+          p_idempotency_key: randomUUID(),
+          p_vehicle_id: vehicle.id,
+          p_expected_updated_at: loaded.updated_at,
+          p_changes: { sale_price: 62000 },
+          p_accessories: ["Câmera de ré", "Sensor de estacionamento"],
+        };
+        const [first, retry] = await Promise.all([
+          callRpc(user, "update_vehicle_configuration", args),
+          callRpc(user, "update_vehicle_configuration", args),
+        ]);
+        assert.equal(first.response.status, 200, JSON.stringify(first.data));
+        assert.equal(retry.response.status, 200, JSON.stringify(retry.data));
+        assert.equal(first.data, vehicle.id);
+        assert.equal(retry.data, vehicle.id);
+
+        const [updatedVehicle] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=id,sale_price,updated_at&id=eq.${vehicle.id}`,
+        );
+        const savedLinks = await authenticatedRows(
+          user,
+          "vehicle_accessories",
+          `select=id,active,accessory_id&vehicle_id=eq.${vehicle.id}`,
+        );
+        assert.equal(Number(updatedVehicle.sale_price), 62000);
+        assert.equal(savedLinks.length, 2);
+        assert.ok(savedLinks.every((link) => link.active));
+
+        const staleEdit = await callRpc(user, "update_vehicle_configuration", {
+          ...args,
+          p_idempotency_key: randomUUID(),
+          p_expected_updated_at: loaded.updated_at,
+          p_changes: { sale_price: 63000 },
+          p_accessories: ["Acessório de rascunho"],
+        });
+        assert.equal(staleEdit.response.status, 409);
+
+        const [unchangedVehicle] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=sale_price&id=eq.${vehicle.id}`,
+        );
+        const unchangedLinks = await authenticatedRows(
+          user,
+          "vehicle_accessories",
+          `select=id,active,accessory_id&vehicle_id=eq.${vehicle.id}`,
+        );
+        assert.equal(Number(unchangedVehicle.sale_price), 62000);
+        assert.equal(unchangedLinks.length, 2);
+        assert.ok(unchangedLinks.every((link) => link.active));
+      },
+    );
 
     await t.test(
       "direct checklist inserts synchronize readiness while stale updates stay blocked",
