@@ -100,6 +100,7 @@ export interface Sale {
   discount: number;
   status: SaleStatus;
   sale_date: string;
+  updated_at: string;
   notes?: string;
   trade_in_vehicle?: Vehicle;
   trade_in_value?: number;
@@ -159,6 +160,7 @@ export interface Installment {
 
 export interface SalePayment {
   id: number;
+  updated_at: string;
   payment_method: PaymentMethod;
   payment_status: PaymentStatus;
   down_payment: number;

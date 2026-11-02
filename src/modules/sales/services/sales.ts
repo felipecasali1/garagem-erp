@@ -1,4 +1,3 @@
-import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabase } from "@/shared/supabase/client";
 import type {
@@ -14,7 +13,6 @@ import type {
   Vehicle,
 } from "@/shared/types/domain";
 import { buildSaleSearchFilter } from "@/modules/sales/lib/build-sale-search-filter";
-import { normalizeSalePayment } from "@/modules/sales/lib/sale-financials";
 import { getPageBounds, type PaginatedResult } from "@/shared/lib/pagination";
 
 type PersonRow = {
@@ -60,6 +58,7 @@ type VehicleRow = Omit<Vehicle, "accessories"> & {
 
 type PaymentRow = {
   id: number;
+  updated_at: string;
   payment_method: PaymentMethod;
   payment_status: PaymentStatus;
   down_payment: number;
@@ -91,6 +90,7 @@ type SaleRow = {
   discount: number;
   status: SaleStatus;
   sale_date: string;
+  updated_at: string;
   notes: string | null;
   trade_in_value: number;
   customer: CustomerRow | null;
@@ -118,7 +118,20 @@ export type CreateSaleInput = {
 };
 
 export type SaleActionInput = {
+  idempotencyKey: string;
   saleId: number;
+  expectedSaleUpdatedAt: string;
+  expectedPaymentUpdatedAt: string;
+};
+
+export type UpdateSalePaymentInput = SaleActionInput & {
+  salePrice: number;
+  discount: number;
+  notes?: string;
+  paymentMethod: Exclude<PaymentMethod, "trade_in">;
+  downPayment: number;
+  installmentsCount: number;
+  paymentDate?: string;
 };
 
 export type SaleListFilters = {
@@ -236,11 +249,13 @@ function mapSale(row: SaleRow): Sale {
     discount: Number(row.discount),
     status: row.status,
     sale_date: row.sale_date,
+    updated_at: row.updated_at,
     notes: row.notes ?? undefined,
     trade_in_value: Number(row.trade_in_value),
     payment: displayPayment
       ? {
           id: displayPayment.id,
+          updated_at: displayPayment.updated_at,
           payment_method: displayPayment.payment_method,
           payment_status: displayPayment.payment_status,
           down_payment: Number(displayPayment.down_payment),
@@ -268,105 +283,7 @@ function mapSale(row: SaleRow): Sale {
 }
 
 const saleSelect =
-  "id, customer_id, vehicle_id, employee_id, total_value, discount, status, sale_date, notes, trade_in_value, customer:customers(id, person_id, notes, active, total_purchases, created_at, person:people(id, name, type, cpf, cnpj, phone, email)), employee:employees(id, person_id, position, salary, commission_rate, commission_type, active, hired_at, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles!sales_vehicle_id_fkey(*), payment:sale_payments(id, payment_method, payment_status, down_payment, installments_count, payment_date, remaining_amount), commission:commissions(id, sale_id, employee_id, vehicle_id, type, rate, amount, status, due_date, paid_at, notes)";
-
-async function ensureSaleCommission({
-  supabaseAdmin,
-  sale,
-  vehicle,
-  employee,
-}: {
-  supabaseAdmin: Awaited<typeof import("@/shared/supabase/server")>["supabaseAdmin"];
-  sale: {
-    id: number;
-    vehicle_id: number;
-    employee_id: number;
-    total_value: number;
-    sale_date: string;
-  };
-  vehicle: { brand: string; model: string; plate: string | null };
-  employee: { commission_rate: number; commission_type: CommissionType };
-}) {
-  const commissionAmount = calculateCommission({
-    totalValue: sale.total_value,
-    commissionType: employee.commission_type,
-    commissionRate: Number(employee.commission_rate),
-  });
-
-  if (commissionAmount <= 0) {
-    return null;
-  }
-
-  const { data: existingCommission, error: existingCommissionError } = await supabaseAdmin
-    .from("commissions")
-    .select(
-      "id, sale_id, employee_id, vehicle_id, type, rate, amount, status, due_date, paid_at, notes",
-    )
-    .eq("sale_id", sale.id)
-    .eq("employee_id", sale.employee_id)
-    .maybeSingle();
-  if (existingCommissionError) throw new Error(existingCommissionError.message);
-
-  let commission = existingCommission;
-
-  if (!commission) {
-    const { data: createdCommission, error: createdCommissionError } = await supabaseAdmin
-      .from("commissions")
-      .insert({
-        sale_id: sale.id,
-        employee_id: sale.employee_id,
-        vehicle_id: sale.vehicle_id,
-        type: employee.commission_type,
-        rate: Number(employee.commission_rate),
-        amount: commissionAmount,
-        status: "pending",
-        due_date: sale.sale_date,
-      })
-      .select(
-        "id, sale_id, employee_id, vehicle_id, type, rate, amount, status, due_date, paid_at, notes",
-      )
-      .single();
-
-    if (createdCommissionError) {
-      throw new Error(createdCommissionError.message);
-    }
-
-    commission = createdCommission;
-  }
-
-  if (!commission) {
-    throw new Error("Falha ao registrar comissão da venda.");
-  }
-
-  const { data: existingCommissionTransaction, error: existingCommissionTransactionError } =
-    await supabaseAdmin
-      .from("financial_transactions")
-      .select("id")
-      .eq("commission_id", commission.id)
-      .limit(1);
-  if (existingCommissionTransactionError)
-    throw new Error(existingCommissionTransactionError.message);
-
-  if ((existingCommissionTransaction ?? []).length === 0) {
-    const { error: transactionError } = await supabaseAdmin.from("financial_transactions").insert({
-      type: "expense",
-      category: "commission",
-      status: commission.status === "paid" ? "paid" : "pending",
-      amount: Number(commission.amount),
-      transaction_date: sale.sale_date,
-      due_date: commission.due_date ?? sale.sale_date,
-      paid_at: commission.paid_at ?? null,
-      description: `Comissão venda #${sale.id} - ${vehicle.brand} ${vehicle.model}`,
-      related: vehicle.plate,
-      sale_id: sale.id,
-      employee_id: sale.employee_id,
-      commission_id: commission.id,
-    });
-    if (transactionError) throw new Error(transactionError.message);
-  }
-
-  return commission as Commission;
-}
+  "id, customer_id, vehicle_id, employee_id, total_value, discount, status, sale_date, updated_at, notes, trade_in_value, customer:customers(id, person_id, notes, active, total_purchases, created_at, person:people(id, name, type, cpf, cnpj, phone, email)), employee:employees(id, person_id, position, salary, commission_rate, commission_type, active, hired_at, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles!sales_vehicle_id_fkey(*), payment:sale_payments(id, updated_at, payment_method, payment_status, down_payment, installments_count, payment_date, remaining_amount), commission:commissions(id, sale_id, employee_id, vehicle_id, type, rate, amount, status, due_date, paid_at, notes)";
 
 export async function listSales() {
   return querySales();
@@ -506,107 +423,6 @@ export async function getSaleById(id: number) {
   return mapSale(data as unknown as SaleRow);
 }
 
-function addMonths(date: string, months: number) {
-  const parsed = new Date(`${date}T00:00:00`);
-  parsed.setMonth(parsed.getMonth() + months);
-  return parsed.toISOString().slice(0, 10);
-}
-
-function calculateCommission({
-  totalValue,
-  commissionType,
-  commissionRate,
-}: {
-  totalValue: number;
-  commissionType: CommissionType;
-  commissionRate: number;
-}) {
-  return commissionType === "percentage" ? (totalValue * commissionRate) / 100 : commissionRate;
-}
-
-async function createSaleFinancialTransactions({
-  supabaseAdmin,
-  sale,
-  vehicle,
-  payment,
-}: {
-  supabaseAdmin: Awaited<typeof import("@/shared/supabase/server")>["supabaseAdmin"];
-  sale: {
-    id: number;
-    vehicle_id: number;
-    employee_id: number;
-    total_value: number;
-    sale_date: string;
-  };
-  vehicle: { brand: string; model: string; plate: string | null };
-  payment: {
-    payment_method: PaymentMethod;
-    payment_status: PaymentStatus;
-    down_payment: number;
-    remaining_amount: number;
-    payment_date?: string | null;
-  };
-}) {
-  const { data: existingTransaction, error: existingTransactionError } = await supabaseAdmin
-    .from("financial_transactions")
-    .select("id")
-    .eq("sale_id", sale.id)
-    .eq("category", "vehicle_sale")
-    .limit(1);
-  if (existingTransactionError) throw new Error(existingTransactionError.message);
-  if ((existingTransaction ?? []).length > 0) return;
-
-  const baseTransaction = {
-    type: "income" as const,
-    category: "vehicle_sale" as const,
-    transaction_date: sale.sale_date,
-    related: vehicle.plate,
-    sale_id: sale.id,
-  };
-
-  if (payment.payment_method === "financing") {
-    const transactions = [];
-
-    if (payment.down_payment > 0) {
-      transactions.push({
-        ...baseTransaction,
-        status: "paid" as const,
-        amount: payment.down_payment,
-        paid_at: new Date().toISOString(),
-        description: `Entrada venda #${sale.id} - ${vehicle.brand} ${vehicle.model}`,
-      });
-    }
-
-    if (payment.remaining_amount > 0) {
-      transactions.push({
-        ...baseTransaction,
-        status: "pending" as const,
-        amount: payment.remaining_amount,
-        due_date: payment.payment_date ?? sale.sale_date,
-        paid_at: null,
-        description: `Repasse financiamento venda #${sale.id} - ${vehicle.brand} ${vehicle.model}`,
-      });
-    }
-
-    if (transactions.length > 0) {
-      const { error: transactionError } = await supabaseAdmin
-        .from("financial_transactions")
-        .insert(transactions);
-      if (transactionError) throw new Error(transactionError.message);
-    }
-    return;
-  }
-
-  const { error: transactionError } = await supabaseAdmin.from("financial_transactions").insert({
-    ...baseTransaction,
-    status: payment.payment_status === "paid" ? "paid" : "pending",
-    amount: sale.total_value,
-    paid_at: payment.payment_status === "paid" ? new Date().toISOString() : null,
-    description: `Venda #${sale.id} - ${vehicle.brand} ${vehicle.model}`,
-  });
-  if (transactionError) throw new Error(transactionError.message);
-}
-
 export async function createSale(input: CreateSaleInput) {
   const data = z
     .object({
@@ -650,170 +466,65 @@ export async function createSale(input: CreateSaleInput) {
   return Number(saleId);
 }
 
-async function applyCompletedSale({
-  supabaseAdmin,
-  sale,
-  vehicle,
-  employee,
-  payment,
-}: {
-  supabaseAdmin: Awaited<typeof import("@/shared/supabase/server")>["supabaseAdmin"];
-  sale: {
-    id: number;
-    vehicle_id: number;
-    employee_id: number;
-    total_value: number;
-    sale_date: string;
-  };
-  vehicle: { id: number; brand: string; model: string; plate: string | null };
-  employee: { commission_rate: number; commission_type: CommissionType };
-  payment: {
-    payment_method: PaymentMethod;
-    payment_status: PaymentStatus;
-    down_payment: number;
-    remaining_amount: number;
-    payment_date?: string | null;
-  };
-}) {
-  const { error: vehicleUpdateError } = await supabaseAdmin
-    .from("vehicles")
-    .update({ status: "sold", published: false })
-    .eq("id", sale.vehicle_id);
-  if (vehicleUpdateError) throw new Error(vehicleUpdateError.message);
+const saleActionInputSchema = z.object({
+  idempotencyKey: z.string().uuid(),
+  saleId: z.number().int().positive(),
+  expectedSaleUpdatedAt: z.string().min(1),
+  expectedPaymentUpdatedAt: z.string().min(1),
+});
 
-  await createSaleFinancialTransactions({ supabaseAdmin, sale, vehicle, payment });
-  await ensureSaleCommission({ supabaseAdmin, sale, vehicle, employee });
+const updateSalePaymentInputSchema = saleActionInputSchema.extend({
+  salePrice: z.number().positive(),
+  discount: z.number().nonnegative(),
+  notes: z.string().optional(),
+  paymentMethod: z.enum(["cash", "financing", "card", "pix"]),
+  downPayment: z.number().nonnegative(),
+  installmentsCount: z.number().int().positive(),
+  paymentDate: z.string().date().optional(),
+});
 
-  const { error: saleUpdateError } = await supabaseAdmin
-    .from("sales")
-    .update({ status: "completed" })
-    .eq("id", sale.id);
-  if (saleUpdateError) throw new Error(saleUpdateError.message);
+async function callSaleMutation(name: string, args: Record<string, unknown>) {
+  const { data, error } = await supabase.rpc(name, args);
+  if (error) throw new Error(error.message);
+  if (data === null) throw new Error("A operação foi registrada sem retornar a venda.");
+  return Number(data);
 }
 
-const completeSaleServer = createServerFn({ method: "POST" })
-  .inputValidator(z.object({ saleId: z.number().int().positive() }))
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/shared/supabase/server");
-
-    const { data: sale, error: saleError } = await supabaseAdmin
-      .from("sales")
-      .select("id, vehicle_id, employee_id, total_value, sale_date, status")
-      .eq("id", data.saleId)
-      .maybeSingle();
-    if (saleError) throw new Error(saleError.message);
-    if (!sale) throw new Error("Venda não encontrada.");
-    if (sale.status !== "pending") {
-      throw new Error("Apenas vendas pendentes podem ser concluídas.");
-    }
-
-    const { data: vehicle, error: vehicleError } = await supabaseAdmin
-      .from("vehicles")
-      .select("id, brand, model, plate")
-      .eq("id", sale.vehicle_id)
-      .maybeSingle();
-    if (vehicleError) throw new Error(vehicleError.message);
-    if (!vehicle) throw new Error("Veículo da venda não encontrado.");
-
-    const { data: employee, error: employeeError } = await supabaseAdmin
-      .from("employees")
-      .select("commission_rate, commission_type")
-      .eq("id", sale.employee_id)
-      .maybeSingle();
-    if (employeeError) throw new Error(employeeError.message);
-    if (!employee) throw new Error("Vendedor da venda não encontrado.");
-
-    const { data: payment, error: paymentError } = await supabaseAdmin
-      .from("sale_payments")
-      .select("payment_method, payment_status, down_payment, remaining_amount, payment_date")
-      .eq("sale_id", sale.id)
-      .limit(1)
-      .maybeSingle();
-    if (paymentError) throw new Error(paymentError.message);
-
-    const paymentInput = normalizeSalePayment({
-      saleStatus: "completed",
-      method: (payment?.payment_method as PaymentMethod | undefined) ?? "financing",
-      totalValue: Number(sale.total_value),
-      downPayment: Number(payment?.down_payment ?? 0),
-      paymentDate: payment?.payment_date,
-      saleDate: String(sale.sale_date),
-    });
-
-    if (payment) {
-      const { error: paymentUpdateError } = await supabaseAdmin
-        .from("sale_payments")
-        .update({
-          payment_status: paymentInput.paymentStatus,
-          down_payment: paymentInput.downPayment,
-          remaining_amount: paymentInput.remainingAmount,
-          payment_date: paymentInput.paymentDate,
-        })
-        .eq("sale_id", sale.id);
-      if (paymentUpdateError) throw new Error(paymentUpdateError.message);
-    }
-
-    await applyCompletedSale({
-      supabaseAdmin,
-      sale: {
-        id: sale.id as number,
-        vehicle_id: sale.vehicle_id as number,
-        employee_id: sale.employee_id as number,
-        total_value: Number(sale.total_value),
-        sale_date: String(sale.sale_date),
-      },
-      vehicle,
-      employee: {
-        commission_rate: Number(employee.commission_rate),
-        commission_type: employee.commission_type as CommissionType,
-      },
-      payment: {
-        payment_method: (payment?.payment_method as PaymentMethod | undefined) ?? "financing",
-        payment_status: paymentInput.paymentStatus,
-        down_payment: paymentInput.downPayment,
-        remaining_amount: paymentInput.remainingAmount,
-        payment_date: paymentInput.paymentDate,
-      },
-    });
-
-    return sale.id as number;
-  });
-
-const cancelSaleServer = createServerFn({ method: "POST" })
-  .inputValidator(z.object({ saleId: z.number().int().positive() }))
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/shared/supabase/server");
-
-    const { data: sale, error: saleError } = await supabaseAdmin
-      .from("sales")
-      .select("id, vehicle_id, status")
-      .eq("id", data.saleId)
-      .maybeSingle();
-    if (saleError) throw new Error(saleError.message);
-    if (!sale) throw new Error("Venda não encontrada.");
-    if (sale.status !== "pending") {
-      throw new Error("Apenas vendas pendentes podem ser canceladas.");
-    }
-
-    const { error: saleUpdateError } = await supabaseAdmin
-      .from("sales")
-      .update({ status: "canceled" })
-      .eq("id", sale.id);
-    if (saleUpdateError) throw new Error(saleUpdateError.message);
-
-    const { error: vehicleUpdateError } = await supabaseAdmin
-      .from("vehicles")
-      .update({ status: "available", published: false })
-      .eq("id", sale.vehicle_id);
-    if (vehicleUpdateError) throw new Error(vehicleUpdateError.message);
-
-    return sale.id as number;
-  });
+function saleVersionArgs(data: SaleActionInput) {
+  return {
+    p_idempotency_key: data.idempotencyKey,
+    p_sale_id: data.saleId,
+    p_expected_sale_updated_at: data.expectedSaleUpdatedAt,
+    p_expected_payment_updated_at: data.expectedPaymentUpdatedAt,
+  };
+}
 
 export async function completeSale(input: SaleActionInput) {
-  return completeSaleServer({ data: input });
+  const data = saleActionInputSchema.parse(input);
+  return callSaleMutation("transition_sale", {
+    ...saleVersionArgs(data),
+    p_action: "complete",
+  });
 }
 
 export async function cancelSale(input: SaleActionInput) {
-  return cancelSaleServer({ data: input });
+  const data = saleActionInputSchema.parse(input);
+  return callSaleMutation("transition_sale", {
+    ...saleVersionArgs(data),
+    p_action: "cancel",
+  });
+}
+
+export async function updateSalePayment(input: UpdateSalePaymentInput) {
+  const data = updateSalePaymentInputSchema.parse(input);
+  return callSaleMutation("update_sale_payment_with_version", {
+    ...saleVersionArgs(data),
+    p_sale_price: data.salePrice,
+    p_discount: data.discount,
+    p_notes: data.notes?.trim() || null,
+    p_payment_method: data.paymentMethod,
+    p_down_payment: data.downPayment,
+    p_installments_count: data.installmentsCount,
+    p_payment_date: data.paymentDate ?? null,
+  });
 }

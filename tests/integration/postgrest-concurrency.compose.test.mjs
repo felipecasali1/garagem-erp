@@ -267,6 +267,33 @@ async function callRpc(user, name, args) {
   });
 }
 
+function transitionSale(user, saleId, action, sale, payment, key = randomUUID()) {
+  return callRpc(user, "transition_sale", {
+    p_idempotency_key: key,
+    p_sale_id: saleId,
+    p_action: action,
+    p_expected_sale_updated_at: sale.updated_at,
+    p_expected_payment_updated_at: payment.updated_at,
+  });
+}
+
+function updateSalePayment(user, saleId, sale, payment, overrides = {}) {
+  return callRpc(user, "update_sale_payment_with_version", {
+    p_idempotency_key: overrides.key ?? randomUUID(),
+    p_sale_id: saleId,
+    p_expected_sale_updated_at: sale.updated_at,
+    p_expected_payment_updated_at: payment.updated_at,
+    p_sale_price: 60000,
+    p_discount: 1000,
+    p_notes: "Venda revisada pelo teste",
+    p_payment_method: "financing",
+    p_down_payment: 5000,
+    p_installments_count: 4,
+    p_payment_date: "2026-12-01",
+    ...overrides,
+  });
+}
+
 function checklistItem(vehicleId) {
   return {
     p_idempotency_key: randomUUID(),
@@ -496,6 +523,300 @@ test(
       assert.equal(transactions.length, 3);
       assert.equal(commissions.length, 1);
     });
+
+    await t.test("null transition action cannot cancel a pending Sale", async () => {
+      const user = fixtures.users[0];
+      const vehicle = await createVehicle(25);
+      const created = await callCreateSale(user, saleArguments({ fixtures, vehicle, user }));
+      assert.equal(created.response.status, 200, JSON.stringify(created.data));
+      const [sale] = await authenticatedRows(
+        user,
+        "sales",
+        `select=id,status,updated_at&id=eq.${created.data}`,
+      );
+      const [payment] = await authenticatedRows(
+        user,
+        "sale_payments",
+        `select=id,payment_status,updated_at&sale_id=eq.${created.data}`,
+      );
+      const invalidAction = await callRpc(user, "transition_sale", {
+        p_idempotency_key: randomUUID(),
+        p_sale_id: created.data,
+        p_action: null,
+        p_expected_sale_updated_at: sale.updated_at,
+        p_expected_payment_updated_at: payment.updated_at,
+      });
+      assert.equal(invalidAction.response.ok, false, JSON.stringify(invalidAction.data));
+
+      const [unchangedSale] = await authenticatedRows(
+        user,
+        "sales",
+        `select=id,status&id=eq.${created.data}`,
+      );
+      const [unchangedVehicle] = await authenticatedRows(
+        user,
+        "vehicles",
+        `select=id,status&id=eq.${vehicle.id}`,
+      );
+      assert.equal(unchangedSale.status, "pending");
+      assert.equal(unchangedVehicle.status, "reserved");
+    });
+
+    await t.test("completion and cancellation race to one atomic Sale transition", async () => {
+      const user = fixtures.users[0];
+      const vehicle = await createVehicle(21);
+      const created = await callCreateSale(user, saleArguments({ fixtures, vehicle, user }));
+      assert.equal(created.response.status, 200, JSON.stringify(created.data));
+      const [sale] = await authenticatedRows(
+        user,
+        "sales",
+        `select=id,status,updated_at&id=eq.${created.data}`,
+      );
+      const [payment] = await authenticatedRows(
+        user,
+        "sale_payments",
+        `select=id,payment_status,updated_at&sale_id=eq.${created.data}`,
+      );
+
+      const outcomes = await Promise.all([
+        transitionSale(user, created.data, "complete", sale, payment),
+        transitionSale(user, created.data, "cancel", sale, payment),
+      ]);
+      const winners = outcomes.filter(({ response }) => response.status === 200);
+      const conflicts = outcomes.filter(({ response }) => response.status === 409);
+      assert.equal(winners.length, 1, JSON.stringify(outcomes.map(({ data }) => data)));
+      assert.equal(conflicts.length, 1, JSON.stringify(outcomes.map(({ data }) => data)));
+
+      const [finalSale] = await authenticatedRows(
+        user,
+        "sales",
+        `select=id,status&id=eq.${created.data}`,
+      );
+      const [finalVehicle] = await authenticatedRows(
+        user,
+        "vehicles",
+        `select=id,status,published&id=eq.${vehicle.id}`,
+      );
+      const finalPayments = await authenticatedRows(
+        user,
+        "sale_payments",
+        `select=id,payment_status&sale_id=eq.${created.data}`,
+      );
+      const commissions = await authenticatedRows(
+        user,
+        "commissions",
+        `select=id&sale_id=eq.${created.data}`,
+      );
+      const transactions = await authenticatedRows(
+        user,
+        "financial_transactions",
+        `select=id,category&sale_id=eq.${created.data}`,
+      );
+
+      assert.equal(finalPayments.length, 1);
+      if (finalSale.status === "completed") {
+        assert.equal(finalVehicle.status, "sold");
+        assert.equal(finalVehicle.published, false);
+        assert.equal(finalPayments[0].payment_status, "partial");
+        assert.equal(commissions.length, 1);
+        assert.equal(transactions.length, 3);
+      } else {
+        assert.equal(finalSale.status, "canceled");
+        assert.equal(finalVehicle.status, "available");
+        assert.equal(finalVehicle.published, false);
+        assert.equal(finalPayments[0].payment_status, "pending");
+        assert.equal(commissions.length, 0);
+        assert.equal(transactions.length, 0);
+      }
+    });
+
+    await t.test("same transition key replays once and rejects a changed action", async () => {
+      const user = fixtures.users[0];
+      const vehicle = await createVehicle(22);
+      const created = await callCreateSale(user, saleArguments({ fixtures, vehicle, user }));
+      assert.equal(created.response.status, 200, JSON.stringify(created.data));
+      const [sale] = await authenticatedRows(
+        user,
+        "sales",
+        `select=id,status,updated_at&id=eq.${created.data}`,
+      );
+      const [payment] = await authenticatedRows(
+        user,
+        "sale_payments",
+        `select=id,payment_status,updated_at&sale_id=eq.${created.data}`,
+      );
+      const key = randomUUID();
+      const [first, replay] = await Promise.all([
+        transitionSale(user, created.data, "complete", sale, payment, key),
+        transitionSale(user, created.data, "complete", sale, payment, key),
+      ]);
+      assert.equal(first.response.status, 200, JSON.stringify(first.data));
+      assert.equal(replay.response.status, 200, JSON.stringify(replay.data));
+      assert.equal(first.data, created.data);
+      assert.equal(replay.data, created.data);
+
+      const changedAction = await transitionSale(user, created.data, "cancel", sale, payment, key);
+      assert.equal(changedAction.response.status, 409, JSON.stringify(changedAction.data));
+
+      const commissions = await authenticatedRows(
+        user,
+        "commissions",
+        `select=id&sale_id=eq.${created.data}`,
+      );
+      const transactions = await authenticatedRows(
+        user,
+        "financial_transactions",
+        `select=id&sale_id=eq.${created.data}`,
+      );
+      assert.equal(commissions.length, 1);
+      assert.equal(transactions.length, 3);
+    });
+
+    await t.test("Sale and Payment edits reject stale versions and replay safely", async () => {
+      const user = fixtures.users[0];
+      const vehicle = await createVehicle(23);
+      const created = await callCreateSale(user, saleArguments({ fixtures, vehicle, user }));
+      assert.equal(created.response.status, 200, JSON.stringify(created.data));
+      const [sale] = await authenticatedRows(
+        user,
+        "sales",
+        `select=id,status,total_value,discount,notes,updated_at&id=eq.${created.data}`,
+      );
+      const [payment] = await authenticatedRows(
+        user,
+        "sale_payments",
+        `select=id,payment_method,payment_status,down_payment,installments_count,payment_date,remaining_amount,updated_at&sale_id=eq.${created.data}`,
+      );
+      const directSaleUpdate = await requestJson(`${apiBase.rest}/sales?id=eq.${created.data}`, {
+        method: "PATCH",
+        token: user.accessToken,
+        body: { status: "completed" },
+      });
+      const directPaymentUpdate = await requestJson(
+        `${apiBase.rest}/sale_payments?id=eq.${payment.id}`,
+        { method: "PATCH", token: user.accessToken, body: { down_payment: 1 } },
+      );
+      assert.equal(directSaleUpdate.response.ok, false);
+      assert.equal(directPaymentUpdate.response.ok, false);
+
+      const key = randomUUID();
+      const args = {
+        p_idempotency_key: key,
+        p_sale_id: created.data,
+        p_expected_sale_updated_at: sale.updated_at,
+        p_expected_payment_updated_at: payment.updated_at,
+        p_sale_price: 60000,
+        p_discount: 1000,
+        p_notes: "Venda revisada pelo teste",
+        p_payment_method: "financing",
+        p_down_payment: 5000,
+        p_installments_count: 4,
+        p_payment_date: "2026-12-01",
+      };
+      const first = await callRpc(user, "update_sale_payment_with_version", args);
+      assert.equal(first.response.status, 200, JSON.stringify(first.data));
+      const replay = await callRpc(user, "update_sale_payment_with_version", args);
+      assert.equal(replay.response.status, 200, JSON.stringify(replay.data));
+      assert.equal(replay.data, created.data);
+
+      const changedPayload = await callRpc(user, "update_sale_payment_with_version", {
+        ...args,
+        p_sale_price: 59000,
+      });
+      assert.equal(changedPayload.response.status, 409, JSON.stringify(changedPayload.data));
+
+      const stale = await updateSalePayment(user, created.data, sale, payment, {
+        p_notes: "Tentativa desatualizada",
+      });
+      assert.equal(stale.response.status, 409, JSON.stringify(stale.data));
+      assert.match(JSON.stringify(stale.data), /STALE_RECORD/i);
+
+      const [updatedSale] = await authenticatedRows(
+        user,
+        "sales",
+        `select=id,status,total_value,discount,notes&id=eq.${created.data}`,
+      );
+      const [updatedPayment] = await authenticatedRows(
+        user,
+        "sale_payments",
+        `select=id,payment_method,payment_status,down_payment,installments_count,payment_date,remaining_amount&sale_id=eq.${created.data}`,
+      );
+      assert.equal(updatedSale.status, "pending");
+      assert.equal(Number(updatedSale.total_value), 59000);
+      assert.equal(Number(updatedSale.discount), 1000);
+      assert.equal(updatedSale.notes, "Venda revisada pelo teste");
+      assert.equal(updatedPayment.payment_method, "financing");
+      assert.equal(updatedPayment.payment_status, "pending");
+      assert.equal(Number(updatedPayment.down_payment), 5000);
+      assert.equal(updatedPayment.installments_count, 4);
+      assert.equal(updatedPayment.payment_date, "2026-12-01");
+      assert.equal(Number(updatedPayment.remaining_amount), 54000);
+
+      const staleTransition = await transitionSale(user, created.data, "complete", sale, payment);
+      assert.equal(staleTransition.response.status, 409, JSON.stringify(staleTransition.data));
+    });
+
+    await t.test(
+      "failed completion leaves Sale, Vehicle, Payment and finance untouched",
+      async () => {
+        const user = fixtures.users[0];
+        const vehicle = await createVehicle(24);
+        const created = await callCreateSale(
+          user,
+          saleArguments({
+            fixtures,
+            vehicle,
+            user,
+            overrides: { p_notes: "__TEST_FORCE_FINANCIAL_FAILURE__" },
+          }),
+        );
+        assert.equal(created.response.status, 200, JSON.stringify(created.data));
+        const [sale] = await authenticatedRows(
+          user,
+          "sales",
+          `select=id,status,updated_at&id=eq.${created.data}`,
+        );
+        const [payment] = await authenticatedRows(
+          user,
+          "sale_payments",
+          `select=id,payment_status,updated_at&sale_id=eq.${created.data}`,
+        );
+        const failed = await transitionSale(user, created.data, "complete", sale, payment);
+        assert.equal(failed.response.ok, false, JSON.stringify(failed.data));
+
+        const [unchangedSale] = await authenticatedRows(
+          user,
+          "sales",
+          `select=id,status&id=eq.${created.data}`,
+        );
+        const [unchangedPayment] = await authenticatedRows(
+          user,
+          "sale_payments",
+          `select=id,payment_status&sale_id=eq.${created.data}`,
+        );
+        const [unchangedVehicle] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=id,status,published&id=eq.${vehicle.id}`,
+        );
+        const commissions = await authenticatedRows(
+          user,
+          "commissions",
+          `select=id&sale_id=eq.${created.data}`,
+        );
+        const transactions = await authenticatedRows(
+          user,
+          "financial_transactions",
+          `select=id&sale_id=eq.${created.data}`,
+        );
+        assert.equal(unchangedSale.status, "pending");
+        assert.equal(unchangedPayment.payment_status, "pending");
+        assert.equal(unchangedVehicle.status, "reserved");
+        assert.equal(unchangedVehicle.published, false);
+        assert.equal(commissions.length, 0);
+        assert.equal(transactions.length, 0);
+      },
+    );
 
     await t.test("financial-only users cannot create a Sale", async () => {
       const result = await callCreateSale(

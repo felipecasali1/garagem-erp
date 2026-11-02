@@ -61,6 +61,7 @@ function createSale(overrides: Partial<Sale>): Sale {
     discount: 0,
     status: "completed",
     sale_date: "2026-09-20",
+    updated_at: "2026-09-20T00:00:00.000Z",
     trade_in_value: 0,
     ...overrides,
   };

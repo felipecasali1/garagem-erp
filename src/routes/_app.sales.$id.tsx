@@ -8,10 +8,11 @@ import {
   CheckCircle2,
   CircleDollarSign,
   Receipt,
+  Pencil,
   User,
   XCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -20,6 +21,7 @@ import { Separator } from "@/shared/components/ui/separator";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { cancelSale, completeSale, getSaleById, saleKeys } from "@/modules/sales/services/sales";
+import { EditPendingSaleDialog } from "@/modules/sales/components/edit-pending-sale-dialog";
 import { vehicleKeys } from "@/modules/vehicles/services/vehicles";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
 import { formatDocument, formatPhone } from "@/shared/lib/field-format";
@@ -51,7 +53,16 @@ function SaleDetail() {
   const queryClient = useQueryClient();
   const saleId = Number(id);
   const [confirmAction, setConfirmAction] = useState<"complete" | "cancel" | null>(null);
-  const { data: sale, isLoading, error } = useQuery({
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const actionKeys = useRef<Record<"complete" | "cancel", string | null>>({
+    complete: null,
+    cancel: null,
+  });
+  const {
+    data: sale,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: saleKeys.detail(saleId),
     queryFn: () => getSaleById(saleId),
     enabled: Number.isFinite(saleId),
@@ -70,10 +81,15 @@ function SaleDetail() {
     mutationFn: completeSale,
     onSuccess: async () => {
       await refreshSale(sale?.vehicle.id);
+      actionKeys.current.complete = null;
       setConfirmAction(null);
       toast.success("Venda concluída");
     },
     onError: (error) => {
+      if (error instanceof Error && error.message.includes("STALE_RECORD")) {
+        actionKeys.current.complete = null;
+        void refreshSale(sale?.vehicle.id);
+      }
       toast.error(error instanceof Error ? error.message : "Falha ao concluir venda.");
     },
   });
@@ -82,13 +98,35 @@ function SaleDetail() {
     mutationFn: cancelSale,
     onSuccess: async () => {
       await refreshSale(sale?.vehicle.id);
+      actionKeys.current.cancel = null;
       setConfirmAction(null);
       toast.success("Venda cancelada");
     },
     onError: (error) => {
+      if (error instanceof Error && error.message.includes("STALE_RECORD")) {
+        actionKeys.current.cancel = null;
+        void refreshSale(sale?.vehicle.id);
+      }
       toast.error(error instanceof Error ? error.message : "Falha ao cancelar venda.");
     },
   });
+
+  function actionInput(action: "complete" | "cancel") {
+    if (!sale?.payment) {
+      toast.error(
+        "O pagamento vinculado à venda não foi encontrado. Atualize os dados antes de continuar.",
+      );
+      return null;
+    }
+    const idempotencyKey = actionKeys.current[action] ?? crypto.randomUUID();
+    actionKeys.current[action] = idempotencyKey;
+    return {
+      idempotencyKey,
+      saleId: sale.id,
+      expectedSaleUpdatedAt: sale.updated_at,
+      expectedPaymentUpdatedAt: sale.payment.updated_at,
+    };
+  }
 
   if (isLoading) {
     return (
@@ -140,6 +178,13 @@ function SaleDetail() {
         <StatusBadge kind="sale" value={sale.status} />
         {isPending && (
           <>
+            <Button
+              variant="outline"
+              onClick={() => setEditDialogOpen(true)}
+              disabled={!sale.payment}
+            >
+              <Pencil className="h-4 w-4" /> Editar venda
+            </Button>
             <Button
               variant="outline"
               onClick={() => setConfirmAction("cancel")}
@@ -210,10 +255,11 @@ function SaleDetail() {
                 <Row label="Valor final" value={brl(sale.total_value)} bold />
                 <Separator />
                 <Row
-                  label={`${financialSummary.commissionLabel} (${sale.employee.commission_type === "percentage"
-                    ? `${sale.employee.commission_rate}%`
-                    : "fixa"
-                    })`}
+                  label={`${financialSummary.commissionLabel} (${
+                    sale.employee.commission_type === "percentage"
+                      ? `${sale.employee.commission_rate}%`
+                      : "fixa"
+                  })`}
                   value={
                     financialSummary.commissionAmount > 0
                       ? brl(financialSummary.commissionAmount)
@@ -221,18 +267,12 @@ function SaleDetail() {
                   }
                   muted
                 />
-                <Row
-                  label="Custo do veículo"
-                  value={brl(sale.vehicle.cost_price)}
-                  muted
-                />
+                <Row label="Custo do veículo" value={brl(sale.vehicle.cost_price)} muted />
                 <Row
                   label="Lucro estimado"
                   value={brl(financialSummary.profit)}
                   bold
-                  className={
-                    financialSummary.profit >= 0 ? "text-success" : "text-destructive"
-                  }
+                  className={financialSummary.profit >= 0 ? "text-success" : "text-destructive"}
                 />
               </div>
             </CardContent>
@@ -245,10 +285,7 @@ function SaleDetail() {
               </div>
               {sale.payment ? (
                 <div className="space-y-3 text-sm">
-                  <Row
-                    label="Forma"
-                    value={paymentMethodLabel[sale.payment.payment_method]}
-                  />
+                  <Row label="Forma" value={paymentMethodLabel[sale.payment.payment_method]} />
                   <Row
                     label="Status"
                     value={paymentStatusLabel[sale.payment.payment_status]}
@@ -413,7 +450,10 @@ function SaleDetail() {
         confirmLabel={completeMutation.isPending ? "Concluindo..." : "Concluir venda"}
         confirmDisabled={completeMutation.isPending}
         confirmVariant="default"
-        onConfirm={() => completeMutation.mutate({ saleId: sale.id })}
+        onConfirm={() => {
+          const input = actionInput("complete");
+          if (input) completeMutation.mutate(input);
+        }}
       />
 
       <ConfirmActionDialog
@@ -425,7 +465,17 @@ function SaleDetail() {
         description="A venda será marcada como cancelada e o veículo voltará para disponível. Nada será apagado."
         confirmLabel={cancelMutation.isPending ? "Cancelando..." : "Cancelar venda"}
         confirmDisabled={cancelMutation.isPending}
-        onConfirm={() => cancelMutation.mutate({ saleId: sale.id })}
+        onConfirm={() => {
+          const input = actionInput("cancel");
+          if (input) cancelMutation.mutate(input);
+        }}
+      />
+
+      <EditPendingSaleDialog
+        sale={sale}
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        onSaved={() => refreshSale(sale.vehicle.id)}
       />
     </div>
   );
