@@ -51,6 +51,21 @@ function mapChecklistItem(row: ChecklistRow): ChecklistItem {
 }
 
 type ChecklistWriteInput = Omit<ChecklistItem, "id" | "created_at" | "updated_at">;
+type PendingChecklistCreation = {
+  fingerprint: string;
+  idempotencyKey: string;
+  activeAttempts: { id: string; startedAt: number }[];
+  confirmed?: boolean;
+};
+
+const checklistAttemptLeaseMs = 5 * 60 * 1000;
+const checklistTabStorageKey = "garagem-erp:checklist-create-tab:v1";
+type ChecklistTabState = {
+  id?: string;
+  lockOwned?: boolean;
+  pendingClaim?: Promise<string>;
+};
+const checklistTabState = (import.meta.hot?.data ?? {}) as ChecklistTabState;
 
 function toChecklistPayload(input: ChecklistWriteInput) {
   return {
@@ -67,6 +82,134 @@ function toChecklistPayload(input: ChecklistWriteInput) {
     responsible_employee_id: input.responsible_employee_id ?? null,
     notes: input.notes?.trim() || null,
     attachments: input.attachments ?? [],
+  };
+}
+
+async function claimChecklistTabLock(tabId: string) {
+  return new Promise<boolean>((resolve, reject) => {
+    void navigator.locks
+      .request(
+        `garagem-erp:checklist-tab:${tabId}`,
+        { mode: "exclusive", ifAvailable: true },
+        (lock) => {
+          resolve(lock !== null);
+          if (lock) return new Promise<never>(() => {});
+        },
+      )
+      .catch(reject);
+  });
+}
+
+function getChecklistCreationTabId() {
+  if (checklistTabState.id && checklistTabState.lockOwned) {
+    return Promise.resolve(checklistTabState.id);
+  }
+  if (checklistTabState.pendingClaim) return checklistTabState.pendingClaim;
+
+  checklistTabState.pendingClaim = (async () => {
+    if (typeof navigator === "undefined" || !navigator.locks) {
+      throw new Error(
+        "Atualize seu navegador para permitir o envio seguro de tarefas do checklist.",
+      );
+    }
+
+    let storedTabId: string | null;
+    try {
+      storedTabId = window.sessionStorage.getItem(checklistTabStorageKey);
+    } catch {
+      throw new Error("O armazenamento desta aba está bloqueado. Habilite-o para continuar.");
+    }
+
+    const candidateTabId = storedTabId ?? crypto.randomUUID();
+    if (!storedTabId) {
+      try {
+        window.sessionStorage.setItem(checklistTabStorageKey, candidateTabId);
+      } catch {
+        throw new Error("O armazenamento desta aba está bloqueado. Habilite-o para continuar.");
+      }
+    }
+    if (await claimChecklistTabLock(candidateTabId)) {
+      checklistTabState.id = candidateTabId;
+      checklistTabState.lockOwned = true;
+      return candidateTabId;
+    }
+
+    const uniqueTabId = crypto.randomUUID();
+    try {
+      window.sessionStorage.setItem(checklistTabStorageKey, uniqueTabId);
+    } catch {
+      throw new Error("O armazenamento desta aba está bloqueado. Habilite-o para continuar.");
+    }
+    if (!(await claimChecklistTabLock(uniqueTabId))) {
+      throw new Error("Não foi possível reservar esta aba para uma tentativa segura.");
+    }
+    checklistTabState.id = uniqueTabId;
+    checklistTabState.lockOwned = true;
+    return uniqueTabId;
+  })().finally(() => {
+    checklistTabState.pendingClaim = undefined;
+  });
+
+  return checklistTabState.pendingClaim;
+}
+
+function checklistCreationStorageKey(userId: string, vehicleId: number, tabId: string) {
+  return `garagem-erp:checklist-create:v1:${userId}:${vehicleId}:${tabId}`;
+}
+
+function readPendingChecklistCreations(storageKey: string): PendingChecklistCreation[] {
+  const stored = window.localStorage.getItem(storageKey);
+  if (!stored) return [];
+
+  const parsed: unknown = JSON.parse(stored);
+  if (
+    Array.isArray(parsed) &&
+    parsed.every(
+      (entry) =>
+        typeof entry?.fingerprint === "string" && typeof entry?.idempotencyKey === "string",
+    )
+  ) {
+    return parsed.map((entry) => ({
+      ...entry,
+      activeAttempts: Array.isArray(entry.activeAttempts)
+        ? entry.activeAttempts.filter(
+            (attempt: { id?: unknown; startedAt?: unknown }) =>
+              typeof attempt.id === "string" && typeof attempt.startedAt === "number",
+          )
+        : [],
+      confirmed: entry.confirmed === true,
+    }));
+  }
+
+  window.localStorage.removeItem(storageKey);
+  return [];
+}
+
+function writePendingChecklistCreations(storageKey: string, entries: PendingChecklistCreation[]) {
+  if (entries.length > 0) {
+    window.localStorage.setItem(storageKey, JSON.stringify(entries));
+  } else {
+    window.localStorage.removeItem(storageKey);
+  }
+}
+
+async function getChecklistCreationContext(input: ChecklistWriteInput) {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw new Error(error.message);
+  const userId = data.session?.user.id;
+  if (!userId) throw new Error("Sua sessão expirou. Entre novamente para continuar.");
+  const tabId = await getChecklistCreationTabId();
+
+  const payload = { vehicle_id: input.vehicle_id, item: toChecklistPayload(input) };
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const fingerprint = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+
+  return {
+    fingerprint,
+    storageKey: checklistCreationStorageKey(userId, input.vehicle_id, tabId),
   };
 }
 
@@ -149,12 +292,74 @@ export async function listChecklist(vehicleId?: number) {
 }
 
 export async function createChecklistItem(input: ChecklistWriteInput) {
-  return unwrapChecklistRpc(
-    supabase.rpc("create_vehicle_checklist_item", {
-      p_vehicle_id: input.vehicle_id,
-      p_item: toChecklistPayload(input),
-    }),
-  );
+  const { fingerprint, storageKey } = await getChecklistCreationContext(input);
+  const reserveAttempt = () => {
+    const now = Date.now();
+    const entries = readPendingChecklistCreations(storageKey)
+      .map((entry) => ({
+        ...entry,
+        activeAttempts: entry.activeAttempts.filter(
+          (activeAttempt) => now - activeAttempt.startedAt < checklistAttemptLeaseMs,
+        ),
+      }))
+      .filter((entry) => entry.activeAttempts.length > 0 || !entry.confirmed);
+    const existing = entries.find((entry) => entry.fingerprint === fingerprint);
+    const recoveredAttempt = existing !== undefined;
+    const attempt = existing ?? {
+      fingerprint,
+      idempotencyKey: crypto.randomUUID(),
+      activeAttempts: [],
+      confirmed: false,
+    };
+    const activeAttemptId = crypto.randomUUID();
+    attempt.activeAttempts.push({ id: activeAttemptId, startedAt: now });
+    if (!existing) entries.push(attempt);
+    writePendingChecklistCreations(storageKey, entries);
+    return { idempotencyKey: attempt.idempotencyKey, activeAttemptId, recoveredAttempt };
+  };
+  const attempt = await navigator.locks.request(storageKey, { mode: "exclusive" }, reserveAttempt);
+
+  const settleAttempt = async (succeeded: boolean) => {
+    try {
+      await navigator.locks.request(storageKey, { mode: "exclusive" }, () => {
+        const entries = readPendingChecklistCreations(storageKey);
+        const current = entries.find((entry) => entry.idempotencyKey === attempt.idempotencyKey);
+        if (!current) return;
+
+        current.activeAttempts = current.activeAttempts.filter(
+          (activeAttempt) => activeAttempt.id !== attempt.activeAttemptId,
+        );
+        current.confirmed = current.confirmed || succeeded;
+        const removeWhenIdle = current.confirmed;
+        writePendingChecklistCreations(
+          storageKey,
+          entries.filter(
+            (entry) =>
+              entry.idempotencyKey !== current.idempotencyKey ||
+              !removeWhenIdle ||
+              current.activeAttempts.length > 0,
+          ),
+        );
+      });
+    } catch {
+      // Preserve the stored key if local cleanup fails; a retry remains idempotent.
+    }
+  };
+
+  try {
+    const created = await unwrapChecklistRpc(
+      supabase.rpc("create_vehicle_checklist_item", {
+        p_idempotency_key: attempt.idempotencyKey,
+        p_vehicle_id: input.vehicle_id,
+        p_item: toChecklistPayload(input),
+      }),
+    );
+    await settleAttempt(true);
+    return { item: created, recoveredAttempt: attempt.recoveredAttempt };
+  } catch (error) {
+    await settleAttempt(false);
+    throw error;
+  }
 }
 
 export async function updateChecklistItem(

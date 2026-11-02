@@ -269,6 +269,7 @@ async function callRpc(user, name, args) {
 
 function checklistItem(vehicleId) {
   return {
+    p_idempotency_key: randomUUID(),
     p_vehicle_id: vehicleId,
     p_item: {
       title: "Preparar veículo para venda",
@@ -562,6 +563,43 @@ test(
           body: { status: "available", published: false },
         });
         assert.equal(bypassFinish.response.ok, false, JSON.stringify(bypassFinish.data));
+      },
+    );
+
+    await t.test(
+      "repeating checklist creation with the same key returns the same task",
+      async () => {
+        const user = fixtures.users[0];
+        const vehicle = await createVehicle(11);
+        const args = checklistItem(vehicle.id);
+        const [first, retry] = await Promise.all([
+          callRpc(user, "create_vehicle_checklist_item", args),
+          callRpc(user, "create_vehicle_checklist_item", args),
+        ]);
+
+        assert.equal(first.response.status, 200, JSON.stringify(first.data));
+        assert.equal(retry.response.status, 200, JSON.stringify(retry.data));
+        assert.equal(retry.data.id, first.data.id);
+
+        const rows = await authenticatedRows(
+          user,
+          "vehicle_checklist_items",
+          `select=id&vehicle_id=eq.${vehicle.id}`,
+        );
+        assert.equal(rows.length, 1);
+
+        const reusedKeyWithDifferentTask = await callRpc(user, "create_vehicle_checklist_item", {
+          ...args,
+          p_item: { ...args.p_item, title: "Outra tarefa" },
+        });
+        assert.equal(reusedKeyWithDifferentTask.response.status, 409);
+        assert.match(JSON.stringify(reusedKeyWithDifferentTask.data), /idempotência/i);
+        const unchangedRows = await authenticatedRows(
+          user,
+          "vehicle_checklist_items",
+          `select=id&vehicle_id=eq.${vehicle.id}`,
+        );
+        assert.equal(unchangedRows.length, 1);
       },
     );
 

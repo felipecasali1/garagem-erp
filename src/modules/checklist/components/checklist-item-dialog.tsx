@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -136,6 +136,7 @@ export function ChecklistItemDialog({
     },
   });
   const queryClient = useQueryClient();
+  const createAttempt = useRef<{ values: FormValues } | null>(null);
   const [baseItem, setBaseItem] = useState(item ?? null);
   const [expectedUpdatedAt, setExpectedUpdatedAt] = useState(item?.updated_at ?? null);
   const [conflict, setConflict] = useState<{ current: ChecklistItem | null } | null>(null);
@@ -150,9 +151,14 @@ export function ChecklistItemDialog({
   };
   const createMutation = useMutation({
     mutationFn: createChecklistItem,
-    onSuccess: async () => {
+    onSuccess: async ({ recoveredAttempt }) => {
       await invalidateChecklist();
-      toast.success("Item adicionado ao checklist");
+      createAttempt.current = null;
+      toast.success(
+        recoveredAttempt
+          ? "Tarefa recuperada de uma tentativa anterior."
+          : "Item adicionado ao checklist",
+      );
       onOpenChange(false);
     },
     onError: (error) => {
@@ -185,7 +191,10 @@ export function ChecklistItemDialog({
 
   useEffect(() => {
     if (open) {
-      form.reset(itemToFormValues(item));
+      if (item) createAttempt.current = null;
+      form.reset(
+        item ? itemToFormValues(item) : (createAttempt.current?.values ?? itemToFormValues()),
+      );
       setBaseItem(item ?? null);
       setExpectedUpdatedAt(item?.updated_at ?? null);
       setConflict(null);
@@ -202,11 +211,13 @@ export function ChecklistItemDialog({
         version: expectedUpdatedAt,
       });
     } else {
-      createMutation.mutate({
+      const input = {
         vehicle_id: vehicleId,
         ...payload,
         attachments: [],
-      });
+      };
+      createAttempt.current = { values };
+      createMutation.mutate(input);
     }
   });
 
@@ -215,8 +226,15 @@ export function ChecklistItemDialog({
     void submit(event);
   }
 
+  function handleDialogOpenChange(nextOpen: boolean) {
+    if (!nextOpen && createAttempt.current) {
+      createAttempt.current.values = form.getValues();
+    }
+    onOpenChange(nextOpen);
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{item ? "Editar item" : "Novo item de checklist"}</DialogTitle>
@@ -400,10 +418,20 @@ export function ChecklistItemDialog({
           </Field>
 
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={createMutation.isPending || updateMutation.isPending}
+              onClick={() => {
+                createAttempt.current = null;
+                onOpenChange(false);
+              }}
+            >
               Cancelar
             </Button>
-            <Button type="submit">{item ? "Salvar alterações" : "Adicionar item"}</Button>
+            <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
+              {item ? "Salvar alterações" : "Adicionar item"}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
