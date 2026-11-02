@@ -25,13 +25,13 @@ Pessoa ou organização da qual a garagem adquire um `Vehicle`. Pode representar
 _Avoid_: presumir que todo `Customer` é `Supplier`, embora uma mesma `Person` possa exercer os dois papéis.
 
 **User**:
-Pessoa com acesso ao sistema. `User` é um papel de acesso e não substitui o papel de `Employee` ou qualquer outro papel de negócio.
+Pessoa com acesso ao sistema. `User` é um papel de acesso e não substitui o papel de `Employee` ou qualquer outro papel de negócio. Inativar o `Employee` vinculado suspende esse acesso; reativar o funcionário não reativa automaticamente o `User`.
 _Avoid_: usar `User` como sinônimo de pessoa ou funcionário.
 
 ### Vehicle lifecycle
 
 **Vehicle**:
-Carro físico que a garagem pode adquirir, preparar, disponibilizar e vender. O mesmo veículo pode retornar à garagem e participar de vários ciclos de estoque ao longo da sua vida.
+Carro físico que a garagem pode adquirir, preparar, disponibilizar e vender. O mesmo veículo pode retornar à garagem e participar de vários ciclos de estoque ao longo da sua vida; ele só está disponível para venda quando não há tarefas abertas de preparação.
 _Avoid_: tratar o veículo como uma operação única de compra e venda.
 
 **Purchase**:
@@ -43,7 +43,7 @@ Fase em que a garagem executa as tarefas necessárias para tornar um `Vehicle` p
 _Avoid_: reduzir `Preparation` a reparos mecânicos; ela pode incluir inspeção, documentação, limpeza, acessórios e outras tarefas operacionais.
 
 **ChecklistItem**:
-Tarefa concreta pertencente à `Preparation` de um `Vehicle`, com acompanhamento de status, prioridade, custos e, quando aplicável, um `Employee` responsável.
+Tarefa concreta pertencente à `Preparation` de um `Vehicle`, com acompanhamento de status, prioridade, custos e, quando aplicável, um `Employee` responsável. Abrir ou reabrir uma tarefa significa que o veículo ainda não está pronto para venda.
 _Avoid_: tratar o checklist como apenas uma lista visual sem efeito no estado de preparação.
 
 **Accessory**:
@@ -64,7 +64,7 @@ Condições e estado do pagamento associado a uma `Sale`, incluindo a forma de p
 _Avoid_: usar `Payment` como sinônimo de `FinancialTransaction`.
 
 **Installment**:
-Parcela individual de um `Payment` ou de uma obrigação financeira, com valor, vencimento e estado próprios.
+Parcela individual de um `Payment` ou de uma obrigação financeira, com valor, vencimento e estado próprios. Pertence a uma única origem, possui número único dentro dela e é quitada integralmente em um único recebimento; pagamentos parciais não fazem parte do modelo atual.
 
 **Commission**:
 Valor devido a um `Employee` em razão de uma `Sale`, calculado conforme a regra de comissão aplicável ao funcionário.
@@ -91,3 +91,9 @@ _Avoid_: tratar `OperationalAlert` como uma mensagem histórica, um evento de au
 **Alert**:
 Rótulo usado na interface para apresentar um `OperationalAlert` ao `User`. A condição é da instalação da garagem, mas cada usuário vê apenas os alertas das áreas que seu nível de acesso permite consultar.
 _Avoid_: usar “Notificação” para os alertas operacionais atuais.
+
+### Garage identity
+
+**CompanySettings**:
+Dados de identificação e configuração da garagem dona da instalação. Cada instalação representa uma única garagem e tem um único perfil de empresa.
+_Avoid_: tratar uma instalação como um portfólio de várias empresas.
