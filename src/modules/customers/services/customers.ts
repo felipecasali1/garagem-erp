@@ -5,7 +5,7 @@ import {
   normalizePhone,
   normalizeUf,
 } from "@/shared/lib/field-format";
-import { getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
+import { createPersonConfiguration } from "@/shared/supabase/person-configuration";
 import type { Address, Customer, PersonType } from "@/shared/types/domain";
 import type { CustomerDraft } from "@/modules/customers/types";
 import { getPageBounds, type PaginatedResult } from "@/shared/lib/pagination";
@@ -205,33 +205,6 @@ async function upsertPrimaryAddress(personId: number, address: CustomerDraft["pr
   }
 }
 
-async function createPersonAndCustomer(draft: CustomerDraft) {
-  const personId = await getOrCreatePersonIdByDocument({
-    name: draft.name,
-    type: draft.type,
-    document: draft.document,
-    phone: draft.phone,
-    email: draft.email,
-  });
-
-  await upsertPrimaryAddress(personId, draft.primary_address);
-
-  const { data: customer, error: customerError } = await supabase
-    .from("customers")
-    .insert({
-      person_id: personId,
-      notes: normalizeText(draft.notes),
-    })
-    .select("id")
-    .single();
-
-  if (customerError) {
-    throw new Error(customerError.message);
-  }
-
-  return customer.id;
-}
-
 export const customerKeys = {
   all: ["customers"] as const,
   list: (page: number) => ["customers", "list", { page }] as const,
@@ -258,9 +231,25 @@ export async function getCustomerById(id: number) {
   return customer;
 }
 
-export async function createCustomer(draft: CustomerDraft) {
-  const id = await createPersonAndCustomer(draft);
-  return getCustomerById(id);
+export async function createCustomer(draft: CustomerDraft, idempotencyKey: string) {
+  const document = normalizeDocument(draft.document, draft.type) || null;
+  const result = await createPersonConfiguration({
+    idempotencyKey,
+    person: {
+      name: draft.name.trim(),
+      type: draft.type,
+      cpf: draft.type === "individual" ? document : null,
+      cnpj: draft.type === "company" ? document : null,
+      phone: normalizeText(normalizePhone(draft.phone)),
+      email: normalizeText(draft.email),
+    },
+    roles: [{ role: "customer", notes: normalizeText(draft.notes) }],
+    primaryAddress: draft.primary_address,
+  });
+  if (!result.customer_id) {
+    throw new Error("O cadastro não retornou o identificador do cliente.");
+  }
+  return getCustomerById(result.customer_id);
 }
 
 export async function updateCustomer(id: number, draft: CustomerDraft) {

@@ -1,6 +1,6 @@
 import { supabase } from "@/shared/supabase/client";
 import { normalizeCep, normalizeCpf, normalizePhone, normalizeUf } from "@/shared/lib/field-format";
-import { getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
+import { createPersonConfiguration } from "@/shared/supabase/person-configuration";
 import type { Address, Employee, PersonType } from "@/shared/types/domain";
 import type { EmployeeAccessRole, EmployeeDraft } from "@/modules/employees/types";
 import { getPageBounds, type PaginatedResult } from "@/shared/lib/pagination";
@@ -296,41 +296,34 @@ async function upsertPrimaryAddress(personId: number, address: EmployeeDraft["pr
   }
 }
 
-async function createPersonAndEmployee(draft: EmployeeDraft) {
-  const personId = await getOrCreatePersonIdByDocument({
-    name: draft.name,
-    type: "individual",
-    document: draft.cpf,
-    phone: draft.phone,
-    email: draft.email,
+export async function createEmployee(draft: EmployeeDraft, idempotencyKey: string) {
+  const result = await createPersonConfiguration({
+    idempotencyKey,
+    person: {
+      name: draft.name.trim(),
+      type: "individual",
+      cpf: normalizeText(normalizeCpf(draft.cpf)),
+      cnpj: null,
+      phone: normalizeText(normalizePhone(draft.phone)),
+      email: normalizeText(draft.email),
+    },
+    roles: [
+      {
+        role: "employee",
+        position: draft.position.trim(),
+        salary: draft.salary,
+        commission_rate: draft.commission_rate,
+        commission_type: draft.commission_type,
+        active: draft.active,
+        hired_at: draft.hired_at ?? new Date().toISOString().slice(0, 10),
+      },
+    ],
+    primaryAddress: draft.primary_address,
   });
-
-  await upsertPrimaryAddress(personId, draft.primary_address);
-
-  const { data: employee, error: employeeError } = await supabase
-    .from("employees")
-    .insert({
-      person_id: personId,
-      position: draft.position.trim(),
-      salary: draft.salary,
-      commission_rate: draft.commission_rate,
-      commission_type: draft.commission_type,
-      active: draft.active,
-      hired_at: draft.hired_at ?? new Date().toISOString().slice(0, 10),
-    })
-    .select("id")
-    .single();
-
-  if (employeeError) {
-    throw new Error(employeeError.message);
+  if (!result.employee_id) {
+    throw new Error("O cadastro não retornou o identificador do funcionário.");
   }
-
-  return employee.id;
-}
-
-export async function createEmployee(draft: EmployeeDraft) {
-  const id = await createPersonAndEmployee(draft);
-  return getEmployeeById(id);
+  return getEmployeeById(result.employee_id);
 }
 
 export async function updateEmployee(id: number, draft: EmployeeDraft) {

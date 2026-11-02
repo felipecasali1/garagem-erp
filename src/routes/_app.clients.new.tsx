@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowLeft, Save } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -17,6 +17,7 @@ import {
 import { CepInput, CpfCnpjInput, PhoneInput, UfInput } from "@/shared/components/form/field-inputs";
 import type { CustomerDraft } from "@/modules/customers/types";
 import { createCustomer, customerKeys } from "@/modules/customers/services/customers";
+import { getIdempotencyAttempt } from "@/shared/lib/idempotency";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/clients/new")({
@@ -27,6 +28,7 @@ export const Route = createFileRoute("/_app/clients/new")({
 function NewClient() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const createAttemptRef = useRef<ReturnType<typeof getIdempotencyAttempt> | null>(null);
   const [draft, setDraft] = useState<CustomerDraft>({
     type: "individual",
     name: "",
@@ -46,8 +48,12 @@ function NewClient() {
   });
 
   const createMutation = useMutation({
-    mutationFn: createCustomer,
-    onSuccess: async (customer) => {
+    mutationFn: ({ draft, idempotencyKey }: { draft: CustomerDraft; idempotencyKey: string }) =>
+      createCustomer(draft, idempotencyKey),
+    onSuccess: async (customer, variables) => {
+      if (createAttemptRef.current?.key === variables.idempotencyKey) {
+        createAttemptRef.current = null;
+      }
       await queryClient.invalidateQueries({ queryKey: customerKeys.all });
       toast.success("Cliente cadastrado");
       await navigate({ to: "/clients/$id", params: { id: String(customer.id) } });
@@ -71,7 +77,9 @@ function NewClient() {
       toast.error("Informe o nome do cliente");
       return;
     }
-    createMutation.mutate(draft);
+    const attempt = getIdempotencyAttempt(draft, createAttemptRef.current);
+    createAttemptRef.current = attempt;
+    createMutation.mutate({ draft, idempotencyKey: attempt.key });
   };
 
   return (

@@ -230,10 +230,46 @@ async function seedFixtures() {
   const customer = await restInsert("customers", { person_id: customerPerson.id, active: true });
   const users = [await createAuthenticatedUser(1), await createAuthenticatedUser(2)];
   const financialOnlyUser = await createAuthenticatedUser(3, "financial");
+  const managerUser = await createAuthenticatedUser(6, "manager");
   const supplier = await createSupplier(1);
   const vehicles = [];
   for (let index = 1; index <= 5; index += 1) vehicles.push(await createVehicle(index));
-  return { customerId: customer.id, supplierId: supplier.id, users, financialOnlyUser, vehicles };
+  return {
+    customerId: customer.id,
+    supplierId: supplier.id,
+    users,
+    financialOnlyUser,
+    managerUser,
+    vehicles,
+  };
+}
+
+function personConfigurationArguments({ key = randomUUID(), cpf, name, roles, address }) {
+  return {
+    p_idempotency_key: key,
+    p_person: {
+      name,
+      type: "individual",
+      cpf,
+      cnpj: null,
+      phone: "67988887777",
+      email: `${cpf}@example.test`,
+    },
+    p_roles: roles,
+    p_primary_address: address,
+  };
+}
+
+function primaryAddress(street) {
+  return {
+    street,
+    number: "123",
+    complement: "Casa",
+    neighborhood: "Centro",
+    city: "Campo Grande",
+    state: "MS",
+    zip_code: "79000000",
+  };
 }
 
 function saleArguments({ fixtures, vehicle, user, key = randomUUID(), overrides = {} }) {
@@ -466,6 +502,322 @@ test(
     }
 
     const fixtures = await seedFixtures();
+
+    await t.test(
+      "Person, multiple business roles and primary Address commit once on retry",
+      async () => {
+        const args = personConfigurationArguments({
+          cpf: "71000000001",
+          name: "Pessoa com vários papéis",
+          roles: [
+            { role: "customer", notes: "Cliente da garagem" },
+            {
+              role: "employee",
+              position: "Vendedor",
+              salary: 3000,
+              commission_rate: 2,
+              commission_type: "percentage",
+              active: true,
+              hired_at: "2026-10-01",
+            },
+            { role: "supplier", supplier_type: "individual", notes: "Também fornecedor" },
+          ],
+          address: primaryAddress("Rua dos Testes"),
+        });
+        const user = fixtures.managerUser;
+        const [first, retry] = await Promise.all([
+          callRpc(user, "create_person_configuration", args),
+          callRpc(user, "create_person_configuration", args),
+        ]);
+
+        assert.equal(first.response.status, 200, JSON.stringify(first.data));
+        assert.equal(retry.response.status, 200, JSON.stringify(retry.data));
+        assert.deepEqual(retry.data, first.data);
+        assert.ok(first.data.person_id);
+        assert.ok(first.data.customer_id);
+        assert.ok(first.data.employee_id);
+        assert.ok(first.data.supplier_id);
+
+        const people = await authenticatedRows(
+          user,
+          "people",
+          `select=id,name,cpf&cpf=eq.${args.p_person.cpf}`,
+        );
+        const customers = await authenticatedRows(
+          user,
+          "customers",
+          `select=id&person_id=eq.${first.data.person_id}`,
+        );
+        const employees = await authenticatedRows(
+          user,
+          "employees",
+          `select=id&person_id=eq.${first.data.person_id}`,
+        );
+        const suppliers = await authenticatedRows(
+          user,
+          "suppliers",
+          `select=id&person_id=eq.${first.data.person_id}`,
+        );
+        const addresses = await authenticatedRows(
+          user,
+          "addresses",
+          `select=id,street,is_primary&person_id=eq.${first.data.person_id}`,
+        );
+
+        assert.equal(people.length, 1);
+        assert.equal(customers.length, 1);
+        assert.equal(employees.length, 1);
+        assert.equal(suppliers.length, 1);
+        assert.equal(addresses.length, 1);
+        assert.equal(addresses[0].street, "Rua dos Testes");
+        assert.equal(addresses[0].is_primary, true);
+
+        const changedRetry = await callRpc(user, "create_person_configuration", {
+          ...args,
+          p_person: { ...args.p_person, name: "Conteúdo diferente" },
+        });
+        assert.equal(changedRetry.response.status, 409);
+      },
+    );
+
+    await t.test("concurrent requests with distinct roles reuse the same Person", async () => {
+      const user = fixtures.managerUser;
+      const customerArgs = personConfigurationArguments({
+        cpf: "71000000005",
+        name: "Pessoa com papéis concorrentes",
+        roles: [{ role: "customer", notes: "Cliente" }],
+        address: primaryAddress("Rua Compartilhada"),
+      });
+      const supplierArgs = personConfigurationArguments({
+        cpf: "71000000005",
+        name: "Pessoa com papéis concorrentes",
+        roles: [{ role: "supplier", supplier_type: "individual", notes: "Fornecedor" }],
+        address: primaryAddress("Rua Compartilhada"),
+      });
+      const [customerResult, supplierResult] = await Promise.all([
+        callRpc(user, "create_person_configuration", customerArgs),
+        callRpc(user, "create_person_configuration", supplierArgs),
+      ]);
+
+      assert.equal(customerResult.response.status, 200, JSON.stringify(customerResult.data));
+      assert.equal(supplierResult.response.status, 200, JSON.stringify(supplierResult.data));
+      assert.equal(customerResult.data.person_id, supplierResult.data.person_id);
+
+      const personId = customerResult.data.person_id;
+      const people = await authenticatedRows(
+        user,
+        "people",
+        `select=id&cpf=eq.${customerArgs.p_person.cpf}`,
+      );
+      const customers = await authenticatedRows(
+        user,
+        "customers",
+        `select=id&person_id=eq.${personId}`,
+      );
+      const suppliers = await authenticatedRows(
+        user,
+        "suppliers",
+        `select=id&person_id=eq.${personId}`,
+      );
+      const addresses = await authenticatedRows(
+        user,
+        "addresses",
+        `select=id&person_id=eq.${personId}`,
+      );
+      assert.equal(people.length, 1);
+      assert.equal(customers.length, 1);
+      assert.equal(suppliers.length, 1);
+      assert.equal(addresses.length, 1);
+    });
+
+    await t.test("adding a role without Person notes preserves existing notes", async () => {
+      const user = fixtures.managerUser;
+      const customerArgs = personConfigurationArguments({
+        cpf: "71000000006",
+        name: "Pessoa com observação",
+        roles: [{ role: "customer", notes: "Cliente" }],
+        address: primaryAddress("Rua das Observações"),
+      });
+      customerArgs.p_person.notes = "Observação pessoal existente";
+      const customer = await callRpc(user, "create_person_configuration", customerArgs);
+      assert.equal(customer.response.status, 200, JSON.stringify(customer.data));
+
+      const supplierArgs = personConfigurationArguments({
+        cpf: customerArgs.p_person.cpf,
+        name: customerArgs.p_person.name,
+        roles: [{ role: "supplier", supplier_type: "individual", notes: "Fornecedor" }],
+        address: primaryAddress("Rua das Observações"),
+      });
+      const supplier = await callRpc(user, "create_person_configuration", supplierArgs);
+      assert.equal(supplier.response.status, 200, JSON.stringify(supplier.data));
+      assert.equal(supplier.data.person_id, customer.data.person_id);
+
+      const people = await authenticatedRows(
+        user,
+        "people",
+        `select=notes&cpf=eq.${customerArgs.p_person.cpf}`,
+      );
+      assert.equal(people[0].notes, "Observação pessoal existente");
+    });
+
+    await t.test(
+      "a duplicate business role conflict rolls back Person and Address changes",
+      async () => {
+        const user = fixtures.users[0];
+        const original = personConfigurationArguments({
+          cpf: "71000000002",
+          name: "Pessoa original",
+          roles: [{ role: "customer", notes: "Cadastro inicial" }],
+          address: primaryAddress("Rua Original"),
+        });
+        const created = await callRpc(user, "create_person_configuration", original);
+        assert.equal(created.response.status, 200, JSON.stringify(created.data));
+
+        const duplicateRole = await callRpc(user, "create_person_configuration", {
+          ...original,
+          p_idempotency_key: randomUUID(),
+          p_person: { ...original.p_person, name: "Nome não deve ser salvo" },
+          p_roles: [{ role: "customer", notes: "Nota não deve ser salva" }],
+          p_primary_address: primaryAddress("Rua não deve ser salva"),
+        });
+        assert.equal(duplicateRole.response.status, 409);
+
+        const people = await authenticatedRows(
+          user,
+          "people",
+          `select=id,name&cpf=eq.${original.p_person.cpf}`,
+        );
+        const addresses = await authenticatedRows(
+          user,
+          "addresses",
+          `select=street&person_id=eq.${created.data.person_id}`,
+        );
+        const customers = await authenticatedRows(
+          user,
+          "customers",
+          `select=id,notes&person_id=eq.${created.data.person_id}`,
+        );
+        assert.equal(people[0].name, "Pessoa original");
+        assert.equal(addresses.length, 1);
+        assert.equal(addresses[0].street, "Rua Original");
+        assert.equal(customers.length, 1);
+        assert.equal(customers[0].notes, "Cadastro inicial");
+      },
+    );
+
+    await t.test(
+      "concurrent creation of the same business role leaves one complete record",
+      async () => {
+        const user = fixtures.users[0];
+        const firstArgs = personConfigurationArguments({
+          cpf: "71000000007",
+          name: "Pessoa em disputa de papel",
+          roles: [{ role: "customer", notes: "Primeira tentativa" }],
+          address: primaryAddress("Rua da Disputa"),
+        });
+        const secondArgs = {
+          ...firstArgs,
+          p_idempotency_key: randomUUID(),
+          p_person: { ...firstArgs.p_person, name: "Outra tentativa" },
+          p_roles: [{ role: "customer", notes: "Segunda tentativa" }],
+          p_primary_address: primaryAddress("Rua da Disputa 2"),
+        };
+        const results = await Promise.all([
+          callRpc(user, "create_person_configuration", firstArgs),
+          callRpc(user, "create_person_configuration", secondArgs),
+        ]);
+
+        assert.equal(results.filter((result) => result.response.status === 200).length, 1);
+        assert.equal(results.filter((result) => result.response.status === 409).length, 1);
+        const winner = results.find((result) => result.response.status === 200);
+        assert.ok(winner);
+        const winningArguments = results[0] === winner ? firstArgs : secondArgs;
+
+        const people = await authenticatedRows(
+          user,
+          "people",
+          `select=id,name&cpf=eq.${firstArgs.p_person.cpf}`,
+        );
+        const customers = await authenticatedRows(
+          user,
+          "customers",
+          `select=id,notes&person_id=eq.${winner.data.person_id}`,
+        );
+        const addresses = await authenticatedRows(
+          user,
+          "addresses",
+          `select=id,street&person_id=eq.${people[0].id}`,
+        );
+        assert.equal(people.length, 1);
+        assert.equal(people[0].name, winningArguments.p_person.name);
+        assert.equal(customers.length, 1);
+        assert.equal(customers[0].notes, winningArguments.p_roles[0].notes);
+        assert.equal(addresses.length, 1);
+        assert.equal(addresses[0].street, winningArguments.p_primary_address.street);
+      },
+    );
+
+    await t.test(
+      "invalid role data and unauthorized Employee creation leave no partial Person",
+      async () => {
+        const manager = fixtures.managerUser;
+        const invalidEmployee = personConfigurationArguments({
+          cpf: "71000000003",
+          name: "Pessoa com papel inválido",
+          roles: [
+            {
+              role: "employee",
+              position: "Vendedor",
+              salary: 3000,
+              commission_rate: 2,
+              commission_type: "invalid_type",
+              active: true,
+              hired_at: "2026-10-01",
+            },
+          ],
+          address: primaryAddress("Rua temporária"),
+        });
+        const failed = await callRpc(manager, "create_person_configuration", invalidEmployee);
+        assert.equal(failed.response.ok, false, JSON.stringify(failed.data));
+
+        const sellerAttempt = await callRpc(fixtures.users[0], "create_person_configuration", {
+          ...personConfigurationArguments({
+            cpf: "71000000004",
+            name: "Funcionário sem permissão",
+            roles: [
+              {
+                role: "employee",
+                position: "Vendedor",
+                salary: 3000,
+                commission_rate: 2,
+                commission_type: "percentage",
+                active: true,
+                hired_at: "2026-10-01",
+              },
+            ],
+            address: primaryAddress("Rua sem permissão"),
+          }),
+        });
+        assert.equal(sellerAttempt.response.status, 403);
+
+        const leftoverPeople = await requestJson(
+          `${apiBase.rest}/people?select=id&cpf=in.(71000000003,71000000004)`,
+          { admin: true },
+        );
+        assert.equal(leftoverPeople.response.status, 200, JSON.stringify(leftoverPeople.data));
+        assert.equal(leftoverPeople.data.length, 0);
+      },
+    );
+
+    await t.test("direct inserts cannot bypass the atomic Person configuration RPC", async () => {
+      const user = fixtures.users[0];
+      const directInsert = await requestJson(`${apiBase.rest}/people`, {
+        method: "POST",
+        token: user.accessToken,
+        body: { name: "Inserção direta não permitida", type: "individual" },
+      });
+      assert.equal(directInsert.response.ok, false);
+    });
 
     await t.test("Purchase creation replays once and rejects changed data", async () => {
       const user = fixtures.users[0];

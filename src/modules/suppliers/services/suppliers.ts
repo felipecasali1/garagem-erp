@@ -5,7 +5,7 @@ import {
   normalizePhone,
   normalizeUf,
 } from "@/shared/lib/field-format";
-import { getOrCreatePersonIdByDocument } from "@/shared/supabase/people";
+import { createPersonConfiguration } from "@/shared/supabase/person-configuration";
 import type { Address, Person, PersonType } from "@/shared/types/domain";
 import type { SupplierDraft, SupplierType } from "@/modules/suppliers/types";
 import { getPageBounds, type PaginatedResult } from "@/shared/lib/pagination";
@@ -78,6 +78,12 @@ export const supplierKeys = {
 function normalizeText(value?: string | null) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function hasAddressValues(address?: Address) {
+  return Boolean(
+    address && Object.values(address).some((value) => typeof value === "string" && value.trim()),
+  );
 }
 
 function mapAddress(row?: AddressRow): Address | undefined {
@@ -231,50 +237,6 @@ async function upsertPrimaryAddress(personId: number, address: Address) {
   }
 }
 
-async function ensureSupplierRole(personId: number, input: CreateSupplierInput) {
-  const { data: existingSupplier, error: existingSupplierError } = await supabase
-    .from("suppliers")
-    .select("id, active")
-    .eq("person_id", personId)
-    .maybeSingle();
-
-  if (existingSupplierError) {
-    throw new Error(existingSupplierError.message);
-  }
-
-  if (existingSupplier) {
-    const { error } = await supabase
-      .from("suppliers")
-      .update({
-        active: true,
-        notes: normalizeText(input.notes),
-        supplier_type: input.supplier_type ?? (input.type === "company" ? "company" : "individual"),
-      })
-      .eq("id", existingSupplier.id);
-    if (error) {
-      throw new Error(error.message);
-    }
-    return existingSupplier.id as number;
-  }
-
-  const { data: supplier, error } = await supabase
-    .from("suppliers")
-    .insert({
-      person_id: personId,
-      supplier_type: input.supplier_type ?? (input.type === "company" ? "company" : "individual"),
-      notes: normalizeText(input.notes),
-      active: true,
-    })
-    .select("id")
-    .single();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return supplier.id as number;
-}
-
 export async function listSuppliers() {
   return fetchSupplierRows();
 }
@@ -295,34 +257,47 @@ export async function getSupplierById(id: number) {
   return supplier;
 }
 
-export async function createSupplier(input: CreateSupplierInput) {
-  const personId = await getOrCreatePersonIdByDocument({
-    name: input.name,
-    type: input.type,
-    document: input.document ?? "",
-    phone: input.phone ?? "",
-    email: input.email ?? "",
+export async function createSupplier(input: CreateSupplierInput, idempotencyKey: string) {
+  const document = normalizeDocument(input.document ?? "", input.type) || null;
+  const result = await createPersonConfiguration({
+    idempotencyKey,
+    person: {
+      name: input.name.trim(),
+      type: input.type,
+      cpf: input.type === "individual" ? document : null,
+      cnpj: input.type === "company" ? document : null,
+      phone: normalizeText(normalizePhone(input.phone ?? "")),
+      email: normalizeText(input.email),
+    },
+    roles: [
+      {
+        role: "supplier",
+        supplier_type: input.supplier_type ?? (input.type === "company" ? "company" : "individual"),
+        notes: normalizeText(input.notes),
+      },
+    ],
+    primaryAddress: hasAddressValues(input.primary_address) ? input.primary_address : null,
   });
-
-  if (input.primary_address && Object.values(input.primary_address).some(Boolean)) {
-    await upsertPrimaryAddress(personId, input.primary_address);
+  if (!result.supplier_id) {
+    throw new Error("O cadastro não retornou o identificador do fornecedor.");
   }
-
-  const supplierId = await ensureSupplierRole(personId, input);
-  return supplierId;
+  return result.supplier_id;
 }
 
-export async function createSupplierFromDraft(draft: SupplierDraft) {
-  const id = await createSupplier({
-    name: draft.name,
-    type: draft.type,
-    document: draft.document,
-    phone: draft.phone,
-    email: draft.email,
-    notes: draft.notes,
-    supplier_type: draft.supplier_type,
-    primary_address: draft.primary_address,
-  });
+export async function createSupplierFromDraft(draft: SupplierDraft, idempotencyKey: string) {
+  const id = await createSupplier(
+    {
+      name: draft.name,
+      type: draft.type,
+      document: draft.document,
+      phone: draft.phone,
+      email: draft.email,
+      notes: draft.notes,
+      supplier_type: draft.supplier_type,
+      primary_address: draft.primary_address,
+    },
+    idempotencyKey,
+  );
   return getSupplierById(id);
 }
 

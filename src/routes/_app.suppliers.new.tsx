@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/shared/components/ui/button";
@@ -10,6 +10,7 @@ import {
 } from "@/modules/suppliers/components/supplier-form";
 import type { SupplierDraft } from "@/modules/suppliers/types";
 import { createSupplierFromDraft, supplierKeys } from "@/modules/suppliers/services/suppliers";
+import { getIdempotencyAttempt } from "@/shared/lib/idempotency";
 
 export const Route = createFileRoute("/_app/suppliers/new")({
   head: () => ({ meta: [{ title: "Novo Fornecedor | GaragemERP" }] }),
@@ -19,11 +20,16 @@ export const Route = createFileRoute("/_app/suppliers/new")({
 function NewSupplier() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const createAttemptRef = useRef<ReturnType<typeof getIdempotencyAttempt> | null>(null);
   const [draft, setDraft] = useState<SupplierDraft>(() => createEmptySupplierDraft());
 
   const createMutation = useMutation({
-    mutationFn: createSupplierFromDraft,
-    onSuccess: async (supplier) => {
+    mutationFn: ({ draft, idempotencyKey }: { draft: SupplierDraft; idempotencyKey: string }) =>
+      createSupplierFromDraft(draft, idempotencyKey),
+    onSuccess: async (supplier, variables) => {
+      if (createAttemptRef.current?.key === variables.idempotencyKey) {
+        createAttemptRef.current = null;
+      }
       await queryClient.invalidateQueries({ queryKey: supplierKeys.all });
       toast.success("Fornecedor cadastrado");
       await navigate({ to: "/suppliers/$id", params: { id: String(supplier.id) } });
@@ -42,7 +48,9 @@ function NewSupplier() {
       toast.error("Informe o CPF/CNPJ do fornecedor");
       return;
     }
-    createMutation.mutate(draft);
+    const attempt = getIdempotencyAttempt(draft, createAttemptRef.current);
+    createAttemptRef.current = attempt;
+    createMutation.mutate({ draft, idempotencyKey: attempt.key });
   };
 
   return (

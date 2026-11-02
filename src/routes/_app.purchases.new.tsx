@@ -30,6 +30,7 @@ import { brl, initials } from "@/shared/lib/format";
 import { formatDocument, formatPhone } from "@/shared/lib/field-format";
 import type { Address, PersonType, Vehicle } from "@/shared/types/domain";
 import { toast } from "sonner";
+import { getIdempotencyAttempt } from "@/shared/lib/idempotency";
 import { listVehicles, vehicleKeys } from "@/modules/vehicles/services/vehicles";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { createPurchase, purchaseKeys } from "@/modules/purchases/services/purchases";
@@ -59,6 +60,7 @@ function NewPurchase() {
   const queryClient = useQueryClient();
   const { vehicleId: initialVehicleId } = Route.useSearch();
   const createAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
+  const supplierCreateAttemptRef = useRef<ReturnType<typeof getIdempotencyAttempt> | null>(null);
   const prefilledVehicleIdRef = useRef<number | null>(null);
   const { data: vehicles = [], isLoading: loadingVehicles } = useQuery({
     queryKey: vehicleKeys.all,
@@ -151,12 +153,21 @@ function NewPurchase() {
   });
 
   const supplierMutation = useMutation({
-    mutationFn: createSupplier,
+    mutationFn: ({
+      input,
+      idempotencyKey,
+    }: {
+      input: CreateSupplierInput;
+      idempotencyKey: string;
+    }) => createSupplier(input, idempotencyKey),
     onSuccess: async (supplierId, variables) => {
+      if (supplierCreateAttemptRef.current?.key === variables.idempotencyKey) {
+        supplierCreateAttemptRef.current = null;
+      }
       await queryClient.invalidateQueries({ queryKey: supplierKeys.all });
       patchDraft({ supplier_id: supplierId });
       setCreateOpen(false);
-      toast.success(`Fornecedor "${variables.name}" criado`);
+      toast.success(`Fornecedor "${variables.input.name}" criado`);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Falha ao criar fornecedor.");
@@ -219,7 +230,11 @@ function NewPurchase() {
               </DialogTrigger>
               <NewSupplierDialog
                 isSaving={supplierMutation.isPending}
-                onCreate={(supplier) => supplierMutation.mutate(supplier)}
+                onCreate={(input) => {
+                  const attempt = getIdempotencyAttempt(input, supplierCreateAttemptRef.current);
+                  supplierCreateAttemptRef.current = attempt;
+                  supplierMutation.mutate({ input, idempotencyKey: attempt.key });
+                }}
               />
             </Dialog>
           </div>
@@ -594,6 +609,7 @@ function NewSupplierDialog({
       <DialogFooter>
         <Button
           type="button"
+          disabled={isSaving}
           onClick={() => {
             if (!name.trim()) {
               toast.error("Nome obrigatório");
