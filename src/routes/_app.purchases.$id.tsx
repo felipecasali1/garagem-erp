@@ -1,15 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  Building2,
-  Calendar,
-  Car,
-  CheckCircle2,
-  Receipt,
-  XCircle,
-} from "lucide-react";
-import { useState } from "react";
+import { ArrowLeft, Building2, Calendar, Car, CheckCircle2, Receipt, XCircle } from "lucide-react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -22,6 +14,7 @@ import {
   getPurchaseById,
   purchaseKeys,
 } from "@/modules/purchases/services/purchases";
+import { EditPendingPurchaseDialog } from "@/modules/purchases/components/edit-pending-purchase-dialog";
 import { vehicleKeys } from "@/modules/vehicles/services/vehicles";
 import { brl, fmtDate } from "@/shared/lib/format";
 import { formatDocument, formatPhone } from "@/shared/lib/field-format";
@@ -37,6 +30,8 @@ function PurchaseDetail() {
   const queryClient = useQueryClient();
   const purchaseId = Number(id);
   const [confirmAction, setConfirmAction] = useState<"complete" | "cancel" | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const commandKeysRef = useRef(new Map<string, string>());
   const {
     data: p,
     isLoading,
@@ -56,6 +51,16 @@ function PurchaseDetail() {
     }
   };
 
+  const handleTransitionError = async (error: Error) => {
+    if (error.message.includes("STALE_RECORD")) {
+      setConfirmAction(null);
+      await refreshPurchase(p?.vehicle.id);
+      toast.error("A compra mudou em outra sessão. Os dados atuais foram carregados.");
+      return;
+    }
+    toast.error(error.message || "Falha ao processar compra.");
+  };
+
   const completeMutation = useMutation({
     mutationFn: completePurchase,
     onSuccess: async () => {
@@ -63,9 +68,7 @@ function PurchaseDetail() {
       setConfirmAction(null);
       toast.success("Compra concluída");
     },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Falha ao concluir compra.");
-    },
+    onError: handleTransitionError,
   });
 
   const cancelMutation = useMutation({
@@ -75,10 +78,23 @@ function PurchaseDetail() {
       setConfirmAction(null);
       toast.success("Compra cancelada");
     },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Falha ao cancelar compra.");
-    },
+    onError: handleTransitionError,
   });
+
+  function transitionInput(action: "complete" | "cancel") {
+    if (!p) throw new Error("Compra não carregada.");
+    const fingerprint = `${action}:${p.id}:${p.updated_at}`;
+    let idempotencyKey = commandKeysRef.current.get(fingerprint);
+    if (!idempotencyKey) {
+      idempotencyKey = crypto.randomUUID();
+      commandKeysRef.current.set(fingerprint, idempotencyKey);
+    }
+    return {
+      idempotencyKey,
+      purchaseId: p.id,
+      expectedUpdatedAt: p.updated_at,
+    };
+  }
 
   if (isLoading) {
     return (
@@ -117,6 +133,13 @@ function PurchaseDetail() {
         <StatusBadge kind="purchase" value={p.status} />
         {isPending && (
           <>
+            <Button
+              variant="outline"
+              onClick={() => setEditOpen(true)}
+              disabled={completeMutation.isPending || cancelMutation.isPending}
+            >
+              Editar compra
+            </Button>
             <Button
               variant="outline"
               onClick={() => setConfirmAction("cancel")}
@@ -272,7 +295,7 @@ function PurchaseDetail() {
         confirmLabel={completeMutation.isPending ? "Concluindo..." : "Concluir compra"}
         confirmDisabled={completeMutation.isPending}
         confirmVariant="default"
-        onConfirm={() => completeMutation.mutate({ purchaseId: p.id })}
+        onConfirm={() => completeMutation.mutate(transitionInput("complete"))}
       />
 
       <ConfirmActionDialog
@@ -281,10 +304,17 @@ function PurchaseDetail() {
           if (!open) setConfirmAction(null);
         }}
         title="Cancelar compra?"
-        description="A compra será marcada como cancelada e o veículo continuará em avaliação. Nada será apagado."
+        description="A compra será marcada como cancelada e o veículo retornará ao estado em que estava antes deste ciclo de aquisição. Nada será apagado."
         confirmLabel={cancelMutation.isPending ? "Cancelando..." : "Cancelar compra"}
         confirmDisabled={cancelMutation.isPending}
-        onConfirm={() => cancelMutation.mutate({ purchaseId: p.id })}
+        onConfirm={() => cancelMutation.mutate(transitionInput("cancel"))}
+      />
+
+      <EditPendingPurchaseDialog
+        purchase={p}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        onSaved={() => refreshPurchase(p.vehicle.id)}
       />
     </div>
   );

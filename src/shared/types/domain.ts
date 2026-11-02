@@ -110,13 +110,14 @@ export interface Sale {
 
 export interface Purchase {
   id: number;
-  supplier_id?: number;
+  supplier_id: number;
   supplier: Person;
   vehicle: Vehicle;
   financial_transaction_id?: number;
   total_value: number;
   purchase_date: string;
   status: PurchaseStatus;
+  updated_at: string;
   notes?: string;
 }
 

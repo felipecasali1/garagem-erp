@@ -1,5 +1,3 @@
-import { createServerFn } from "@tanstack/react-start";
-import { z } from "zod";
 import { supabase } from "@/shared/supabase/client";
 import type { Person, PersonType, Purchase, PurchaseStatus, Vehicle } from "@/shared/types/domain";
 import type { SupplierType } from "@/modules/suppliers/services/suppliers";
@@ -41,20 +39,39 @@ type PurchaseRow = {
   purchase_date: string;
   status: PurchaseStatus;
   notes: string | null;
+  updated_at: string;
   supplier: SupplierRow | null;
   vehicle: VehicleRow | null;
 };
 
 const purchaseSelect =
-  "id, supplier_id, vehicle_id, financial_transaction_id, total_value, purchase_date, status, notes, supplier:suppliers(id, person_id, supplier_type, active, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles(*)";
+  "id, supplier_id, vehicle_id, financial_transaction_id, total_value, purchase_date, status, notes, updated_at, supplier:suppliers(id, person_id, supplier_type, active, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles(*)";
 
 export type CreatePurchaseInput = {
+  idempotencyKey: string;
   supplierId: number;
   vehicleId: number;
+  expectedVehicleUpdatedAt: string;
   totalValue: number;
   purchaseDate: string;
   status: PurchaseStatus;
   notes?: string;
+};
+
+export type UpdatePurchaseInput = {
+  idempotencyKey: string;
+  purchaseId: number;
+  expectedUpdatedAt: string;
+  supplierId: number;
+  totalValue: number;
+  purchaseDate: string;
+  notes?: string;
+};
+
+export type PurchaseTransitionInput = {
+  idempotencyKey: string;
+  purchaseId: number;
+  expectedUpdatedAt: string;
 };
 
 export const purchaseKeys = {
@@ -122,6 +139,7 @@ function mapPurchase(row: PurchaseRow): Purchase {
     purchase_date: row.purchase_date,
     status: row.status,
     notes: row.notes ?? undefined,
+    updated_at: row.updated_at,
   };
 }
 
@@ -177,9 +195,7 @@ async function queryPurchases(vehicleId?: number) {
 export async function getPurchaseById(id: number) {
   const { data, error } = await supabase
     .from("purchases")
-    .select(
-      "id, supplier_id, vehicle_id, financial_transaction_id, total_value, purchase_date, status, notes, supplier:suppliers(id, person_id, supplier_type, active, notes, person:people(id, name, type, cpf, cnpj, phone, email)), vehicle:vehicles(*)",
-    )
+    .select(purchaseSelect)
     .eq("id", id)
     .maybeSingle();
 
@@ -194,256 +210,50 @@ export async function getPurchaseById(id: number) {
   return mapPurchase(data as unknown as PurchaseRow);
 }
 
-const createPurchaseServer = createServerFn({ method: "POST" })
-  .inputValidator(
-    z.object({
-      supplierId: z.number().int().positive(),
-      vehicleId: z.number().int().positive(),
-      totalValue: z.number().nonnegative(),
-      purchaseDate: z.string().min(1),
-      status: z.enum(["pending", "completed", "canceled"]),
-      notes: z.string().optional(),
-    }),
-  )
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/shared/supabase/server");
-
-    const { data: vehicle, error: vehicleError } = await supabaseAdmin
-      .from("vehicles")
-      .select("id, brand, model, plate, status, updated_at")
-      .eq("id", data.vehicleId)
-      .maybeSingle();
-    if (vehicleError) {
-      throw new Error(vehicleError.message);
-    }
-    if (!vehicle) {
-      throw new Error("Veículo não encontrado para registrar compra.");
-    }
-    if (vehicle.status !== "evaluating") {
-      throw new Error("Apenas veículos em avaliação podem ser vinculados a uma nova compra.");
-    }
-
-    const { data: purchase, error: purchaseError } = await supabaseAdmin
-      .from("purchases")
-      .insert({
-        supplier_id: data.supplierId,
-        vehicle_id: data.vehicleId,
-        total_value: data.totalValue,
-        purchase_date: data.purchaseDate,
-        status: data.status === "completed" ? "pending" : data.status,
-        notes: normalizeText(data.notes),
-      })
-      .select("id")
-      .single();
-    if (purchaseError) {
-      throw new Error(purchaseError.message);
-    }
-
-    if (data.status === "completed") {
-      await applyCompletedPurchase({
-        supabaseAdmin,
-        purchaseId: purchase.id as number,
-        vehicle,
-        vehicleId: data.vehicleId,
-        totalValue: data.totalValue,
-        purchaseDate: data.purchaseDate,
-        financialTransactionId: null,
-      });
-    }
-
-    return purchase.id as number;
-  });
-
 export async function createPurchase(input: CreatePurchaseInput) {
-  return createPurchaseServer({ data: input });
-}
-
-type PurchaseActionInput = {
-  purchaseId: number;
-};
-
-type SupabaseAdminClient = Awaited<typeof import("@/shared/supabase/server")>["supabaseAdmin"];
-
-async function applyCompletedPurchase({
-  supabaseAdmin,
-  purchaseId,
-  vehicle,
-  vehicleId,
-  totalValue,
-  purchaseDate,
-  financialTransactionId,
-}: {
-  supabaseAdmin: SupabaseAdminClient;
-  purchaseId: number;
-  vehicle: { brand: string; model: string; plate: string | null; updated_at: string };
-  vehicleId: number;
-  totalValue: number;
-  purchaseDate: string;
-  financialTransactionId: number | null;
-}) {
-  const { data: checklistItems, error: checklistError } = await supabaseAdmin
-    .from("vehicle_checklist_items")
-    .select("id")
-    .eq("vehicle_id", vehicleId)
-    .not("status", "in", "(completed,cancelled)")
-    .limit(1);
-  if (checklistError) {
-    throw new Error(checklistError.message);
-  }
-
-  const nextVehicleStatus = (checklistItems ?? []).length > 0 ? "in_repair" : "available";
-
-  const { data: updatedVehicle, error: vehicleUpdateError } = await supabaseAdmin
-    .from("vehicles")
-    .update({
-      cost_price: totalValue,
-      status: nextVehicleStatus,
-      published: false,
-    })
-    .eq("id", vehicleId)
-    .eq("updated_at", vehicle.updated_at)
-    .select("id")
-    .maybeSingle();
-  if (vehicleUpdateError) {
-    throw new Error(vehicleUpdateError.message);
-  }
-  if (!updatedVehicle) {
-    throw new Error(
-      "O veículo mudou enquanto a compra era concluída. Atualize os dados e tente novamente.",
-    );
-  }
-
-  let nextFinancialTransactionId = financialTransactionId;
-  if (!nextFinancialTransactionId) {
-    const { data: transaction, error: transactionError } = await supabaseAdmin
-      .from("financial_transactions")
-      .insert({
-        type: "expense",
-        category: "vehicle_purchase",
-        status: "paid",
-        amount: totalValue,
-        transaction_date: purchaseDate,
-        paid_at: new Date().toISOString(),
-        description: `Compra #${purchaseId} - ${vehicle.brand} ${vehicle.model}`,
-        related: vehicle.plate,
-        purchase_id: purchaseId,
-      })
-      .select("id")
-      .single();
-    if (transactionError) {
-      throw new Error(transactionError.message);
-    }
-    nextFinancialTransactionId = transaction.id as number;
-  }
-
-  const { error: purchaseUpdateError } = await supabaseAdmin
-    .from("purchases")
-    .update({
-      status: "completed",
-      financial_transaction_id: nextFinancialTransactionId,
-    })
-    .eq("id", purchaseId);
-  if (purchaseUpdateError) {
-    throw new Error(purchaseUpdateError.message);
-  }
-}
-
-const completePurchaseServer = createServerFn({ method: "POST" })
-  .inputValidator(
-    z.object({
-      purchaseId: z.number().int().positive(),
-    }),
-  )
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/shared/supabase/server");
-
-    const { data: purchase, error: purchaseError } = await supabaseAdmin
-      .from("purchases")
-      .select("id, vehicle_id, total_value, purchase_date, status, financial_transaction_id")
-      .eq("id", data.purchaseId)
-      .maybeSingle();
-    if (purchaseError) {
-      throw new Error(purchaseError.message);
-    }
-    if (!purchase) {
-      throw new Error("Compra não encontrada.");
-    }
-    if (purchase.status !== "pending") {
-      throw new Error("Apenas compras pendentes podem ser concluídas.");
-    }
-
-    const { data: vehicle, error: vehicleError } = await supabaseAdmin
-      .from("vehicles")
-      .select("id, brand, model, plate, updated_at")
-      .eq("id", purchase.vehicle_id)
-      .maybeSingle();
-    if (vehicleError) {
-      throw new Error(vehicleError.message);
-    }
-    if (!vehicle) {
-      throw new Error("Veículo da compra não encontrado.");
-    }
-
-    await applyCompletedPurchase({
-      supabaseAdmin,
-      purchaseId: purchase.id as number,
-      vehicle,
-      vehicleId: purchase.vehicle_id as number,
-      totalValue: Number(purchase.total_value),
-      purchaseDate: String(purchase.purchase_date),
-      financialTransactionId: (purchase.financial_transaction_id as number | null) ?? null,
-    });
-
-    return purchase.id as number;
+  const { data, error } = await supabase.rpc("create_purchase_atomically", {
+    p_idempotency_key: input.idempotencyKey,
+    p_supplier_id: input.supplierId,
+    p_vehicle_id: input.vehicleId,
+    p_expected_vehicle_updated_at: input.expectedVehicleUpdatedAt,
+    p_total_value: input.totalValue,
+    p_purchase_date: input.purchaseDate,
+    p_status: input.status,
+    p_notes: normalizeText(input.notes),
   });
-
-const cancelPurchaseServer = createServerFn({ method: "POST" })
-  .inputValidator(
-    z.object({
-      purchaseId: z.number().int().positive(),
-    }),
-  )
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/shared/supabase/server");
-
-    const { data: purchase, error: purchaseError } = await supabaseAdmin
-      .from("purchases")
-      .select("id, vehicle_id, status")
-      .eq("id", data.purchaseId)
-      .maybeSingle();
-    if (purchaseError) {
-      throw new Error(purchaseError.message);
-    }
-    if (!purchase) {
-      throw new Error("Compra não encontrada.");
-    }
-    if (purchase.status !== "pending") {
-      throw new Error("Apenas compras pendentes podem ser canceladas.");
-    }
-
-    const { error: purchaseUpdateError } = await supabaseAdmin
-      .from("purchases")
-      .update({ status: "canceled" })
-      .eq("id", purchase.id);
-    if (purchaseUpdateError) {
-      throw new Error(purchaseUpdateError.message);
-    }
-
-    const { error: vehicleUpdateError } = await supabaseAdmin
-      .from("vehicles")
-      .update({ status: "evaluating", published: false })
-      .eq("id", purchase.vehicle_id);
-    if (vehicleUpdateError) {
-      throw new Error(vehicleUpdateError.message);
-    }
-
-    return purchase.id as number;
-  });
-
-export async function completePurchase(input: PurchaseActionInput) {
-  return completePurchaseServer({ data: input });
+  if (error) throw new Error(error.message);
+  return Number(data);
 }
 
-export async function cancelPurchase(input: PurchaseActionInput) {
-  return cancelPurchaseServer({ data: input });
+export async function updatePurchase(input: UpdatePurchaseInput) {
+  const { data, error } = await supabase.rpc("update_purchase_with_version", {
+    p_idempotency_key: input.idempotencyKey,
+    p_purchase_id: input.purchaseId,
+    p_expected_updated_at: input.expectedUpdatedAt,
+    p_supplier_id: input.supplierId,
+    p_total_value: input.totalValue,
+    p_purchase_date: input.purchaseDate,
+    p_notes: normalizeText(input.notes),
+  });
+  if (error) throw new Error(error.message);
+  return Number(data);
+}
+
+async function transitionPurchase(input: PurchaseTransitionInput, action: "complete" | "cancel") {
+  const { data, error } = await supabase.rpc("transition_purchase", {
+    p_idempotency_key: input.idempotencyKey,
+    p_purchase_id: input.purchaseId,
+    p_action: action,
+    p_expected_updated_at: input.expectedUpdatedAt,
+  });
+  if (error) throw new Error(error.message);
+  return Number(data);
+}
+
+export async function completePurchase(input: PurchaseTransitionInput) {
+  return transitionPurchase(input, "complete");
+}
+
+export async function cancelPurchase(input: PurchaseTransitionInput) {
+  return transitionPurchase(input, "cancel");
 }

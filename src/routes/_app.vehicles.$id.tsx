@@ -217,6 +217,13 @@ function VehicleDetail() {
             </Link>
           </Button>
         )}
+        {isSold && (
+          <Button variant="outline" asChild>
+            <Link to="/purchases/new" search={{ vehicleId: vehicle.id }}>
+              <ShoppingCart className="h-4 w-4" /> Registrar nova aquisição
+            </Link>
+          </Button>
+        )}
         {isPreparing && preparationBlockers === 0 && (
           <Button
             variant="outline"

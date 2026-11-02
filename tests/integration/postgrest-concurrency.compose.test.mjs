@@ -210,6 +210,18 @@ async function createVehicle(index, status = "available") {
   });
 }
 
+async function createSupplier(index) {
+  const person = await restInsert("people", {
+    name: `Fornecedor teste ${index}`,
+    type: "company",
+  });
+  return restInsert("suppliers", {
+    person_id: person.id,
+    supplier_type: "company",
+    active: true,
+  });
+}
+
 async function seedFixtures() {
   const customerPerson = await restInsert("people", {
     name: "Cliente teste de reserva",
@@ -218,9 +230,10 @@ async function seedFixtures() {
   const customer = await restInsert("customers", { person_id: customerPerson.id, active: true });
   const users = [await createAuthenticatedUser(1), await createAuthenticatedUser(2)];
   const unauthorizedUser = await createAuthenticatedUser(3, "financial");
+  const supplier = await createSupplier(1);
   const vehicles = [];
   for (let index = 1; index <= 5; index += 1) vehicles.push(await createVehicle(index));
-  return { customerId: customer.id, users, unauthorizedUser, vehicles };
+  return { customerId: customer.id, supplierId: supplier.id, users, unauthorizedUser, vehicles };
 }
 
 function saleArguments({ fixtures, vehicle, user, key = randomUUID(), overrides = {} }) {
@@ -243,11 +256,50 @@ function saleArguments({ fixtures, vehicle, user, key = randomUUID(), overrides 
   };
 }
 
+function purchaseArguments({ fixtures, vehicle, key = randomUUID(), overrides = {} }) {
+  return {
+    p_idempotency_key: key,
+    p_supplier_id: fixtures.supplierId,
+    p_vehicle_id: vehicle.id,
+    p_expected_vehicle_updated_at: vehicle.updated_at,
+    p_total_value: 42000,
+    p_purchase_date: "2026-11-02",
+    p_status: "pending",
+    p_notes: "Compra via teste de integração",
+    ...overrides,
+  };
+}
+
 async function callCreateSale(user, args) {
   return requestJson(`${apiBase.rest}/rpc/create_sale_with_reservation`, {
     method: "POST",
     token: user.accessToken,
     body: args,
+  });
+}
+
+async function callCreatePurchase(user, args) {
+  return callRpc(user, "create_purchase_atomically", args);
+}
+
+function transitionPurchase(user, purchaseId, action, expectedUpdatedAt, key = randomUUID()) {
+  return callRpc(user, "transition_purchase", {
+    p_idempotency_key: key,
+    p_purchase_id: purchaseId,
+    p_action: action,
+    p_expected_updated_at: expectedUpdatedAt,
+  });
+}
+
+function updatePurchase(user, purchaseId, expectedUpdatedAt, fixtures, overrides = {}) {
+  return callRpc(user, "update_purchase_with_version", {
+    p_idempotency_key: overrides.key ?? randomUUID(),
+    p_purchase_id: purchaseId,
+    p_expected_updated_at: expectedUpdatedAt,
+    p_supplier_id: overrides.supplierId ?? fixtures.supplierId,
+    p_total_value: overrides.totalValue ?? 39000,
+    p_purchase_date: overrides.purchaseDate ?? "2026-11-03",
+    p_notes: overrides.notes ?? "Compra revisada pelo teste",
   });
 }
 
@@ -341,6 +393,399 @@ test(
     }
 
     const fixtures = await seedFixtures();
+
+    await t.test("Purchase creation replays once and rejects changed data", async () => {
+      const user = fixtures.users[0];
+      const vehicle = await createVehicle(31, "evaluating");
+      const args = purchaseArguments({ fixtures, vehicle, key: randomUUID() });
+      const [first, replay] = await Promise.all([
+        callCreatePurchase(user, args),
+        callCreatePurchase(user, args),
+      ]);
+
+      assert.equal(first.response.status, 200, JSON.stringify(first.data));
+      assert.equal(replay.response.status, 200, JSON.stringify(replay.data));
+      assert.equal(first.data, replay.data);
+
+      const changedPayload = await callCreatePurchase(user, {
+        ...args,
+        p_total_value: 41000,
+      });
+      assert.equal(changedPayload.response.status, 409, JSON.stringify(changedPayload.data));
+      assert.match(JSON.stringify(changedPayload.data), /idempotência/i);
+
+      const purchases = await authenticatedRows(
+        user,
+        "purchases",
+        `select=id,status,total_value,financial_transaction_id&vehicle_id=eq.${vehicle.id}`,
+      );
+      assert.equal(purchases.length, 1);
+      assert.equal(purchases[0].status, "pending");
+      assert.equal(Number(purchases[0].total_value), 42000);
+      assert.equal(purchases[0].financial_transaction_id, null);
+
+      const [storedVehicle] = await authenticatedRows(
+        user,
+        "vehicles",
+        `select=id,status&id=eq.${vehicle.id}`,
+      );
+      assert.equal(storedVehicle.status, "evaluating");
+    });
+
+    await t.test("creating a completed Purchase commits Vehicle and expense once", async () => {
+      const user = fixtures.users[0];
+      const vehicle = await createVehicle(33, "evaluating");
+      const args = purchaseArguments({
+        fixtures,
+        vehicle,
+        key: randomUUID(),
+        overrides: { p_status: "completed" },
+      });
+      const first = await callCreatePurchase(user, args);
+      assert.equal(first.response.status, 200, JSON.stringify(first.data));
+      const replay = await callCreatePurchase(user, args);
+      assert.equal(replay.response.status, 200, JSON.stringify(replay.data));
+      assert.equal(replay.data, first.data);
+
+      const [purchase] = await authenticatedRows(
+        user,
+        "purchases",
+        `select=id,status,total_value,financial_transaction_id&id=eq.${first.data}`,
+      );
+      const [vehicleAfter] = await authenticatedRows(
+        user,
+        "vehicles",
+        `select=id,status,cost_price,published&id=eq.${vehicle.id}`,
+      );
+      const transactions = await authenticatedRows(
+        user,
+        "financial_transactions",
+        `select=id,type,category,status,amount,purchase_id&purchase_id=eq.${first.data}`,
+      );
+
+      assert.equal(purchase.status, "completed");
+      assert.ok(purchase.financial_transaction_id);
+      assert.equal(vehicleAfter.status, "available");
+      assert.equal(Number(vehicleAfter.cost_price), 42000);
+      assert.equal(vehicleAfter.published, false);
+      assert.equal(transactions.length, 1);
+      assert.equal(transactions[0].type, "expense");
+      assert.equal(transactions[0].category, "vehicle_purchase");
+      assert.equal(transactions[0].status, "paid");
+      assert.equal(Number(transactions[0].amount), 42000);
+    });
+
+    await t.test("concurrent Purchase creation cannot start two active cycles", async () => {
+      const vehicle = await createVehicle(32, "evaluating");
+      const outcomes = await Promise.all([
+        callCreatePurchase(fixtures.users[0], purchaseArguments({ fixtures, vehicle })),
+        callCreatePurchase(fixtures.users[1], purchaseArguments({ fixtures, vehicle })),
+      ]);
+      const success = outcomes.filter(({ response }) => response.ok);
+      const conflicts = outcomes.filter(({ response }) => response.status === 409);
+
+      assert.equal(success.length, 1, JSON.stringify(outcomes.map((item) => item.data)));
+      assert.equal(conflicts.length, 1, JSON.stringify(outcomes.map((item) => item.data)));
+      assert.equal(typeof success[0].data, "number");
+
+      const purchases = await authenticatedRows(
+        fixtures.users[0],
+        "purchases",
+        `select=id,status&vehicle_id=eq.${vehicle.id}`,
+      );
+      assert.equal(purchases.length, 1);
+      assert.equal(purchases[0].status, "pending");
+    });
+
+    await t.test(
+      "Vehicle archive cannot strand a pending Purchase, and legacy archive remains cancelable",
+      async () => {
+        const user = fixtures.users[0];
+        const vehicle = await createVehicle(38, "evaluating");
+        const created = await callCreatePurchase(user, purchaseArguments({ fixtures, vehicle }));
+        assert.equal(created.response.status, 200, JSON.stringify(created.data));
+
+        const archiveAttempt = await callRpc(user, "archive_vehicle_with_version", {
+          p_vehicle_id: vehicle.id,
+          p_expected_updated_at: vehicle.updated_at,
+        });
+        assert.equal(archiveAttempt.response.status, 409, JSON.stringify(archiveAttempt.data));
+        assert.match(JSON.stringify(archiveAttempt.data), /VEHICLE_HAS_PENDING_PURCHASE/i);
+
+        const legacyArchive = await requestJson(`${apiBase.rest}/vehicles?id=eq.${vehicle.id}`, {
+          method: "PATCH",
+          admin: true,
+          body: { status: "archived" },
+        });
+        assert.equal(legacyArchive.response.ok, true, JSON.stringify(legacyArchive.data));
+
+        const [purchase] = await authenticatedRows(
+          user,
+          "purchases",
+          `select=id,updated_at&id=eq.${created.data}`,
+        );
+        const canceled = await transitionPurchase(
+          user,
+          created.data,
+          "cancel",
+          purchase.updated_at,
+        );
+        assert.equal(canceled.response.status, 200, JSON.stringify(canceled.data));
+
+        const [storedPurchase] = await authenticatedRows(
+          user,
+          "purchases",
+          `select=id,status&id=eq.${created.data}`,
+        );
+        const [storedVehicle] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=id,status&id=eq.${vehicle.id}`,
+        );
+        assert.equal(storedPurchase.status, "canceled");
+        assert.equal(storedVehicle.status, "evaluating");
+      },
+    );
+
+    await t.test("completion and cancellation race to one Purchase transition", async () => {
+      const user = fixtures.users[0];
+      const vehicle = await createVehicle(34, "evaluating");
+      const created = await callCreatePurchase(user, purchaseArguments({ fixtures, vehicle }));
+      assert.equal(created.response.status, 200, JSON.stringify(created.data));
+      const [purchaseBefore] = await authenticatedRows(
+        user,
+        "purchases",
+        `select=id,updated_at&id=eq.${created.data}`,
+      );
+
+      const outcomes = await Promise.all([
+        transitionPurchase(user, created.data, "complete", purchaseBefore.updated_at),
+        transitionPurchase(fixtures.users[1], created.data, "cancel", purchaseBefore.updated_at),
+      ]);
+      const success = outcomes.filter(({ response }) => response.ok);
+      const conflicts = outcomes.filter(({ response }) => response.status === 409);
+      assert.equal(success.length, 1, JSON.stringify(outcomes.map((item) => item.data)));
+      assert.equal(conflicts.length, 1, JSON.stringify(outcomes.map((item) => item.data)));
+
+      const [purchase] = await authenticatedRows(
+        user,
+        "purchases",
+        `select=id,status,financial_transaction_id&id=eq.${created.data}`,
+      );
+      const [storedVehicle] = await authenticatedRows(
+        user,
+        "vehicles",
+        `select=id,status,cost_price&id=eq.${vehicle.id}`,
+      );
+      const transactions = await authenticatedRows(
+        user,
+        "financial_transactions",
+        `select=id,category,purchase_id&purchase_id=eq.${created.data}`,
+      );
+
+      if (purchase.status === "completed") {
+        assert.equal(storedVehicle.status, "available");
+        assert.equal(Number(storedVehicle.cost_price), 42000);
+        assert.ok(purchase.financial_transaction_id);
+        assert.equal(transactions.length, 1);
+      } else {
+        assert.equal(purchase.status, "canceled");
+        assert.equal(storedVehicle.status, "evaluating");
+        assert.equal(transactions.length, 0);
+      }
+    });
+
+    await t.test(
+      "the same transition key replays completion without duplicating expense",
+      async () => {
+        const user = fixtures.users[0];
+        const vehicle = await createVehicle(37, "evaluating");
+        const created = await callCreatePurchase(user, purchaseArguments({ fixtures, vehicle }));
+        assert.equal(created.response.status, 200, JSON.stringify(created.data));
+        const [purchase] = await authenticatedRows(
+          user,
+          "purchases",
+          `select=id,updated_at&id=eq.${created.data}`,
+        );
+        const key = randomUUID();
+        const [first, replay] = await Promise.all([
+          transitionPurchase(user, created.data, "complete", purchase.updated_at, key),
+          transitionPurchase(user, created.data, "complete", purchase.updated_at, key),
+        ]);
+        assert.equal(first.response.status, 200, JSON.stringify(first.data));
+        assert.equal(replay.response.status, 200, JSON.stringify(replay.data));
+        assert.equal(first.data, created.data);
+        assert.equal(replay.data, created.data);
+
+        const changedAction = await transitionPurchase(
+          user,
+          created.data,
+          "cancel",
+          purchase.updated_at,
+          key,
+        );
+        assert.equal(changedAction.response.status, 409, JSON.stringify(changedAction.data));
+
+        const transactions = await authenticatedRows(
+          user,
+          "financial_transactions",
+          `select=id,purchase_id&purchase_id=eq.${created.data}`,
+        );
+        assert.equal(transactions.length, 1);
+      },
+    );
+
+    await t.test("Purchase edits replay safely and reject stale values", async () => {
+      const user = fixtures.users[0];
+      const vehicle = await createVehicle(35, "evaluating");
+      const created = await callCreatePurchase(user, purchaseArguments({ fixtures, vehicle }));
+      assert.equal(created.response.status, 200, JSON.stringify(created.data));
+      const [purchaseBefore] = await authenticatedRows(
+        user,
+        "purchases",
+        `select=id,updated_at,total_value&id=eq.${created.data}`,
+      );
+      const updateArgs = {
+        key: randomUUID(),
+        totalValue: 38000,
+        purchaseDate: "2026-11-04",
+        notes: "Valor conferido",
+      };
+      const [first, replay] = await Promise.all([
+        updatePurchase(user, created.data, purchaseBefore.updated_at, fixtures, updateArgs),
+        updatePurchase(user, created.data, purchaseBefore.updated_at, fixtures, updateArgs),
+      ]);
+      assert.equal(first.response.status, 200, JSON.stringify(first.data));
+      assert.equal(replay.response.status, 200, JSON.stringify(replay.data));
+      assert.equal(first.data, created.data);
+      assert.equal(replay.data, created.data);
+
+      const changedPayload = await updatePurchase(
+        user,
+        created.data,
+        purchaseBefore.updated_at,
+        fixtures,
+        { ...updateArgs, totalValue: 37000 },
+      );
+      assert.equal(changedPayload.response.status, 409, JSON.stringify(changedPayload.data));
+
+      const directStatusUpdate = await requestJson(
+        `${apiBase.rest}/purchases?id=eq.${created.data}`,
+        {
+          method: "PATCH",
+          token: user.accessToken,
+          body: { status: "completed" },
+        },
+      );
+      assert.equal(directStatusUpdate.response.ok, false, JSON.stringify(directStatusUpdate.data));
+
+      const staleSave = await updatePurchase(
+        user,
+        created.data,
+        purchaseBefore.updated_at,
+        fixtures,
+        { totalValue: 36000 },
+      );
+      assert.equal(staleSave.response.status, 409, JSON.stringify(staleSave.data));
+      assert.match(JSON.stringify(staleSave.data), /STALE_RECORD/i);
+
+      const [storedPurchase] = await authenticatedRows(
+        user,
+        "purchases",
+        `select=id,status,total_value,purchase_date,notes&id=eq.${created.data}`,
+      );
+      assert.equal(storedPurchase.status, "pending");
+      assert.equal(Number(storedPurchase.total_value), 38000);
+      assert.equal(storedPurchase.purchase_date, "2026-11-04");
+      assert.equal(storedPurchase.notes, "Valor conferido");
+    });
+
+    await t.test(
+      "a sold Vehicle can start a new Purchase cycle and cancellation restores sold status",
+      async () => {
+        const user = fixtures.users[0];
+        const vehicle = await createVehicle(36, "evaluating");
+        const firstPurchase = await callCreatePurchase(
+          user,
+          purchaseArguments({
+            fixtures,
+            vehicle,
+            overrides: { p_status: "completed" },
+          }),
+        );
+        assert.equal(firstPurchase.response.status, 200, JSON.stringify(firstPurchase.data));
+
+        const sale = await callCreateSale(
+          user,
+          saleArguments({ fixtures, vehicle: { ...vehicle, status: "available" }, user }),
+        );
+        assert.equal(sale.response.status, 200, JSON.stringify(sale.data));
+        const [saleRow] = await authenticatedRows(
+          user,
+          "sales",
+          `select=id,status,updated_at&id=eq.${sale.data}`,
+        );
+        const [payment] = await authenticatedRows(
+          user,
+          "sale_payments",
+          `select=id,payment_status,updated_at&sale_id=eq.${sale.data}`,
+        );
+        const completedSale = await transitionSale(user, sale.data, "complete", saleRow, payment);
+        assert.equal(completedSale.response.status, 200, JSON.stringify(completedSale.data));
+
+        const [soldVehicle] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=id,status,updated_at&id=eq.${vehicle.id}`,
+        );
+        assert.equal(soldVehicle.status, "sold");
+        const secondPurchase = await callCreatePurchase(
+          user,
+          purchaseArguments({
+            fixtures,
+            vehicle: soldVehicle,
+            overrides: { p_total_value: 45000 },
+          }),
+        );
+        assert.equal(secondPurchase.response.status, 200, JSON.stringify(secondPurchase.data));
+
+        const [reacquiredVehicle] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=id,status&id=eq.${vehicle.id}`,
+        );
+        assert.equal(reacquiredVehicle.status, "evaluating");
+        const history = await authenticatedRows(
+          user,
+          "purchases",
+          `select=id,status,vehicle_id&vehicle_id=eq.${vehicle.id}&order=id.asc`,
+        );
+        assert.equal(history.length, 2);
+        assert.equal(history[0].id, firstPurchase.data);
+        assert.equal(history[0].status, "completed");
+        assert.equal(history[1].id, secondPurchase.data);
+        assert.equal(history[1].status, "pending");
+
+        const [secondPurchaseRow] = await authenticatedRows(
+          user,
+          "purchases",
+          `select=id,updated_at&id=eq.${secondPurchase.data}`,
+        );
+        const canceled = await transitionPurchase(
+          user,
+          secondPurchase.data,
+          "cancel",
+          secondPurchaseRow.updated_at,
+        );
+        assert.equal(canceled.response.status, 200, JSON.stringify(canceled.data));
+        const [vehicleAfterCancellation] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=id,status&id=eq.${vehicle.id}`,
+        );
+        assert.equal(vehicleAfterCancellation.status, "sold");
+      },
+    );
 
     await t.test("concurrent users cannot create two Sales for one Vehicle", async () => {
       const vehicle = fixtures.vehicles[0];

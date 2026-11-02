@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Car, Plus, Save, Search, UserPlus } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -8,12 +8,7 @@ import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
 import { Textarea } from "@/shared/components/ui/textarea";
 import { DatePicker } from "@/shared/components/ui/date-picker";
-import {
-  CepInput,
-  CpfCnpjInput,
-  PhoneInput,
-  UfInput,
-} from "@/shared/components/form/field-inputs";
+import { CepInput, CpfCnpjInput, PhoneInput, UfInput } from "@/shared/components/form/field-inputs";
 import {
   Select,
   SelectContent,
@@ -37,10 +32,7 @@ import type { Address, PersonType, Vehicle } from "@/shared/types/domain";
 import { toast } from "sonner";
 import { listVehicles, vehicleKeys } from "@/modules/vehicles/services/vehicles";
 import { StatusBadge } from "@/shared/components/status-badge";
-import {
-  createPurchase,
-  purchaseKeys,
-} from "@/modules/purchases/services/purchases";
+import { createPurchase, purchaseKeys } from "@/modules/purchases/services/purchases";
 import {
   createSupplier,
   type CreateSupplierInput,
@@ -66,6 +58,8 @@ function NewPurchase() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { vehicleId: initialVehicleId } = Route.useSearch();
+  const createAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
+  const prefilledVehicleIdRef = useRef<number | null>(null);
   const { data: vehicles = [], isLoading: loadingVehicles } = useQuery({
     queryKey: vehicleKeys.all,
     queryFn: listVehicles,
@@ -109,8 +103,10 @@ function NewPurchase() {
 
   const selected = suppliers.find((s) => s.id === draft.supplier_id);
   const selectedVehicle = vehicles.find((vehicle) => vehicle.id === selectedVehicleId);
-  const evaluationVehicles = vehicles.filter((vehicle) => vehicle.status === "evaluating");
-  const filteredEvaluationVehicles = evaluationVehicles.filter(
+  const eligibleVehicles = vehicles.filter(
+    (vehicle) => vehicle.status === "evaluating" || vehicle.status === "sold",
+  );
+  const filteredEligibleVehicles = eligibleVehicles.filter(
     (vehicle) =>
       !vehicleSearch ||
       `${vehicle.brand} ${vehicle.model} ${vehicle.plate}`
@@ -119,21 +115,28 @@ function NewPurchase() {
   );
 
   useEffect(() => {
-    if (!selectedVehicle) return;
-    patchDraft({
+    if (!selectedVehicle) {
+      prefilledVehicleIdRef.current = null;
+      return;
+    }
+    if (prefilledVehicleIdRef.current === selectedVehicle.id) return;
+    prefilledVehicleIdRef.current = selectedVehicle.id;
+    setDraft((current) => ({
+      ...current,
       vehicle: {
         plate: selectedVehicle.plate,
         model_label: `${selectedVehicle.brand} ${selectedVehicle.model}`.trim(),
         model_year: selectedVehicle.model_year,
         current_mileage: selectedVehicle.current_mileage,
       },
-      total_value: selectedVehicle.cost_price || draft.total_value,
-    });
-  }, [selectedVehicle?.id]);
+      total_value: selectedVehicle.cost_price,
+    }));
+  }, [selectedVehicle]);
 
   const createMutation = useMutation({
     mutationFn: createPurchase,
     onSuccess: async (purchaseId) => {
+      createAttemptRef.current = null;
       await queryClient.invalidateQueries({ queryKey: purchaseKeys.all });
       await queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
       if (selectedVehicleId) {
@@ -170,14 +173,22 @@ function NewPurchase() {
       toast.error("Selecione um fornecedor");
       return;
     }
-    createMutation.mutate({
+    const command = {
       supplierId: selected.id,
       vehicleId: selectedVehicle.id,
+      expectedVehicleUpdatedAt: selectedVehicle.updated_at,
       totalValue: draft.total_value,
       purchaseDate: draft.purchase_date ?? new Date().toISOString().slice(0, 10),
       status: draft.status,
       notes: draft.notes,
-    });
+    };
+    const fingerprint = JSON.stringify(command);
+    const idempotencyKey =
+      createAttemptRef.current?.fingerprint === fingerprint
+        ? createAttemptRef.current.key
+        : crypto.randomUUID();
+    createAttemptRef.current = { fingerprint, key: idempotencyKey };
+    createMutation.mutate({ ...command, idempotencyKey });
   };
 
   return (
@@ -278,10 +289,7 @@ function NewPurchase() {
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium truncate">{s.person.name}</div>
                         <div className="text-xs text-muted-foreground truncate">
-                          {formatDocument(
-                            s.person.cpf ?? s.person.cnpj ?? "",
-                            s.person.type,
-                          )}
+                          {formatDocument(s.person.cpf ?? s.person.cnpj ?? "", s.person.type)}
                         </div>
                       </div>
                     </button>
@@ -299,8 +307,8 @@ function NewPurchase() {
             <div>
               <h2 className="font-display font-semibold">Veículo da compra</h2>
               <p className="text-xs text-muted-foreground">
-                Selecione uma avaliação existente ou cadastre uma nova avaliação antes de concluir a
-                compra.
+                Selecione um veículo em avaliação ou um veículo vendido que esteja retornando à
+                garagem.
               </p>
             </div>
             <Button type="button" variant="outline" size="sm" asChild>
@@ -330,7 +338,7 @@ function NewPurchase() {
                 <div className="rounded-md border border-border p-6 text-sm text-muted-foreground">
                   Carregando avaliações...
                 </div>
-              ) : filteredEvaluationVehicles.length === 0 ? (
+              ) : filteredEligibleVehicles.length === 0 ? (
                 <div className="rounded-md border border-border p-6 text-center text-sm text-muted-foreground">
                   Nenhum veículo em avaliação encontrado.
                   <Button type="button" variant="link" asChild>
@@ -339,7 +347,7 @@ function NewPurchase() {
                 </div>
               ) : (
                 <div className="max-h-72 overflow-y-auto divide-y divide-border rounded-md border border-border">
-                  {filteredEvaluationVehicles.map((vehicle) => (
+                  {filteredEligibleVehicles.map((vehicle) => (
                     <button
                       key={vehicle.id}
                       type="button"
@@ -422,13 +430,7 @@ function NewPurchase() {
   );
 }
 
-function SelectedVehicleCard({
-  vehicle,
-  onChange,
-}: {
-  vehicle: Vehicle;
-  onChange: () => void;
-}) {
+function SelectedVehicleCard({ vehicle, onChange }: { vehicle: Vehicle; onChange: () => void }) {
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4 md:flex-row md:items-center">
       <div className="flex h-11 w-11 items-center justify-center rounded-md bg-background text-primary">
