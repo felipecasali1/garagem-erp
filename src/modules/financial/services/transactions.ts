@@ -34,6 +34,7 @@ export type ManualFinancialTransactionDraft = z.infer<typeof manualFinancialTran
 
 type FinancialTransactionRow = {
   id: number;
+  updated_at: string;
   type: TransactionType;
   category: TransactionCategory;
   status: TransactionStatus;
@@ -50,7 +51,24 @@ type FinancialTransactionRow = {
 };
 
 const financialTransactionSelect =
-  "id, type, category, status, amount, transaction_date, due_date, paid_at, description, related, sale_id, purchase_id, employee_id, commission_id";
+  "id, updated_at, type, category, status, amount, transaction_date, due_date, paid_at, description, related, sale_id, purchase_id, employee_id, commission_id";
+
+export type FinancialTransactionTransitionInput = {
+  idempotencyKey: string;
+  transactionId: number;
+  expectedUpdatedAt: string;
+};
+
+export type UpdateManualFinancialTransactionInput = FinancialTransactionTransitionInput & {
+  amount: number;
+  transactionDate: string;
+  dueDate?: string;
+  description: string;
+  related?: string;
+};
+
+type FinancialTransitionAction = "settle" | "cancel";
+const pendingFinancialTransitionKeys = new Map<string, string>();
 
 export type FinancialListFilters = {
   page: number;
@@ -85,6 +103,7 @@ export const financialTransactionKeys = {
 function mapFinancialTransaction(row: FinancialTransactionRow): FinancialTransactionWithLinks {
   return {
     id: row.id,
+    updated_at: row.updated_at,
     type: row.type,
     category: row.category,
     status: row.status,
@@ -204,89 +223,77 @@ export async function getFinancialTransactionById(id: number) {
   return mapFinancialTransaction(data as FinancialTransactionRow);
 }
 
-const markFinancialTransactionPaidServer = createServerFn({ method: "POST" })
-  .inputValidator(z.object({ id: z.number().int().positive() }))
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/shared/supabase/server");
-
-    const { data: transaction, error: transactionError } = await supabaseAdmin
-      .from("financial_transactions")
-      .select("id, status, commission_id")
-      .eq("id", data.id)
-      .maybeSingle();
-    if (transactionError) throw new Error(transactionError.message);
-    if (!transaction) throw new Error("Transação não encontrada.");
-    if (transaction.status === "paid") {
-      throw new Error("Esta transação já está paga.");
-    }
-    if (transaction.status === "canceled") {
-      throw new Error("Transação cancelada não pode ser marcada como paga.");
-    }
-
-    const paidAt = new Date().toISOString();
-
-    const { error: updateError } = await supabaseAdmin
-      .from("financial_transactions")
-      .update({
-        status: "paid",
-        paid_at: paidAt,
-      })
-      .eq("id", data.id);
-    if (updateError) throw new Error(updateError.message);
-
-    if (transaction.commission_id) {
-      const { error: commissionUpdateError } = await supabaseAdmin
-        .from("commissions")
-        .update({
-          status: "paid",
-          paid_at: paidAt,
-        })
-        .eq("id", transaction.commission_id);
-      if (commissionUpdateError) throw new Error(commissionUpdateError.message);
-    }
-
-    return data.id;
-  });
-
-export async function markFinancialTransactionPaid(id: number) {
-  return markFinancialTransactionPaidServer({ data: { id } });
+function transitionCacheKey(
+  action: FinancialTransitionAction,
+  transactionId: number,
+  updatedAt: string,
+) {
+  return `${transactionId}:${action}:${updatedAt}`;
 }
 
-const cancelFinancialTransactionServer = createServerFn({ method: "POST" })
-  .inputValidator(z.object({ id: z.number().int().positive() }))
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/shared/supabase/server");
+export function financialTransactionTransitionInput(
+  transaction: FinancialTransactionWithLinks,
+  action: FinancialTransitionAction,
+): FinancialTransactionTransitionInput {
+  const cacheKey = transitionCacheKey(action, transaction.id, transaction.updated_at);
+  let idempotencyKey = pendingFinancialTransitionKeys.get(cacheKey);
+  if (!idempotencyKey) {
+    idempotencyKey = crypto.randomUUID();
+    pendingFinancialTransitionKeys.set(cacheKey, idempotencyKey);
+  }
+  return {
+    idempotencyKey,
+    transactionId: transaction.id,
+    expectedUpdatedAt: transaction.updated_at,
+  };
+}
 
-    const { data: transaction, error: transactionError } = await supabaseAdmin
-      .from("financial_transactions")
-      .select("id, status, sale_id, purchase_id, commission_id")
-      .eq("id", data.id)
-      .maybeSingle();
-    if (transactionError) throw new Error(transactionError.message);
-    if (!transaction) throw new Error("Transação não encontrada.");
-    if (transaction.status === "canceled") {
-      throw new Error("Esta transação já está cancelada.");
-    }
-    if (transaction.sale_id || transaction.purchase_id || transaction.commission_id) {
-      throw new Error(
-        "Lançamentos vinculados a compra, venda ou comissão devem ser ajustados pela origem.",
-      );
-    }
+export function clearFinancialTransactionTransitionInput(
+  input: FinancialTransactionTransitionInput,
+  action: FinancialTransitionAction,
+) {
+  pendingFinancialTransitionKeys.delete(
+    transitionCacheKey(action, input.transactionId, input.expectedUpdatedAt),
+  );
+}
 
-    const { error: updateError } = await supabaseAdmin
-      .from("financial_transactions")
-      .update({
-        status: "canceled",
-        paid_at: null,
-      })
-      .eq("id", data.id);
-    if (updateError) throw new Error(updateError.message);
-
-    return data.id;
+async function transitionFinancialTransaction(
+  input: FinancialTransactionTransitionInput,
+  action: FinancialTransitionAction,
+) {
+  const { data, error } = await supabase.rpc("transition_financial_transaction", {
+    p_idempotency_key: input.idempotencyKey,
+    p_transaction_id: input.transactionId,
+    p_action: action,
+    p_expected_updated_at: input.expectedUpdatedAt,
   });
+  if (error) throw new Error(error.message);
+  return data as number;
+}
 
-export async function cancelFinancialTransaction(id: number) {
-  return cancelFinancialTransactionServer({ data: { id } });
+export function markFinancialTransactionPaid(input: FinancialTransactionTransitionInput) {
+  return transitionFinancialTransaction(input, "settle");
+}
+
+export function cancelFinancialTransaction(input: FinancialTransactionTransitionInput) {
+  return transitionFinancialTransaction(input, "cancel");
+}
+
+export async function updateManualFinancialTransaction(
+  input: UpdateManualFinancialTransactionInput,
+) {
+  const { data, error } = await supabase.rpc("update_manual_financial_transaction_with_version", {
+    p_idempotency_key: input.idempotencyKey,
+    p_transaction_id: input.transactionId,
+    p_expected_updated_at: input.expectedUpdatedAt,
+    p_amount: input.amount,
+    p_transaction_date: input.transactionDate,
+    p_due_date: input.dueDate ?? null,
+    p_description: input.description,
+    p_related: input.related ?? null,
+  });
+  if (error) throw new Error(error.message);
+  return data as number;
 }
 
 const createManualFinancialTransactionServer = createServerFn({ method: "POST" })

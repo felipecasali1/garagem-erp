@@ -38,6 +38,8 @@ import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { brl, fmtDate } from "@/shared/lib/format";
 import {
   cancelFinancialTransaction,
+  clearFinancialTransactionTransitionInput,
+  financialTransactionTransitionInput,
   financialTransactionKeys,
   getFinancialTransactionSummary,
   isManualFinancialTransaction,
@@ -145,26 +147,52 @@ function BillsPage() {
 
   const payMutation = useMutation({
     mutationFn: markFinancialTransactionPaid,
-    onSuccess: async (id) => {
+    onSuccess: async (id, input) => {
+      clearFinancialTransactionTransitionInput(input, "settle");
       await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
       await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.detail(id) });
       setConfirmPaidId(null);
       toast.success("Conta marcada como paga");
     },
-    onError: (error) => {
+    onError: (error, input) => {
+      if (error instanceof Error && error.message.includes("STALE_RECORD")) {
+        clearFinancialTransactionTransitionInput(input, "settle");
+        void queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
+        void queryClient.invalidateQueries({
+          queryKey: financialTransactionKeys.detail(input.transactionId),
+        });
+        setConfirmPaidId(null);
+        toast.error(
+          "A conta mudou. Atualizei os dados; confira o status antes de tentar novamente.",
+        );
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Falha ao marcar conta como paga.");
     },
   });
 
   const cancelMutation = useMutation({
     mutationFn: cancelFinancialTransaction,
-    onSuccess: async (id) => {
+    onSuccess: async (id, input) => {
+      clearFinancialTransactionTransitionInput(input, "cancel");
       await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
       await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.detail(id) });
       setConfirmCancelId(null);
       toast.success("Conta cancelada");
     },
-    onError: (error) => {
+    onError: (error, input) => {
+      if (error instanceof Error && error.message.includes("STALE_RECORD")) {
+        clearFinancialTransactionTransitionInput(input, "cancel");
+        void queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
+        void queryClient.invalidateQueries({
+          queryKey: financialTransactionKeys.detail(input.transactionId),
+        });
+        setConfirmCancelId(null);
+        toast.error(
+          "A conta mudou. Atualizei os dados; confira o status antes de tentar novamente.",
+        );
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Falha ao cancelar conta.");
     },
   });
@@ -441,7 +469,9 @@ function BillsPage() {
         confirmDisabled={payMutation.isPending}
         confirmVariant="default"
         onConfirm={() => {
-          if (confirmPaidId != null) payMutation.mutate(confirmPaidId);
+          if (confirmPaidBill) {
+            payMutation.mutate(financialTransactionTransitionInput(confirmPaidBill, "settle"));
+          }
         }}
       />
 
@@ -460,7 +490,9 @@ function BillsPage() {
         confirmDisabled={cancelMutation.isPending}
         confirmVariant="destructive"
         onConfirm={() => {
-          if (confirmCancelId != null) cancelMutation.mutate(confirmCancelId);
+          if (confirmCancelBill) {
+            cancelMutation.mutate(financialTransactionTransitionInput(confirmCancelBill, "cancel"));
+          }
         }}
       />
     </div>
@@ -477,7 +509,8 @@ function BillRow({
   onCancel: () => void;
 }) {
   const canMarkPaid = bill.status === "pending" || bill.status === "overdue";
-  const canCancel = bill.status !== "canceled" && isManualFinancialTransaction(bill);
+  const canCancel =
+    (bill.status === "pending" || bill.status === "overdue") && isManualFinancialTransaction(bill);
 
   return (
     <TableRow>

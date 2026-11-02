@@ -39,6 +39,8 @@ import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { brl, fmtDate } from "@/shared/lib/format";
 import {
   cancelFinancialTransaction,
+  clearFinancialTransactionTransitionInput,
+  financialTransactionTransitionInput,
   financialTransactionKeys,
   getFinancialTransactionSummary,
   isManualFinancialTransaction,
@@ -145,26 +147,52 @@ function ReceivablesPage() {
 
   const receiveMutation = useMutation({
     mutationFn: markFinancialTransactionPaid,
-    onSuccess: async (id) => {
+    onSuccess: async (id, input) => {
+      clearFinancialTransactionTransitionInput(input, "settle");
       await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
       await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.detail(id) });
       setConfirmPaidId(null);
       toast.success("Conta marcada como recebida");
     },
-    onError: (error) => {
+    onError: (error, input) => {
+      if (error instanceof Error && error.message.includes("STALE_RECORD")) {
+        clearFinancialTransactionTransitionInput(input, "settle");
+        void queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
+        void queryClient.invalidateQueries({
+          queryKey: financialTransactionKeys.detail(input.transactionId),
+        });
+        setConfirmPaidId(null);
+        toast.error(
+          "A conta mudou. Atualizei os dados; confira o status antes de tentar novamente.",
+        );
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Falha ao marcar conta como recebida.");
     },
   });
 
   const cancelMutation = useMutation({
     mutationFn: cancelFinancialTransaction,
-    onSuccess: async (id) => {
+    onSuccess: async (id, input) => {
+      clearFinancialTransactionTransitionInput(input, "cancel");
       await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
       await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.detail(id) });
       setConfirmCancelId(null);
       toast.success("Conta cancelada");
     },
-    onError: (error) => {
+    onError: (error, input) => {
+      if (error instanceof Error && error.message.includes("STALE_RECORD")) {
+        clearFinancialTransactionTransitionInput(input, "cancel");
+        void queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
+        void queryClient.invalidateQueries({
+          queryKey: financialTransactionKeys.detail(input.transactionId),
+        });
+        setConfirmCancelId(null);
+        toast.error(
+          "A conta mudou. Atualizei os dados; confira o status antes de tentar novamente.",
+        );
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Falha ao cancelar conta.");
     },
   });
@@ -435,7 +463,11 @@ function ReceivablesPage() {
         confirmDisabled={receiveMutation.isPending}
         confirmVariant="default"
         onConfirm={() => {
-          if (confirmPaidId != null) receiveMutation.mutate(confirmPaidId);
+          if (confirmPaidReceivable) {
+            receiveMutation.mutate(
+              financialTransactionTransitionInput(confirmPaidReceivable, "settle"),
+            );
+          }
         }}
       />
 
@@ -454,7 +486,11 @@ function ReceivablesPage() {
         confirmDisabled={cancelMutation.isPending}
         confirmVariant="destructive"
         onConfirm={() => {
-          if (confirmCancelId != null) cancelMutation.mutate(confirmCancelId);
+          if (confirmCancelReceivable) {
+            cancelMutation.mutate(
+              financialTransactionTransitionInput(confirmCancelReceivable, "cancel"),
+            );
+          }
         }}
       />
     </div>
@@ -471,7 +507,9 @@ function ReceivableRow({
   onCancel: () => void;
 }) {
   const canMarkPaid = receivable.status === "pending" || receivable.status === "overdue";
-  const canCancel = receivable.status !== "canceled" && isManualFinancialTransaction(receivable);
+  const canCancel =
+    (receivable.status === "pending" || receivable.status === "overdue") &&
+    isManualFinancialTransaction(receivable);
 
   return (
     <TableRow>

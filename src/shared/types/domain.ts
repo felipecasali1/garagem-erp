@@ -123,6 +123,7 @@ export interface Purchase {
 
 export interface FinancialTransaction {
   id: number;
+  updated_at: string;
   type: TransactionType;
   category: TransactionCategory;
   status: TransactionStatus;

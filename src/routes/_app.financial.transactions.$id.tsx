@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Clock,
   Link2,
+  Pencil,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -16,9 +17,12 @@ import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { StatusBadge } from "@/shared/components/status-badge";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
+import { EditManualFinancialTransactionDialog } from "@/modules/financial/components/edit-manual-financial-transaction-dialog";
 import { brl, fmtDate } from "@/shared/lib/format";
 import {
   cancelFinancialTransaction,
+  clearFinancialTransactionTransitionInput,
+  financialTransactionTransitionInput,
   financialTransactionKeys,
   getFinancialTransactionById,
   isManualFinancialTransaction,
@@ -46,6 +50,7 @@ function TransactionDetail() {
   const transactionId = Number(id);
   const [confirmPaidOpen, setConfirmPaidOpen] = useState(false);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const {
     data: t,
     isLoading,
@@ -58,30 +63,56 @@ function TransactionDetail() {
 
   const markPaidMutation = useMutation({
     mutationFn: markFinancialTransactionPaid,
-    onSuccess: async () => {
+    onSuccess: async (id, input) => {
+      clearFinancialTransactionTransitionInput(input, "settle");
       await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
       await queryClient.invalidateQueries({
-        queryKey: financialTransactionKeys.detail(transactionId),
+        queryKey: financialTransactionKeys.detail(id),
       });
       setConfirmPaidOpen(false);
       toast.success("Transação marcada como paga");
     },
-    onError: (error) => {
+    onError: (error, input) => {
+      if (error instanceof Error && error.message.includes("STALE_RECORD")) {
+        clearFinancialTransactionTransitionInput(input, "settle");
+        void queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
+        void queryClient.invalidateQueries({
+          queryKey: financialTransactionKeys.detail(input.transactionId),
+        });
+        setConfirmPaidOpen(false);
+        toast.error(
+          "A transação mudou. Atualizei os dados; confira o status antes de tentar novamente.",
+        );
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Falha ao marcar transação como paga.");
     },
   });
 
   const cancelMutation = useMutation({
     mutationFn: cancelFinancialTransaction,
-    onSuccess: async () => {
+    onSuccess: async (id, input) => {
+      clearFinancialTransactionTransitionInput(input, "cancel");
       await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
       await queryClient.invalidateQueries({
-        queryKey: financialTransactionKeys.detail(transactionId),
+        queryKey: financialTransactionKeys.detail(id),
       });
       setConfirmCancelOpen(false);
       toast.success("Transação cancelada");
     },
-    onError: (error) => {
+    onError: (error, input) => {
+      if (error instanceof Error && error.message.includes("STALE_RECORD")) {
+        clearFinancialTransactionTransitionInput(input, "cancel");
+        void queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
+        void queryClient.invalidateQueries({
+          queryKey: financialTransactionKeys.detail(input.transactionId),
+        });
+        setConfirmCancelOpen(false);
+        toast.error(
+          "A transação mudou. Atualizei os dados; confira o status antes de tentar novamente.",
+        );
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Falha ao cancelar transação.");
     },
   });
@@ -105,7 +136,10 @@ function TransactionDetail() {
 
   const isIncome = t.type === "income";
   const canMarkPaid = t.status === "pending" || t.status === "overdue";
-  const canCancel = t.status !== "canceled" && isManualFinancialTransaction(t);
+  const canCancel =
+    (t.status === "pending" || t.status === "overdue") && isManualFinancialTransaction(t);
+  const canEdit =
+    isManualFinancialTransaction(t) && (t.status === "pending" || t.status === "overdue");
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -120,6 +154,11 @@ function TransactionDetail() {
         </h1>
         <StatusBadge kind="transaction" value={t.status} />
         <div className="flex flex-wrap items-center gap-2">
+          {canEdit && (
+            <Button variant="outline" onClick={() => setEditOpen(true)}>
+              <Pencil className="h-4 w-4" /> Editar lançamento
+            </Button>
+          )}
           {canCancel && (
             <Button
               variant="outline"
@@ -130,10 +169,7 @@ function TransactionDetail() {
             </Button>
           )}
           {canMarkPaid && (
-            <Button
-              onClick={() => setConfirmPaidOpen(true)}
-              disabled={markPaidMutation.isPending}
-            >
+            <Button onClick={() => setConfirmPaidOpen(true)} disabled={markPaidMutation.isPending}>
               <CheckCircle2 className="h-4 w-4" /> Marcar como paga
             </Button>
           )}
@@ -175,7 +211,11 @@ function TransactionDetail() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <InfoCard icon={Calendar} label="Data lançamento" value={fmtDate(t.transaction_date)} />
         <InfoCard icon={Clock} label="Vencimento" value={t.due_date ? fmtDate(t.due_date) : "-"} />
-        <InfoCard icon={CheckCircle2} label="Pago em" value={t.paid_at ? fmtDate(t.paid_at) : "-"} />
+        <InfoCard
+          icon={CheckCircle2}
+          label="Pago em"
+          value={t.paid_at ? fmtDate(t.paid_at) : "-"}
+        />
       </div>
 
       {(t.sale_id || t.purchase_id || t.employee_id || t.commission_id) && (
@@ -185,9 +225,7 @@ function TransactionDetail() {
               <Link2 className="h-4 w-4" /> Vínculos
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              {t.sale_id && (
-                <LinkedRecord label="Venda" to="/sales/$id" id={t.sale_id} />
-              )}
+              {t.sale_id && <LinkedRecord label="Venda" to="/sales/$id" id={t.sale_id} />}
               {t.purchase_id && (
                 <LinkedRecord label="Compra" to="/purchases/$id" id={t.purchase_id} />
               )}
@@ -208,7 +246,7 @@ function TransactionDetail() {
         confirmLabel={markPaidMutation.isPending ? "Marcando..." : "Marcar como paga"}
         confirmDisabled={markPaidMutation.isPending}
         confirmVariant="default"
-        onConfirm={() => markPaidMutation.mutate(t.id)}
+        onConfirm={() => markPaidMutation.mutate(financialTransactionTransitionInput(t, "settle"))}
       />
 
       <ConfirmActionDialog
@@ -219,7 +257,19 @@ function TransactionDetail() {
         confirmLabel={cancelMutation.isPending ? "Cancelando..." : "Cancelar lançamento"}
         confirmDisabled={cancelMutation.isPending}
         confirmVariant="destructive"
-        onConfirm={() => cancelMutation.mutate(t.id)}
+        onConfirm={() => cancelMutation.mutate(financialTransactionTransitionInput(t, "cancel"))}
+      />
+
+      <EditManualFinancialTransactionDialog
+        transaction={t}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        onSaved={async () => {
+          await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
+          await queryClient.invalidateQueries({
+            queryKey: financialTransactionKeys.detail(transactionId),
+          });
+        }}
       />
     </div>
   );

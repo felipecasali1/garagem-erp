@@ -229,11 +229,11 @@ async function seedFixtures() {
   });
   const customer = await restInsert("customers", { person_id: customerPerson.id, active: true });
   const users = [await createAuthenticatedUser(1), await createAuthenticatedUser(2)];
-  const unauthorizedUser = await createAuthenticatedUser(3, "financial");
+  const financialOnlyUser = await createAuthenticatedUser(3, "financial");
   const supplier = await createSupplier(1);
   const vehicles = [];
   for (let index = 1; index <= 5; index += 1) vehicles.push(await createVehicle(index));
-  return { customerId: customer.id, supplierId: supplier.id, users, unauthorizedUser, vehicles };
+  return { customerId: customer.id, supplierId: supplier.id, users, financialOnlyUser, vehicles };
 }
 
 function saleArguments({ fixtures, vehicle, user, key = randomUUID(), overrides = {} }) {
@@ -343,6 +343,42 @@ function updateSalePayment(user, saleId, sale, payment, overrides = {}) {
     p_installments_count: 4,
     p_payment_date: "2026-12-01",
     ...overrides,
+  });
+}
+
+function transitionFinancialTransaction(
+  user,
+  transactionId,
+  action,
+  expectedUpdatedAt,
+  key = randomUUID(),
+) {
+  return callRpc(user, "transition_financial_transaction", {
+    p_idempotency_key: key,
+    p_transaction_id: transactionId,
+    p_action: action,
+    p_expected_updated_at: expectedUpdatedAt,
+  });
+}
+
+function updateManualFinancialTransaction(user, transaction, overrides = {}) {
+  return callRpc(user, "update_manual_financial_transaction_with_version", {
+    p_idempotency_key: overrides.key ?? randomUUID(),
+    p_transaction_id: transaction.id,
+    p_expected_updated_at: overrides.expectedUpdatedAt ?? transaction.updated_at,
+    p_amount: overrides.amount ?? 275,
+    p_transaction_date: overrides.transactionDate ?? "2026-11-03",
+    p_due_date: overrides.dueDate ?? "2026-11-30",
+    p_description: overrides.description ?? "Despesa revisada pelo teste",
+    p_related: overrides.related ?? "Fornecedor de teste",
+  });
+}
+
+function settleInstallment(user, installment, key = randomUUID()) {
+  return callRpc(user, "settle_installment", {
+    p_idempotency_key: key,
+    p_installment_id: installment.id,
+    p_expected_updated_at: installment.updated_at,
   });
 }
 
@@ -1265,11 +1301,11 @@ test(
 
     await t.test("financial-only users cannot create a Sale", async () => {
       const result = await callCreateSale(
-        fixtures.unauthorizedUser,
+        fixtures.financialOnlyUser,
         saleArguments({
           fixtures,
           vehicle: fixtures.vehicles[4],
-          user: fixtures.unauthorizedUser,
+          user: fixtures.financialOnlyUser,
         }),
       );
       assert.equal(result.response.status, 403, JSON.stringify(result.data));
@@ -1463,7 +1499,7 @@ test(
     await t.test("financial-only users cannot create preparation ChecklistItems", async () => {
       const vehicle = await createVehicle(9);
       const result = await callRpc(
-        fixtures.unauthorizedUser,
+        fixtures.financialOnlyUser,
         "create_vehicle_checklist_item",
         checklistItem(vehicle.id),
       );
@@ -1517,5 +1553,553 @@ test(
         assert.equal(storedVehicle.published, false);
       },
     );
+
+    await t.test(
+      "financial obligations settle idempotently and serialize against cancellation",
+      async () => {
+        const financeUser = fixtures.financialOnlyUser;
+        const secondFinanceUser = await createAuthenticatedUser(5, "financial");
+        const settlement = await restInsert("financial_transactions", {
+          type: "expense",
+          category: "other",
+          status: "pending",
+          amount: 420,
+          transaction_date: "2026-11-02",
+          due_date: "2026-11-20",
+          description: "Obrigação para teste de quitação",
+        });
+        const [loadedSettlement] = await authenticatedRows(
+          financeUser,
+          "financial_transactions",
+          `select=id,status,paid_at,updated_at&id=eq.${settlement.id}`,
+        );
+        const sellerCannotSettle = await transitionFinancialTransaction(
+          fixtures.users[0],
+          settlement.id,
+          "settle",
+          loadedSettlement.updated_at,
+        );
+        assert.equal(
+          sellerCannotSettle.response.status,
+          403,
+          JSON.stringify(sellerCannotSettle.data),
+        );
+        const key = randomUUID();
+        const [first, replay] = await Promise.all([
+          transitionFinancialTransaction(
+            financeUser,
+            settlement.id,
+            "settle",
+            loadedSettlement.updated_at,
+            key,
+          ),
+          transitionFinancialTransaction(
+            financeUser,
+            settlement.id,
+            "settle",
+            loadedSettlement.updated_at,
+            key,
+          ),
+        ]);
+        assert.equal(first.response.status, 200, JSON.stringify(first.data));
+        assert.equal(replay.response.status, 200, JSON.stringify(replay.data));
+        assert.equal(first.data, settlement.id);
+        assert.equal(replay.data, settlement.id);
+
+        const reusedKeyWithDifferentAction = await transitionFinancialTransaction(
+          financeUser,
+          settlement.id,
+          "cancel",
+          loadedSettlement.updated_at,
+          key,
+        );
+        assert.equal(reusedKeyWithDifferentAction.response.status, 409);
+
+        const staleCancel = await transitionFinancialTransaction(
+          secondFinanceUser,
+          settlement.id,
+          "cancel",
+          loadedSettlement.updated_at,
+        );
+        assert.equal(staleCancel.response.status, 409, JSON.stringify(staleCancel.data));
+        assert.match(JSON.stringify(staleCancel.data), /STALE_RECORD/i);
+
+        const [settled] = await authenticatedRows(
+          financeUser,
+          "financial_transactions",
+          `select=id,status,paid_at,updated_at&id=eq.${settlement.id}`,
+        );
+        assert.equal(settled.status, "paid");
+        assert.ok(settled.paid_at);
+        const cannotCancelSettled = await transitionFinancialTransaction(
+          financeUser,
+          settlement.id,
+          "cancel",
+          settled.updated_at,
+        );
+        assert.equal(
+          cannotCancelSettled.response.status,
+          409,
+          JSON.stringify(cannotCancelSettled.data),
+        );
+        assert.match(JSON.stringify(cannotCancelSettled.data), /NOT_CANCELLABLE/i);
+
+        const racingObligation = await restInsert("financial_transactions", {
+          type: "expense",
+          category: "other",
+          status: "pending",
+          amount: 510,
+          transaction_date: "2026-11-02",
+          due_date: "2026-11-22",
+          description: "Obrigação para corrida de quitação/cancelamento",
+        });
+        const [loadedRace] = await authenticatedRows(
+          financeUser,
+          "financial_transactions",
+          `select=id,status,updated_at&id=eq.${racingObligation.id}`,
+        );
+        const outcomes = await Promise.all([
+          transitionFinancialTransaction(
+            financeUser,
+            racingObligation.id,
+            "settle",
+            loadedRace.updated_at,
+          ),
+          transitionFinancialTransaction(
+            secondFinanceUser,
+            racingObligation.id,
+            "cancel",
+            loadedRace.updated_at,
+          ),
+        ]);
+        assert.equal(
+          outcomes.filter(({ response }) => response.status === 200).length,
+          1,
+          JSON.stringify(outcomes.map(({ data }) => data)),
+        );
+        assert.equal(
+          outcomes.filter(({ response }) => response.status === 409).length,
+          1,
+          JSON.stringify(outcomes.map(({ data }) => data)),
+        );
+        const [raceResult] = await authenticatedRows(
+          financeUser,
+          "financial_transactions",
+          `select=id,status,paid_at&id=eq.${racingObligation.id}`,
+        );
+        assert.ok(["paid", "canceled"].includes(raceResult.status));
+        assert.equal(raceResult.paid_at !== null, raceResult.status === "paid");
+      },
+    );
+
+    await t.test(
+      "settling a Commission obligation updates Commission in the same command",
+      async () => {
+        const seller = fixtures.users[0];
+        const financeUser = fixtures.financialOnlyUser;
+        const vehicle = await createVehicle(61);
+        const created = await callCreateSale(
+          seller,
+          saleArguments({ fixtures, vehicle, user: seller }),
+        );
+        assert.equal(created.response.status, 200, JSON.stringify(created.data));
+        const [sale] = await authenticatedRows(
+          seller,
+          "sales",
+          `select=id,status,updated_at&id=eq.${created.data}`,
+        );
+        const [payment] = await authenticatedRows(
+          seller,
+          "sale_payments",
+          `select=id,payment_status,updated_at&sale_id=eq.${created.data}`,
+        );
+        const completed = await transitionSale(seller, created.data, "complete", sale, payment);
+        assert.equal(completed.response.status, 200, JSON.stringify(completed.data));
+
+        const commissions = await authenticatedRows(
+          financeUser,
+          "commissions",
+          `select=id,status,paid_at&sale_id=eq.${created.data}`,
+        );
+        assert.equal(commissions.length, 1);
+        const commissionTransactions = await authenticatedRows(
+          financeUser,
+          "financial_transactions",
+          `select=id,status,paid_at,updated_at&commission_id=eq.${commissions[0].id}`,
+        );
+        assert.equal(commissionTransactions.length, 1);
+        const commissionTransaction = commissionTransactions[0];
+        const key = randomUUID();
+        const [first, replay] = await Promise.all([
+          transitionFinancialTransaction(
+            financeUser,
+            commissionTransaction.id,
+            "settle",
+            commissionTransaction.updated_at,
+            key,
+          ),
+          transitionFinancialTransaction(
+            financeUser,
+            commissionTransaction.id,
+            "settle",
+            commissionTransaction.updated_at,
+            key,
+          ),
+        ]);
+        assert.equal(first.response.status, 200, JSON.stringify(first.data));
+        assert.equal(replay.response.status, 200, JSON.stringify(replay.data));
+
+        const [settledTransaction] = await authenticatedRows(
+          financeUser,
+          "financial_transactions",
+          `select=id,status,paid_at&commission_id=eq.${commissions[0].id}`,
+        );
+        const [settledCommission] = await authenticatedRows(
+          financeUser,
+          "commissions",
+          `select=id,status,paid_at&id=eq.${commissions[0].id}`,
+        );
+        assert.equal(settledTransaction.status, "paid");
+        assert.equal(settledCommission.status, "paid");
+        assert.equal(settledCommission.paid_at, settledTransaction.paid_at);
+
+        const directCommissionUpdate = await requestJson(
+          `${apiBase.rest}/commissions?id=eq.${commissions[0].id}`,
+          {
+            method: "PATCH",
+            token: financeUser.accessToken,
+            body: { status: "pending", paid_at: null },
+          },
+        );
+        assert.equal(directCommissionUpdate.response.ok, false);
+      },
+    );
+
+    await t.test(
+      "manual financial edits replay and reject stale values without losing the result",
+      async () => {
+        const financeUser = fixtures.financialOnlyUser;
+        const transaction = await restInsert("financial_transactions", {
+          type: "expense",
+          category: "other",
+          status: "pending",
+          amount: 180,
+          transaction_date: "2026-11-02",
+          due_date: "2026-11-25",
+          description: "Lançamento manual original",
+          related: "Fornecedor original",
+        });
+        const [loaded] = await authenticatedRows(
+          financeUser,
+          "financial_transactions",
+          `select=id,status,amount,transaction_date,due_date,description,related,updated_at&id=eq.${transaction.id}`,
+        );
+        const directUpdate = await requestJson(
+          `${apiBase.rest}/financial_transactions?id=eq.${transaction.id}`,
+          { method: "PATCH", token: financeUser.accessToken, body: { amount: 1 } },
+        );
+        assert.equal(directUpdate.response.ok, false);
+
+        const key = randomUUID();
+        const args = {
+          p_idempotency_key: key,
+          p_transaction_id: transaction.id,
+          p_expected_updated_at: loaded.updated_at,
+          p_amount: 275,
+          p_transaction_date: "2026-11-03",
+          p_due_date: "2026-11-30",
+          p_description: "Despesa revisada pelo teste",
+          p_related: "Fornecedor de teste",
+        };
+        const first = await callRpc(
+          financeUser,
+          "update_manual_financial_transaction_with_version",
+          args,
+        );
+        assert.equal(first.response.status, 200, JSON.stringify(first.data));
+        const replay = await callRpc(
+          financeUser,
+          "update_manual_financial_transaction_with_version",
+          args,
+        );
+        assert.equal(replay.response.status, 200, JSON.stringify(replay.data));
+        assert.equal(replay.data, transaction.id);
+
+        const changedPayload = await callRpc(
+          financeUser,
+          "update_manual_financial_transaction_with_version",
+          { ...args, p_amount: 300 },
+        );
+        assert.equal(changedPayload.response.status, 409, JSON.stringify(changedPayload.data));
+
+        const stale = await updateManualFinancialTransaction(financeUser, loaded, {
+          amount: 350,
+          expectedUpdatedAt: loaded.updated_at,
+        });
+        assert.equal(stale.response.status, 409, JSON.stringify(stale.data));
+        assert.match(JSON.stringify(stale.data), /STALE_RECORD/i);
+
+        const [updated] = await authenticatedRows(
+          financeUser,
+          "financial_transactions",
+          `select=id,status,amount,transaction_date,due_date,description,related&id=eq.${transaction.id}`,
+        );
+        assert.equal(updated.status, "pending");
+        assert.equal(Number(updated.amount), 275);
+        assert.equal(updated.transaction_date, "2026-11-03");
+        assert.equal(updated.due_date, "2026-11-30");
+        assert.equal(updated.description, "Despesa revisada pelo teste");
+        assert.equal(updated.related, "Fornecedor de teste");
+      },
+    );
+
+    await t.test("Installment ownership, numbering, and full settlement are enforced", async () => {
+      const financeUser = fixtures.financialOnlyUser;
+      const seller = fixtures.users[0];
+      const transaction = await restInsert("financial_transactions", {
+        type: "income",
+        category: "other",
+        status: "pending",
+        amount: 900,
+        transaction_date: "2026-11-02",
+        due_date: "2026-12-02",
+        description: "Obrigação parcelada de teste",
+      });
+      const vehicle = await createVehicle(62);
+      const createdSale = await callCreateSale(
+        seller,
+        saleArguments({
+          fixtures,
+          vehicle,
+          user: seller,
+          overrides: { p_down_payment: 64100 },
+        }),
+      );
+      assert.equal(createdSale.response.status, 200, JSON.stringify(createdSale.data));
+      const [sale] = await authenticatedRows(
+        seller,
+        "sales",
+        `select=id,status,updated_at&id=eq.${createdSale.data}`,
+      );
+      const [payment] = await authenticatedRows(
+        seller,
+        "sale_payments",
+        `select=id,payment_status,remaining_amount,updated_at&sale_id=eq.${createdSale.data}`,
+      );
+      const completed = await transitionSale(seller, createdSale.data, "complete", sale, payment);
+      assert.equal(completed.response.status, 200, JSON.stringify(completed.data));
+      const [completedPayment] = await authenticatedRows(
+        seller,
+        "sale_payments",
+        `select=id,payment_status,remaining_amount,updated_at&sale_id=eq.${createdSale.data}`,
+      );
+      assert.equal(completedPayment.payment_status, "partial");
+      assert.equal(Number(completedPayment.remaining_amount), 900);
+      const installmentFields = {
+        number: 1,
+        total_installments: 2,
+        amount: 450,
+        due_date: "2026-12-02",
+        status: "pending",
+        description: "Parcela de teste",
+      };
+
+      const noOwner = await requestJson(`${apiBase.rest}/installments`, {
+        method: "POST",
+        admin: true,
+        body: installmentFields,
+      });
+      assert.equal(noOwner.response.ok, false);
+      const twoOwners = await requestJson(`${apiBase.rest}/installments`, {
+        method: "POST",
+        admin: true,
+        body: {
+          ...installmentFields,
+          transaction_id: transaction.id,
+          sale_payment_id: payment.id,
+        },
+      });
+      assert.equal(twoOwners.response.ok, false);
+
+      const transactionOwned = await restInsert("installments", {
+        ...installmentFields,
+        transaction_id: transaction.id,
+      });
+      const duplicateTransactionNumber = await requestJson(`${apiBase.rest}/installments`, {
+        method: "POST",
+        admin: true,
+        body: { ...installmentFields, transaction_id: transaction.id },
+      });
+      assert.equal(duplicateTransactionNumber.response.ok, false);
+      const secondTransactionOwned = await restInsert("installments", {
+        ...installmentFields,
+        number: 2,
+        due_date: "2027-01-02",
+        transaction_id: transaction.id,
+      });
+
+      const salePaymentOwned = await restInsert("installments", {
+        ...installmentFields,
+        sale_payment_id: completedPayment.id,
+      });
+      const duplicateSalePaymentNumber = await requestJson(`${apiBase.rest}/installments`, {
+        method: "POST",
+        admin: true,
+        body: { ...installmentFields, sale_payment_id: completedPayment.id },
+      });
+      assert.equal(duplicateSalePaymentNumber.response.ok, false);
+      const secondSalePaymentOwned = await restInsert("installments", {
+        ...installmentFields,
+        number: 2,
+        due_date: "2027-01-02",
+        sale_payment_id: completedPayment.id,
+      });
+
+      const [parentTransaction] = await authenticatedRows(
+        financeUser,
+        "financial_transactions",
+        `select=id,status,updated_at&id=eq.${transaction.id}`,
+      );
+      const cannotSettleParent = await transitionFinancialTransaction(
+        financeUser,
+        transaction.id,
+        "settle",
+        parentTransaction.updated_at,
+      );
+      assert.equal(
+        cannotSettleParent.response.status,
+        409,
+        JSON.stringify(cannotSettleParent.data),
+      );
+      assert.match(JSON.stringify(cannotSettleParent.data), /HAS_INSTALLMENTS/i);
+
+      const [saleReceivable] = await authenticatedRows(
+        financeUser,
+        "financial_transactions",
+        `select=id,status,updated_at&sale_id=eq.${createdSale.data}&category=eq.vehicle_sale&status=eq.pending`,
+      );
+      const cannotSettleSaleReceivable = await transitionFinancialTransaction(
+        financeUser,
+        saleReceivable.id,
+        "settle",
+        saleReceivable.updated_at,
+      );
+      assert.equal(
+        cannotSettleSaleReceivable.response.status,
+        409,
+        JSON.stringify(cannotSettleSaleReceivable.data),
+      );
+      assert.match(JSON.stringify(cannotSettleSaleReceivable.data), /HAS_INSTALLMENTS/i);
+
+      const [loadedInstallment] = await authenticatedRows(
+        financeUser,
+        "installments",
+        `select=id,status,amount,paid_at,updated_at&id=eq.${transactionOwned.id}`,
+      );
+      const key = randomUUID();
+      const [first, replay] = await Promise.all([
+        settleInstallment(financeUser, loadedInstallment, key),
+        settleInstallment(financeUser, loadedInstallment, key),
+      ]);
+      assert.equal(first.response.status, 200, JSON.stringify(first.data));
+      assert.equal(replay.response.status, 200, JSON.stringify(replay.data));
+      assert.equal(first.data, transactionOwned.id);
+      assert.equal(replay.data, transactionOwned.id);
+
+      const [parentAfterFirstInstallment] = await authenticatedRows(
+        financeUser,
+        "financial_transactions",
+        `select=id,status,paid_at&id=eq.${transaction.id}`,
+      );
+      assert.equal(parentAfterFirstInstallment.status, "pending");
+      assert.equal(parentAfterFirstInstallment.paid_at, null);
+
+      const secondPart = await settleInstallment(financeUser, secondTransactionOwned);
+      assert.equal(secondPart.response.status, 200, JSON.stringify(secondPart.data));
+      const [settledParent] = await authenticatedRows(
+        financeUser,
+        "financial_transactions",
+        `select=id,status,paid_at&id=eq.${transaction.id}`,
+      );
+      assert.equal(settledParent.status, "paid");
+      assert.ok(settledParent.paid_at);
+
+      const secondSettlement = await settleInstallment(financeUser, loadedInstallment);
+      assert.equal(secondSettlement.response.status, 409, JSON.stringify(secondSettlement.data));
+      assert.match(
+        JSON.stringify(secondSettlement.data),
+        /STALE_RECORD|INSTALLMENT_ORIGIN_NOT_SETTLEABLE/i,
+      );
+
+      const partialSettlement = await callRpc(financeUser, "settle_installment", {
+        p_idempotency_key: randomUUID(),
+        p_installment_id: loadedInstallment.id,
+        p_expected_updated_at: loadedInstallment.updated_at,
+        p_received_amount: 1,
+      });
+      assert.equal(partialSettlement.response.ok, false);
+
+      const directInstallmentUpdate = await requestJson(
+        `${apiBase.rest}/installments?id=eq.${loadedInstallment.id}`,
+        {
+          method: "PATCH",
+          token: financeUser.accessToken,
+          body: { amount: 1, status: "pending", paid_at: null },
+        },
+      );
+      assert.equal(directInstallmentUpdate.response.ok, false);
+
+      const [settledInstallment] = await authenticatedRows(
+        financeUser,
+        "installments",
+        `select=id,status,amount,paid_at&id=eq.${loadedInstallment.id}`,
+      );
+      assert.equal(settledInstallment.status, "paid");
+      assert.equal(Number(settledInstallment.amount), 450);
+      assert.ok(settledInstallment.paid_at);
+
+      const [loadedSaleInstallment] = await authenticatedRows(
+        financeUser,
+        "installments",
+        `select=id,status,amount,paid_at,updated_at&id=eq.${salePaymentOwned.id}`,
+      );
+      const saleInstallmentResult = await settleInstallment(financeUser, loadedSaleInstallment);
+      assert.equal(
+        saleInstallmentResult.response.status,
+        200,
+        JSON.stringify(saleInstallmentResult.data),
+      );
+      const [paymentAfterFirstInstallment] = await authenticatedRows(
+        financeUser,
+        "sale_payments",
+        `select=id,payment_status,remaining_amount&id=eq.${completedPayment.id}`,
+      );
+      assert.equal(paymentAfterFirstInstallment.payment_status, "partial");
+      assert.equal(Number(paymentAfterFirstInstallment.remaining_amount), 450);
+
+      const saleInstallmentSecondResult = await settleInstallment(
+        financeUser,
+        secondSalePaymentOwned,
+      );
+      assert.equal(
+        saleInstallmentSecondResult.response.status,
+        200,
+        JSON.stringify(saleInstallmentSecondResult.data),
+      );
+      const [settledPayment] = await authenticatedRows(
+        financeUser,
+        "sale_payments",
+        `select=id,payment_status,remaining_amount&id=eq.${completedPayment.id}`,
+      );
+      assert.equal(settledPayment.payment_status, "paid");
+      assert.equal(Number(settledPayment.remaining_amount), 0);
+      const [settledSaleReceivable] = await authenticatedRows(
+        financeUser,
+        "financial_transactions",
+        `select=id,status,paid_at&id=eq.${saleReceivable.id}`,
+      );
+      assert.equal(settledSaleReceivable.status, "paid");
+      assert.ok(settledSaleReceivable.paid_at);
+    });
   },
 );

@@ -10,6 +10,7 @@ type AccessRole = "admin" | "manager" | "seller" | "financial";
 function transaction(overrides: Partial<FinancialTransaction> = {}): FinancialTransaction {
   return {
     id: 1,
+    updated_at: "2026-09-01T00:00:00.000Z",
     type: "expense",
     category: "fixed_cost",
     status: "pending",
