@@ -1,0 +1,26 @@
+services:
+  sales-test-fixture:
+    image: public.ecr.aws/supabase/postgres:17.6.1.136
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /fixtures/sale-reservation.sql
+    environment:
+      DATABASE_URL: postgres://postgres:${GARAGEM_LOCAL_DB_PASSWORD:-}@db:5432/postgres
+    volumes:
+      - ./supabase/tests/database/sale-reservation-fixture.sql:/fixtures/sale-reservation.sql:ro,z
+    networks: [backend]
+
+  sales-integration:
+    image: node:22-bookworm-slim
+    command: [--test, /tests/sale-reservation.compose.test.mjs]
+    environment:
+      GARAGEM_SALES_TEST_INNER: "1"
+      GARAGEM_SALES_TEST_ANON_KEY: ${GARAGEM_LOCAL_ANON_KEY:-}
+      GARAGEM_SALES_TEST_SERVICE_KEY: ${GARAGEM_LOCAL_SERVICE_ROLE_KEY:-}
+    volumes:
+      - ./tests/integration/sale-reservation.compose.test.mjs:/tests/sale-reservation.compose.test.mjs:ro,z
+    networks: [backend]

@@ -250,8 +250,8 @@ services:
 
 networks:
   backend:
-    name: garagem-erp-backend
+    name: ${GARAGEM_LOCAL_NETWORK_NAME:-garagem-erp-backend}
 
 volumes:
   garagem-erp-db:
-    name: garagem-erp-db
+    name: ${GARAGEM_LOCAL_DB_VOLUME_NAME:-garagem-erp-db}

@@ -101,10 +101,11 @@ type SaleRow = {
 };
 
 export type CreateSaleInput = {
+  idempotencyKey: string;
   vehicleId: number;
   customerId: number;
   employeeId: number;
-  status: SaleStatus;
+  status: Exclude<SaleStatus, "canceled">;
   saleDate: string;
   salePrice: number;
   discount: number;
@@ -133,11 +134,6 @@ export const saleKeys = {
   byEmployee: (employeeId: number) => ["sales", "employee", employeeId] as const,
   detail: (id: number) => ["sales", id] as const,
 };
-
-function normalizeText(value?: string | null) {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
-}
 
 function mapCustomer(row: CustomerRow): Customer {
   if (!row.person) {
@@ -610,14 +606,15 @@ async function createSaleFinancialTransactions({
   if (transactionError) throw new Error(transactionError.message);
 }
 
-const createSaleServer = createServerFn({ method: "POST" })
-  .inputValidator(
-    z.object({
+export async function createSale(input: CreateSaleInput) {
+  const data = z
+    .object({
+      idempotencyKey: z.string().uuid(),
       vehicleId: z.number().int().positive(),
       customerId: z.number().int().positive(),
       employeeId: z.number().int().positive(),
-      status: z.enum(["pending", "completed", "canceled"]),
-      saleDate: z.string().min(1),
+      status: z.enum(["pending", "completed"]),
+      saleDate: z.string().date(),
       salePrice: z.number().positive(),
       discount: z.number().nonnegative(),
       notes: z.string().optional(),
@@ -625,136 +622,31 @@ const createSaleServer = createServerFn({ method: "POST" })
       paymentStatus: z.enum(["pending", "partial", "paid"]),
       downPayment: z.number().nonnegative(),
       installmentsCount: z.number().int().positive(),
-      paymentDate: z.string().optional(),
-    }),
-  )
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/shared/supabase/server");
+      paymentDate: z.string().date().optional(),
+    })
+    .parse(input);
 
-    const { data: vehicle, error: vehicleError } = await supabaseAdmin
-      .from("vehicles")
-      .select("id, brand, model, plate, sale_price, cost_price, status")
-      .eq("id", data.vehicleId)
-      .maybeSingle();
-    if (vehicleError) throw new Error(vehicleError.message);
-    if (!vehicle) throw new Error("Veículo não encontrado.");
-    if (vehicle.status !== "available") {
-      throw new Error("Apenas veículos disponíveis podem ser vendidos.");
-    }
-
-    const { data: customer, error: customerError } = await supabaseAdmin
-      .from("customers")
-      .select("id, active")
-      .eq("id", data.customerId)
-      .maybeSingle();
-    if (customerError) throw new Error(customerError.message);
-    if (!customer || !customer.active) {
-      throw new Error("Cliente não encontrado ou arquivado.");
-    }
-
-    const { data: employee, error: employeeError } = await supabaseAdmin
-      .from("employees")
-      .select("id, active, commission_rate, commission_type")
-      .eq("id", data.employeeId)
-      .maybeSingle();
-    if (employeeError) throw new Error(employeeError.message);
-    if (!employee || !employee.active) {
-      throw new Error("Vendedor não encontrado ou inativo.");
-    }
-
-    const totalValue = data.salePrice - data.discount;
-    if (totalValue <= 0) {
-      throw new Error("O valor final da venda deve ser maior que zero.");
-    }
-    const paymentInput = normalizeSalePayment({
-      saleStatus: data.status,
-      method: data.paymentMethod,
-      totalValue,
-      downPayment: data.downPayment,
-      paymentDate: data.paymentDate,
-      saleDate: data.saleDate,
-    });
-
-    const { data: sale, error: saleError } = await supabaseAdmin
-      .from("sales")
-      .insert({
-        customer_id: data.customerId,
-        vehicle_id: data.vehicleId,
-        employee_id: data.employeeId,
-        total_value: totalValue,
-        discount: data.discount,
-        status: data.status,
-        sale_date: data.saleDate,
-        notes: normalizeText(data.notes),
-      })
-      .select("id")
-      .single();
-    if (saleError) throw new Error(saleError.message);
-
-    const { data: payment, error: paymentError } = await supabaseAdmin
-      .from("sale_payments")
-      .insert({
-        sale_id: sale.id,
-        payment_method: data.paymentMethod,
-        payment_status: paymentInput.paymentStatus,
-        down_payment: paymentInput.downPayment,
-        installments_count: paymentInput.installmentsCount,
-        payment_date: paymentInput.paymentDate,
-        remaining_amount: paymentInput.remainingAmount,
-      })
-      .select("id")
-      .single();
-    if (paymentError) throw new Error(paymentError.message);
-
-    const nextVehicleStatus =
-      data.status === "completed" ? "sold" : data.status === "pending" ? "reserved" : "available";
-    const { error: vehicleUpdateError } = await supabaseAdmin
-      .from("vehicles")
-      .update({ status: nextVehicleStatus, published: false })
-      .eq("id", data.vehicleId);
-    if (vehicleUpdateError) throw new Error(vehicleUpdateError.message);
-
-    if (data.status === "completed") {
-      await createSaleFinancialTransactions({
-        supabaseAdmin,
-        sale: {
-          id: sale.id as number,
-          vehicle_id: data.vehicleId,
-          employee_id: data.employeeId,
-          total_value: totalValue,
-          sale_date: data.saleDate,
-        },
-        vehicle,
-        payment: {
-          payment_method: data.paymentMethod,
-          payment_status: paymentInput.paymentStatus,
-          down_payment: paymentInput.downPayment,
-          remaining_amount: paymentInput.remainingAmount,
-          payment_date: paymentInput.paymentDate,
-        },
-      });
-      await ensureSaleCommission({
-        supabaseAdmin,
-        sale: {
-          id: sale.id as number,
-          vehicle_id: data.vehicleId,
-          employee_id: data.employeeId,
-          total_value: totalValue,
-          sale_date: data.saleDate,
-        },
-        vehicle,
-        employee: {
-          commission_rate: Number(employee.commission_rate),
-          commission_type: employee.commission_type as CommissionType,
-        },
-      });
-    }
-
-    return sale.id as number;
+  const { data: saleId, error } = await supabase.rpc("create_sale_with_reservation", {
+    p_idempotency_key: data.idempotencyKey,
+    p_vehicle_id: data.vehicleId,
+    p_customer_id: data.customerId,
+    p_employee_id: data.employeeId,
+    p_status: data.status,
+    p_sale_date: data.saleDate,
+    p_sale_price: data.salePrice,
+    p_discount: data.discount,
+    p_notes: data.notes?.trim() || null,
+    p_payment_method: data.paymentMethod,
+    p_payment_status: data.paymentStatus,
+    p_down_payment: data.downPayment,
+    p_installments_count: data.installmentsCount,
+    p_payment_date: data.paymentDate ?? null,
   });
 
-export async function createSale(input: CreateSaleInput) {
-  return createSaleServer({ data: input });
+  if (error) throw new Error(error.message);
+  if (saleId === null)
+    throw new Error("A venda foi registrada, mas o servidor não retornou seu código.");
+  return Number(saleId);
 }
 
 async function applyCompletedSale({

@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Check, Car, UserCircle2, Receipt } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -18,12 +18,9 @@ import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { DatePicker } from "@/shared/components/ui/date-picker";
 import { StatusBadge } from "@/shared/components/status-badge";
 import type { SaleDraft } from "@/modules/sales/types";
-import { createSale, saleKeys } from "@/modules/sales/services/sales";
+import { createSale, saleKeys, type CreateSaleInput } from "@/modules/sales/services/sales";
 import { listVehicles, vehicleKeys } from "@/modules/vehicles/services/vehicles";
-import {
-  customerKeys,
-  listActiveCustomers,
-} from "@/modules/customers/services/customers";
+import { customerKeys, listActiveCustomers } from "@/modules/customers/services/customers";
 import { employeeKeys, listActiveEmployees } from "@/modules/employees/services/employees";
 import { brl, initials } from "@/shared/lib/format";
 import { formatDocument } from "@/shared/lib/field-format";
@@ -68,6 +65,7 @@ function NewSale() {
   const navigate = useNavigate();
   const { vehicleId: initialVehicleId } = Route.useSearch();
   const queryClient = useQueryClient();
+  const createIntent = useRef<{ fingerprint: string; key: string } | null>(null);
   const { data: vehicles = [], isLoading: loadingVehicles } = useQuery({
     queryKey: vehicleKeys.all,
     queryFn: listVehicles,
@@ -118,7 +116,9 @@ function NewSale() {
   useEffect(() => {
     if (draft.vehicle_id || !initialVehicleId) return;
 
-    const preselectedVehicle = availableVehicles.find((candidate) => candidate.id === initialVehicleId);
+    const preselectedVehicle = availableVehicles.find(
+      (candidate) => candidate.id === initialVehicleId,
+    );
     if (!preselectedVehicle) return;
 
     patchDraft({
@@ -157,7 +157,7 @@ function NewSale() {
       toast.error("A entrada não pode ser maior que o valor final da venda.");
       return;
     }
-    createMutation.mutate({
+    const saleInput: Omit<CreateSaleInput, "idempotencyKey"> = {
       vehicleId: vehicle.id,
       customerId: customer.id,
       employeeId: employee.id,
@@ -171,16 +171,22 @@ function NewSale() {
         draft.status !== "completed"
           ? "pending"
           : draft.payment_method !== "financing"
-          ? "paid"
-          : draft.down_payment >= total
             ? "paid"
-            : draft.down_payment > 0
-              ? "partial"
-              : "pending",
+            : draft.down_payment >= total
+              ? "paid"
+              : draft.down_payment > 0
+                ? "partial"
+                : "pending",
       downPayment: draft.payment_method === "financing" ? draft.down_payment : total,
       installmentsCount: 1,
       paymentDate: draft.payment_date,
-    });
+    };
+    const fingerprint = JSON.stringify(saleInput);
+    if (createIntent.current?.fingerprint !== fingerprint) {
+      createIntent.current = { fingerprint, key: globalThis.crypto.randomUUID() };
+    }
+
+    createMutation.mutate({ ...saleInput, idempotencyKey: createIntent.current.key });
   };
 
   return (
@@ -273,29 +279,29 @@ function NewSale() {
             </div>
           ) : (
             customers.map((c) => {
-            const sel = c.id === draft.customer_id;
-            return (
-              <button
-                key={c.id}
-                onClick={() => patchDraft({ customer_id: c.id })}
-                className={`flex items-center gap-3 rounded-xl border-2 p-4 transition ${
-                  sel ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
-                }`}
-              >
-                <Avatar>
-                  <AvatarFallback className="bg-muted text-xs">
-                    {initials(c.person.name)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 text-left min-w-0">
-                  <div className="font-medium truncate">{c.person.name}</div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    {formatDocument(c.person.cpf ?? c.person.cnpj ?? "", c.person.type)}
+              const sel = c.id === draft.customer_id;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => patchDraft({ customer_id: c.id })}
+                  className={`flex items-center gap-3 rounded-xl border-2 p-4 transition ${
+                    sel ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
+                  }`}
+                >
+                  <Avatar>
+                    <AvatarFallback className="bg-muted text-xs">
+                      {initials(c.person.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 text-left min-w-0">
+                    <div className="font-medium truncate">{c.person.name}</div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {formatDocument(c.person.cpf ?? c.person.cnpj ?? "", c.person.type)}
+                    </div>
                   </div>
-                </div>
-              </button>
-            );
-          })
+                </button>
+              );
+            })
           )}
         </div>
       )}
@@ -313,12 +319,11 @@ function NewSale() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {employees
-                    .map((e) => (
-                      <SelectItem key={e.id} value={String(e.id)}>
-                        {e.person.name} - {e.position}
-                      </SelectItem>
-                    ))}
+                  {employees.map((e) => (
+                    <SelectItem key={e.id} value={String(e.id)}>
+                      {e.person.name} - {e.position}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               {loadingEmployees && (
@@ -330,9 +335,7 @@ function NewSale() {
                 <Label className="text-xs uppercase text-muted-foreground">Status da venda</Label>
                 <Select
                   value={draft.status}
-                  onValueChange={(value) =>
-                    patchDraft({ status: value as SaleDraft["status"] })
-                  }
+                  onValueChange={(value) => patchDraft({ status: value as SaleDraft["status"] })}
                 >
                   <SelectTrigger>
                     <SelectValue />

@@ -136,7 +136,10 @@ Comandos úteis para executar testes específicos:
 ```bash
 npm run test:unit
 npm run test:integration
+npm run test:integration:sales
 ```
+
+`test:integration:sales` valida criação concorrente, repetição idempotente e rollback usando Auth e PostgREST autenticados em um Compose descartável. Ele gera chaves, nomes de rede e volume temporários e os remove ao terminar; não usa `.env`, `.env.compose`, `.env.docker` nem os volumes do ambiente self-hosted habitual. Requer Docker Compose e pode baixar imagens na primeira execução.
 
 ## Setup do Banco de Dados
 

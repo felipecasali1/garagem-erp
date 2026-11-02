@@ -20,6 +20,7 @@
     "format": "prettier --write .",
     "test:unit": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js tests/unit/selfhosted-compose.test.mjs",
     "test:integration": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/integration/*.test.js",
+    "test:integration:sales": "node --test tests/integration/sale-reservation.compose.test.mjs",
     "test": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js tests/unit/selfhosted-compose.test.mjs .test-dist/tests/integration/*.test.js"
   },
   "dependencies": {
