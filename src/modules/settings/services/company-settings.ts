@@ -122,6 +122,11 @@ export async function saveCompanySettings(draft: CompanySettingsDraft) {
     .single();
 
   if (error) {
+    if (error.code === "23505") {
+      throw new Error(
+        "As configurações da empresa já foram criadas em outra sessão ou o CNPJ já está em uso. Atualize os dados e tente novamente.",
+      );
+    }
     throw new Error(error.message);
   }
 

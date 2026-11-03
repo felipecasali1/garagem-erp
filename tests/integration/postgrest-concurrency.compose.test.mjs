@@ -550,6 +550,68 @@ test(
     const fixtures = await seedFixtures();
 
     await t.test(
+      "concurrent CompanySettings creation leaves one row and an authorized User can edit it",
+      async () => {
+        const user = fixtures.managerUser;
+        const attempts = [
+          {
+            legal_name: "Garagem concorrente A",
+            cnpj: "88999999000101",
+            city: "Campo Grande",
+          },
+          {
+            legal_name: "Garagem concorrente B",
+            cnpj: "88999999000102",
+            city: "Dourados",
+          },
+        ];
+        const results = await Promise.all(
+          attempts.map((body) =>
+            requestJson(`${apiBase.rest}/company_settings`, {
+              method: "POST",
+              token: user.accessToken,
+              body,
+            }),
+          ),
+        );
+
+        assert.equal(
+          results.filter((result) => result.response.status === 201).length,
+          1,
+          JSON.stringify(results.map((result) => result.data)),
+        );
+        assert.equal(
+          results.filter((result) => result.response.status === 409).length,
+          1,
+          JSON.stringify(results.map((result) => result.data)),
+        );
+
+        const listed = await requestJson(
+          `${apiBase.rest}/company_settings?select=id,legal_name,cnpj`,
+          { token: user.accessToken },
+        );
+        assert.equal(listed.response.status, 200, JSON.stringify(listed.data));
+        assert.equal(listed.data.length, 1);
+
+        const settingsId = listed.data[0].id;
+        const edited = await requestJson(`${apiBase.rest}/company_settings?id=eq.${settingsId}`, {
+          method: "PATCH",
+          token: user.accessToken,
+          body: { legal_name: "Garagem autorizada editada" },
+        });
+        assert.equal(edited.response.ok, true, JSON.stringify(edited.data));
+
+        const confirmed = await requestJson(
+          `${apiBase.rest}/company_settings?select=id,legal_name&id=eq.${settingsId}`,
+          { token: user.accessToken },
+        );
+        assert.equal(confirmed.response.status, 200, JSON.stringify(confirmed.data));
+        assert.equal(confirmed.data.length, 1);
+        assert.equal(confirmed.data[0].legal_name, "Garagem autorizada editada");
+      },
+    );
+
+    await t.test(
       "User provisioning stays pending through Auth downtime and resumes once",
       async () => {
         const operationId = randomUUID();
