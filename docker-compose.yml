@@ -93,6 +93,39 @@ services:
       retries: 12
     networks: [backend]
 
+  storage:
+    image: public.ecr.aws/supabase/storage-api:v1.81.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      rest:
+        condition: service_healthy
+    environment:
+      ANON_KEY: ${GARAGEM_LOCAL_ANON_KEY:-}
+      SERVICE_KEY: ${GARAGEM_LOCAL_SERVICE_ROLE_KEY:-}
+      POSTGREST_URL: http://rest:3000
+      AUTH_JWT_SECRET: ${GARAGEM_LOCAL_JWT_SECRET:-}
+      DATABASE_URL: postgres://supabase_storage_admin:${GARAGEM_LOCAL_DB_PASSWORD:-}@db:5432/postgres
+      STORAGE_PUBLIC_URL: http://127.0.0.1:${GARAGEM_LOCAL_API_PORT:-8000}
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      FILE_SIZE_LIMIT: 5242880
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      GLOBAL_S3_BUCKET: garagem-erp-storage
+      TENANT_ID: stub
+      REGION: local
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    volumes:
+      - garagem-erp-storage:/var/lib/storage
+    healthcheck:
+      test: [CMD, wget, --no-verbose, --tries=1, --spider, http://127.0.0.1:5000/status]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks: [backend]
+
   meta:
     image: public.ecr.aws/supabase/postgres-meta:v0.100.0
     restart: unless-stopped
@@ -168,6 +201,8 @@ services:
     depends_on:
       studio:
         condition: service_healthy
+      storage:
+        condition: service_healthy
     entrypoint: [/bin/sh, /home/kong/kong-entrypoint.sh]
     ports:
       - 127.0.0.1:${GARAGEM_LOCAL_API_PORT:-8000}:8000
@@ -203,6 +238,8 @@ services:
       db:
         condition: service_healthy
       auth:
+        condition: service_healthy
+      storage:
         condition: service_healthy
     entrypoint: [/bin/sh, /scripts/apply-migrations.sh]
     environment:
@@ -255,3 +292,5 @@ networks:
 volumes:
   garagem-erp-db:
     name: ${GARAGEM_LOCAL_DB_VOLUME_NAME:-garagem-erp-db}
+  garagem-erp-storage:
+    name: ${GARAGEM_LOCAL_STORAGE_VOLUME_NAME:-garagem-erp-storage}

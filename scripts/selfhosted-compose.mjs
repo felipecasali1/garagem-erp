@@ -44,6 +44,7 @@ function createEnvironmentFile() {
     GARAGEM_LOCAL_DASHBOARD_PASSWORD: randomHex(24),
     GARAGEM_LOCAL_APP_PORT: "3101",
     GARAGEM_LOCAL_API_PORT: "8000",
+    GARAGEM_LOCAL_STORAGE_VOLUME_NAME: "garagem-erp-storage",
   };
   const contents = [
     "# Gerado pelo GaragemERP para o Supabase self-hosted via Docker Compose.",
@@ -235,6 +236,7 @@ async function verifyPublicApi(values, timeoutMs = 30_000) {
   const checks = [
     { service: "Auth/gateway", path: "/auth/v1/health" },
     { service: "REST/migrations/gateway", path: "/rest/v1/vehicles?select=id&limit=0" },
+    { service: "Storage/gateway", path: "/storage/v1/status" },
   ];
   const deadline = Date.now() + timeoutMs;
   const lastStatus = new Map();
@@ -264,12 +266,12 @@ async function verifyPublicApi(values, timeoutMs = 30_000) {
   );
   throw new Error(
     `As verificações externas do gateway falharam (${summary.join("; ")}). ` +
-      "Confira os serviços auth, rest e migrations com `docker compose --env-file .env.compose ps`.",
+      "Confira os serviços auth, rest, storage e migrations com `docker compose --env-file .env.compose ps`.",
   );
 }
 
 async function waitForHealth(timeoutMs = 150_000) {
-  const required = ["db", "auth", "rest", "meta", "studio", "api-gw", "app"];
+  const required = ["db", "auth", "rest", "storage", "meta", "studio", "api-gw", "app"];
   const deadline = Date.now() + timeoutMs;
   let lastServices = [];
 
@@ -385,7 +387,7 @@ async function main() {
   await waitForHealth(10_000);
   await verifyPublicApi(values);
   console.log(
-    "Healthcheck passou: Postgres, Auth, REST, Studio, gateway, migrations e aplicação estão saudáveis.",
+    "Healthcheck passou: Postgres, Auth, REST, Storage, Studio, gateway, migrations e aplicação estão saudáveis.",
   );
 }
 

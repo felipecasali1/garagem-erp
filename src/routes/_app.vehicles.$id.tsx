@@ -14,7 +14,6 @@ import {
   Settings2,
   ShoppingCart,
   AlertTriangle,
-  Car,
 } from "lucide-react";
 import { useState } from "react";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -39,6 +38,9 @@ import { StaleRecordError } from "@/shared/lib/stale-record";
 import { StaleRecordConflictDialog } from "@/shared/components/stale-record-conflict-dialog";
 import type { Vehicle } from "@/shared/types/domain";
 import { vehicleStatusLabel } from "@/modules/vehicles/lib/vehicle-status-label";
+import { VehiclePhotoPanel } from "@/modules/vehicles/components/vehicle-photo-panel";
+import { canAccessPath } from "@/shared/auth/access-control";
+import { useAuth } from "@/shared/supabase/auth";
 
 export const Route = createFileRoute("/_app/vehicles/$id")({
   head: () => ({ meta: [{ title: "Detalhe do Veículo | GaragemERP" }] }),
@@ -65,6 +67,7 @@ function VehicleDetail() {
   const navigate = useNavigate();
   const numericId = Number(id);
   const queryClient = useQueryClient();
+  const { accessRole } = useAuth();
   const [confirmFinishPreparation, setConfirmFinishPreparation] = useState(false);
   const [activeTab, setActiveTab] = useState("info");
   const [conflict, setConflict] = useState<{
@@ -287,11 +290,11 @@ function VehicleDetail() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2 overflow-hidden">
-          <div className="aspect-[16/9] bg-gradient-to-br from-muted to-muted/40 flex items-center justify-center">
-            <Car className="h-24 w-24 text-neutral-400 dark:text-neutral-600" aria-hidden="true" />
-          </div>
-        </Card>
+        <VehiclePhotoPanel
+          vehicleId={vehicle.id}
+          alt={`${vehicle.brand} ${vehicle.model} · ${vehicle.plate}`}
+          canManage={canAccessPath(accessRole, "/vehicles")}
+        />
         <Card>
           <CardContent className="p-6 space-y-4">
             <div>

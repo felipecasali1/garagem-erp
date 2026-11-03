@@ -15,7 +15,7 @@ Este fluxo sobe a aplicação e um Supabase self-hosted para uso local pelo Dock
 npm run selfhosted:up
 ```
 
-Na primeira execução, o comando cria `.env.compose` com segredos aleatórios e permissões `0600`, valida o acesso ao Docker, constrói a imagem da aplicação e sobe os serviços. O arquivo é ignorado pelo Git. Guarde-o junto com o volume do banco: as credenciais são necessárias para reabrir uma instalação existente.
+Na primeira execução, o comando cria `.env.compose` com segredos aleatórios e permissões `0600`, valida o acesso ao Docker, constrói a imagem da aplicação e sobe os serviços. O arquivo é ignorado pelo Git. Guarde-o junto com os volumes do banco e do Storage: as credenciais são necessárias para reabrir uma instalação existente.
 
 Quando o healthcheck passar:
 
@@ -24,7 +24,7 @@ Quando o healthcheck passar:
 
 No Studio, crie o primeiro usuário em **Authentication → Users**. Depois vincule-o a `public.users` seguindo as instruções de primeiro administrador no README. O Supabase Auth está configurado para confirmação automática de e-mail local; o cadastro público permanece desativado.
 
-O serviço de migrações aguarda Postgres e Auth ficarem saudáveis, aplica cada arquivo SQL versionado em uma transação e registra a versão em `supabase_migrations.schema_migrations`. Versões já registradas não são reaplicadas. A inicialização não executa `db reset`, não apaga nem recria o volume.
+O serviço de migrações aguarda Postgres, Auth e Storage ficarem saudáveis, aplica cada arquivo SQL versionado em uma transação e registra a versão em `supabase_migrations.schema_migrations`. Versões já registradas não são reaplicadas. A inicialização não executa `db reset`, não apaga nem recria os volumes.
 
 ## Verificar e parar
 
@@ -33,7 +33,7 @@ npm run selfhosted:healthcheck
 npm run selfhosted:down
 ```
 
-O comando de parada remove os containers e a rede, mas preserva o volume `garagem-erp-db`. A próxima execução de `selfhosted:up` reinicia os serviços e verifica migrations pendentes. Não use `docker compose down -v` para uma parada normal: `-v` apagaria os dados persistidos.
+O comando de parada remove os containers e a rede, mas preserva os volumes `garagem-erp-db` e `garagem-erp-storage`. A próxima execução de `selfhosted:up` reinicia os serviços e verifica migrations pendentes. Não use `docker compose down -v` para uma parada normal: `-v` apagaria os dados persistidos.
 
 As portas da aplicação e do gateway são publicadas apenas em `127.0.0.1`; o Postgres não publica porta no host. Dentro da rede Docker, a aplicação usa `http://api-gw:8000`. O navegador usa `http://127.0.0.1:8000`. O `.env` Cloud e `.env.docker` não são lidos pelo Compose. Se alterar as portas em `.env.compose`, as URLs internas e os redirecionamentos são derivados delas.
 
@@ -47,7 +47,7 @@ O teste inicia um projeto Compose descartável, aplica as migrations e executa c
 
 `npm run test:integration:sales` permanece como alias de compatibilidade e executa a mesma suíte combinada.
 
-Este recorte inclui Postgres, Auth, PostgREST, Studio, gateway e aplicação. Storage de arquivos/fotos, Realtime, Edge Functions, pooler e observabilidade não são iniciados porque não são usados pelo escopo atual do ERP. As imagens de Supabase estão fixadas na versão da configuração self-hosted `v0.8.3` (commit `bc27d2661edd09a5d0b8d76ce33da6d4071a756e`). Os pequenos arquivos de bootstrap do banco e do gateway são adaptações da configuração oficial Supabase, licenciada sob Apache-2.0.
+Este recorte inclui Postgres, Auth, PostgREST, Storage, Studio, gateway e aplicação. A galeria usa um bucket privado e o backend de arquivos persiste no volume `garagem-erp-storage`; as imagens são otimizadas no navegador antes do envio. Realtime, Edge Functions, pooler, imgproxy e observabilidade não são iniciados. As imagens de Supabase estão fixadas na versão da configuração self-hosted `v0.8.3` (commit `bc27d2661edd09a5d0b8d76ce33da6d4071a756e`). Os pequenos arquivos de bootstrap do banco e do gateway são adaptações da configuração oficial Supabase, licenciada sob Apache-2.0. Um backup futuro precisa copiar o volume de Storage junto com o banco para manter registros e arquivos consistentes.
 
 ## Diagnóstico
 

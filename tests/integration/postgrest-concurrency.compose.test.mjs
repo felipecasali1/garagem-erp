@@ -99,6 +99,7 @@ async function initializeDisposableCompose() {
     GARAGEM_LOCAL_API_PORT: "8000",
     GARAGEM_LOCAL_NETWORK_NAME: `${projectName}-network`,
     GARAGEM_LOCAL_DB_VOLUME_NAME: `${projectName}-db`,
+    GARAGEM_LOCAL_STORAGE_VOLUME_NAME: `${projectName}-storage`,
   };
   await writeFile(
     config.envFile,

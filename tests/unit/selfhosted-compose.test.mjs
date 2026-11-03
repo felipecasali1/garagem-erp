@@ -29,7 +29,12 @@ test("allowlists CORS do gateway autorizam o header da API do Supabase", async (
   const allowedHeaderCount =
     gatewayConfig.match(/^\s+-\s+X-Supabase-Api-Version\s*$/gim)?.length ?? 0;
 
-  assert.equal(allowedHeaderCount, 2, "Auth e PostgREST devem permitir o header de versão");
+  assert.equal(
+    allowedHeaderCount,
+    3,
+    "Auth, PostgREST e Storage devem permitir o header de versão",
+  );
+  assert.match(gatewayConfig, /\/storage\/v1\//);
 });
 
 test("selfhosted:down usa o env vazio do Compose e preserva volumes", async (t) => {

@@ -24,6 +24,7 @@
     "test:integration:vehicle-preparation": "npm run test:integration:concurrency",
     "test:integration:sales": "npm run test:integration:concurrency",
     "test:integration:financial": "npm run test:integration:concurrency",
+    "test:integration:vehicle-photos": "tsc -p tsconfig.tests.json && node --test tests/integration/vehicle-photo-storage.compose.test.mjs",
     "test": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js tests/unit/selfhosted-compose.test.mjs .test-dist/tests/integration/*.test.js"
   },
   "dependencies": {
