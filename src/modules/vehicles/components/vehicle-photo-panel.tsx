@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ImagePlus, LoaderCircle, RotateCcw, Trash2, Upload } from "lucide-react";
+import { Check, ImagePlus, LoaderCircle, RotateCcw, Trash2, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
@@ -8,195 +8,356 @@ import { Card, CardContent } from "@/shared/components/ui/card";
 import { supabase } from "@/shared/supabase/client";
 import {
   createVehiclePhotoService,
-  VehiclePhotoServiceError,
+  MAX_VEHICLE_PHOTOS,
+  type VehiclePhoto,
+  type VehiclePhotoUpload,
+  type VehiclePhotoUploadProgress,
 } from "../services/vehicle-photo-service";
 
-const vehiclePhotoService = createVehiclePhotoService(supabase);
-
-const vehiclePhotoKeys = {
-  current: (vehicleId: number) => ["vehicle-photos", vehicleId] as const,
+const photoService = createVehiclePhotoService(supabase);
+type UploadJob = {
+  attempt: VehiclePhotoUpload;
+  status: "queued" | "uploading" | "saved" | "failed";
+  error?: string;
 };
 
-type VehiclePhotoPanelProps = {
-  vehicleId: number;
-  alt: string;
-  canManage: boolean;
-};
+type VehiclePhotoPanelProps = { vehicleId: number; alt: string; canManage: boolean };
 
 export function VehiclePhotoPanel({ vehicleId, alt, canManage }: VehiclePhotoPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const replacementRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  const [orphanedPath, setOrphanedPath] = useState<string | null>(null);
-  const photoQuery = useQuery({
-    queryKey: vehiclePhotoKeys.current(vehicleId),
-    queryFn: () => vehiclePhotoService.getVehiclePhoto(vehicleId),
+  const queryKey = ["vehicle-photos", vehicleId] as const;
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<VehiclePhoto | null>(null);
+  const [replacementTarget, setReplacementTarget] = useState<VehiclePhoto | null>(null);
+  const [jobs, setJobs] = useState<UploadJob[]>([]);
+  const [cleanupPaths, setCleanupPaths] = useState<string[]>([]);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const galleryQuery = useQuery({
+    queryKey,
+    queryFn: () => photoService.listVehiclePhotos(vehicleId),
   });
+  const photos = galleryQuery.data ?? [];
+  const activePhoto = photos.find((photo) => photo.id === selectedId) ?? photos[0];
+  const remaining = Math.max(0, MAX_VEHICLE_PHOTOS - photos.length);
+  const refresh = () => queryClient.invalidateQueries({ queryKey });
+
+  function uploadProgress(progress: VehiclePhotoUploadProgress) {
+    setJobs((current) =>
+      current.map((job) =>
+        job.attempt.id !== progress.id
+          ? job
+          : {
+              ...job,
+              status: progress.status,
+              error: progress.status === "failed" ? progress.error : undefined,
+            },
+      ),
+    );
+    if (progress.status === "failed" && progress.cleanupPath) {
+      const path = progress.cleanupPath;
+      setCleanupPaths((current) => [...new Set([...current, path])]);
+    }
+    if (progress.status === "saved") setSelectedId(progress.photo.id);
+  }
 
   const uploadMutation = useMutation({
-    mutationFn: (file: File) => vehiclePhotoService.replaceVehiclePhoto(vehicleId, file),
-    onSuccess: async (photo) => {
-      setOrphanedPath(photo.pending_cleanup_paths[0] ?? null);
-      await queryClient.invalidateQueries({ queryKey: vehiclePhotoKeys.current(vehicleId) });
-      toast.success("Foto do veículo salva.");
+    mutationFn: (attempts: VehiclePhotoUpload[]) =>
+      photoService.uploadVehiclePhotos(vehicleId, attempts, uploadProgress),
+    onSuccess: (results) => {
+      const saved = results.filter((result) => result.status === "saved").length;
+      if (saved) toast.success(`${saved} ${saved === 1 ? "foto salva" : "fotos salvas"}.`);
+      if (saved < results.length)
+        toast.error("Algumas fotos não foram salvas. Confira o resultado de cada arquivo.");
     },
-    onError: (error) => {
-      if (error instanceof VehiclePhotoServiceError && error.cleanupPath) {
-        setOrphanedPath(error.cleanupPath);
-      }
-      toast.error(error instanceof Error ? error.message : "Não foi possível salvar a foto.");
-    },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Não foi possível enviar as fotos."),
+    onSettled: refresh,
   });
 
   const removeMutation = useMutation({
-    mutationFn: () => vehiclePhotoService.removeVehiclePhoto(vehicleId),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: vehiclePhotoKeys.current(vehicleId) });
-      setConfirmRemove(false);
+    mutationFn: (photo: VehiclePhoto) => photoService.removeVehiclePhoto(vehicleId, photo.id),
+    onSuccess: () => {
+      setConfirmRemove(null);
       toast.success("Foto removida.");
     },
     onError: (error) => {
-      if (error instanceof VehiclePhotoServiceError && error.cleanupPath) {
-        setOrphanedPath(error.cleanupPath);
-      }
-      toast.error(error instanceof Error ? error.message : "Não foi possível remover a foto.");
+      setConfirmRemove(null);
+      toast.error(error instanceof Error ? error.message : "A remoção está pendente.");
     },
+    onSettled: refresh,
   });
 
-  const retryCleanupMutation = useMutation({
-    mutationFn: (path: string) => vehiclePhotoService.retryCleanup(path),
-    onSuccess: async (result) => {
-      setOrphanedPath(null);
-      await queryClient.invalidateQueries({ queryKey: vehiclePhotoKeys.current(vehicleId) });
+  const cleanupMutation = useMutation({
+    mutationFn: (path: string) => photoService.retryCleanup(path),
+    onSuccess: async (result, path) => {
+      setCleanupPaths((current) => current.filter((item) => item !== path));
+      await refresh();
       toast.success(
-        result === "referenced"
-          ? "A foto já está salva no veículo."
-          : "Limpeza do arquivo concluída.",
+        result === "referenced" ? "A foto já está salva na galeria." : "Arquivo pendente removido.",
       );
     },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "A limpeza ainda não foi concluída.");
-    },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "A verificação está pendente."),
   });
 
-  function selectPhoto(file: File | undefined) {
-    if (file) uploadMutation.mutate(file);
-    if (inputRef.current) inputRef.current.value = "";
-  }
+  const isBusy = uploadMutation.isPending || removeMutation.isPending || cleanupMutation.isPending;
+  const pendingPaths = [
+    ...new Set([...cleanupPaths, ...photos.flatMap((photo) => photo.pending_cleanup_paths)]),
+  ];
 
-  const photo = photoQuery.data;
-  const isBusy = uploadMutation.isPending || removeMutation.isPending;
+  function selectFiles(files: FileList | null, replacing?: VehiclePhoto | null) {
+    if (!files?.length) return;
+    const selected = Array.from(files);
+    if (!replacing && selected.length > remaining) {
+      toast.error(
+        `A galeria tem ${remaining} ${remaining === 1 ? "vaga" : "vagas"}. Selecione no máximo essa quantidade.`,
+      );
+      return;
+    }
+    const attempts = selected.map(
+      (file): VehiclePhotoUpload => ({
+        id: crypto.randomUUID(),
+        file,
+        replaces: replacing
+          ? { photoId: replacing.id, storagePath: replacing.storage_path }
+          : undefined,
+      }),
+    );
+    setJobs((current) => [
+      ...current.filter((job) => job.status === "failed"),
+      ...attempts.map((attempt): UploadJob => ({ attempt, status: "queued" })),
+    ]);
+    uploadMutation.mutate(attempts);
+  }
 
   return (
     <Card className="lg:col-span-2 overflow-hidden">
-      <div className="relative aspect-[16/9] bg-gradient-to-br from-muted to-muted/40">
-        {photo?.signed_url ? (
+      <div className="relative aspect-[16/9] bg-muted/40">
+        {activePhoto?.signed_url && activePhoto.signed_url !== failedUrl ? (
           <img
-            className="h-full w-full object-cover"
-            src={photo.signed_url}
+            className="h-full w-full object-contain"
+            src={activePhoto.signed_url}
             alt={alt}
-            onError={() =>
-              void queryClient.invalidateQueries({ queryKey: vehiclePhotoKeys.current(vehicleId) })
-            }
+            onError={() => setFailedUrl(activePhoto.signed_url)}
           />
-        ) : photoQuery.isLoading ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
-            Carregando foto...
-          </div>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-            <ImagePlus className="h-16 w-16" aria-hidden="true" />
-            <span className="text-sm">Nenhuma foto privada cadastrada</span>
-          </div>
-        )}
-      </div>
-
-      <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-        <div className="min-w-0 text-sm">
-          <div className="font-medium">Foto do veículo</div>
-          <div className="text-muted-foreground">
-            {photoQuery.isError
-              ? "Não foi possível carregar a foto. Atualize para tentar novamente."
-              : "Imagem privada, visível para usuários autenticados."}
-          </div>
-        </div>
-
-        {canManage && (
-          <div className="flex flex-wrap gap-2">
-            <input
-              ref={inputRef}
-              className="hidden"
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              aria-label="Escolher foto do veículo"
-              disabled={isBusy}
-              onChange={(event) => selectPhoto(event.currentTarget.files?.[0])}
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={isBusy}
-              onClick={() => inputRef.current?.click()}
-            >
-              {isBusy ? (
-                <LoaderCircle className="animate-spin" />
-              ) : photo ? (
-                <Upload />
-              ) : (
-                <ImagePlus />
-              )}
-              {uploadMutation.isPending
-                ? "Otimizando e enviando..."
-                : photo
-                  ? "Substituir foto"
-                  : "Adicionar foto"}
-            </Button>
-            {photo && (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={isBusy}
-                onClick={() => setConfirmRemove(true)}
-              >
-                <Trash2 /> Remover
+            {galleryQuery.isLoading ? (
+              <LoaderCircle className="h-8 w-8 animate-spin" />
+            ) : (
+              <ImagePlus className="h-16 w-16" aria-hidden="true" />
+            )}
+            <span className="text-sm">
+              {galleryQuery.isLoading
+                ? "Carregando fotos..."
+                : activePhoto
+                  ? "Visualização indisponível"
+                  : "Nenhuma foto cadastrada"}
+            </span>
+            {(activePhoto || galleryQuery.isError) && (
+              <Button variant="outline" size="sm" onClick={() => void galleryQuery.refetch()}>
+                Recarregar fotos
               </Button>
             )}
           </div>
         )}
+        {activePhoto?.deletion_pending && (
+          <div className="absolute inset-x-0 bottom-0 bg-background/90 px-4 py-2 text-sm">
+            Remoção pendente. Tente novamente para liberar esta vaga.
+          </div>
+        )}
+      </div>
 
-        {canManage && (orphanedPath || photo?.pending_cleanup_paths.length) ? (
-          <div className="flex w-full items-center justify-between gap-3 rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs">
-            <span className="text-muted-foreground">
-              Uma cópia antiga ainda precisa ser limpa do armazenamento.
-            </span>
+      <CardContent className="space-y-4 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="font-medium">
+              Fotos do veículo{" "}
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                {photos.length}/{MAX_VEHICLE_PHOTOS}
+              </span>
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {galleryQuery.isError
+                ? "Não foi possível carregar a galeria. Tente novamente."
+                : `${remaining} ${remaining === 1 ? "vaga disponível" : "vagas disponíveis"} · JPEG, PNG ou WebP`}
+            </div>
+          </div>
+          {canManage && (
+            <>
+              <input
+                ref={inputRef}
+                type="file"
+                className="hidden"
+                multiple
+                accept="image/jpeg,image/png,image/webp"
+                aria-label="Adicionar fotos do veículo"
+                disabled={isBusy}
+                onChange={(event) => {
+                  selectFiles(event.currentTarget.files);
+                  event.currentTarget.value = "";
+                }}
+              />
+              <input
+                ref={replacementRef}
+                type="file"
+                className="hidden"
+                accept="image/jpeg,image/png,image/webp"
+                aria-label="Substituir foto selecionada"
+                disabled={isBusy}
+                onChange={(event) => {
+                  selectFiles(event.currentTarget.files, replacementTarget);
+                  event.currentTarget.value = "";
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isBusy || !remaining || galleryQuery.isLoading || galleryQuery.isError}
+                onClick={() => inputRef.current?.click()}
+              >
+                <ImagePlus /> Adicionar fotos
+              </Button>
+            </>
+          )}
+        </div>
+
+        {photos.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto pb-1" aria-label="Fotos da galeria">
+            {photos.map((photo, index) => (
+              <button
+                type="button"
+                key={photo.id}
+                aria-label={`Ver foto ${index + 1}${photo.deletion_pending ? ", remoção pendente" : ""}`}
+                aria-pressed={photo.id === activePhoto?.id}
+                onClick={() => setSelectedId(photo.id)}
+                className={`relative h-20 w-28 shrink-0 overflow-hidden rounded-md border-2 bg-muted ${photo.id === activePhoto?.id ? "border-primary" : "border-transparent"}`}
+              >
+                {photo.signed_url ? (
+                  <img src={photo.signed_url} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <ImagePlus className="mx-auto h-6 w-6 text-muted-foreground" />
+                )}
+                {photo.deletion_pending && (
+                  <span className="absolute inset-x-0 bottom-0 bg-background/90 text-xs">
+                    Removendo
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {canManage && activePhoto && (
+          <div className="flex flex-wrap justify-end gap-2">
+            {!activePhoto.deletion_pending && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isBusy}
+                onClick={() => {
+                  setReplacementTarget(activePhoto);
+                  replacementRef.current?.click();
+                }}
+              >
+                <Upload /> Substituir selecionada
+              </Button>
+            )}
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              disabled={retryCleanupMutation.isPending}
+              disabled={isBusy}
               onClick={() =>
-                retryCleanupMutation.mutate(orphanedPath ?? photo?.pending_cleanup_paths[0] ?? "")
+                activePhoto.deletion_pending
+                  ? removeMutation.mutate(activePhoto)
+                  : setConfirmRemove(activePhoto)
               }
             >
-              {retryCleanupMutation.isPending ? (
-                <LoaderCircle className="animate-spin" />
-              ) : (
-                <RotateCcw />
-              )}
-              Tentar limpeza novamente
+              {activePhoto.deletion_pending ? <RotateCcw /> : <Trash2 />}
+              {activePhoto.deletion_pending ? "Tentar remoção" : "Remover selecionada"}
             </Button>
           </div>
-        ) : null}
-      </CardContent>
+        )}
 
+        {canManage && jobs.length > 0 && (
+          <div className="space-y-2 rounded-md border p-3" aria-live="polite">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium">Resultado dos envios</span>
+              <Button variant="ghost" size="sm" disabled={isBusy} onClick={() => setJobs([])}>
+                Limpar resultados
+              </Button>
+            </div>
+            {jobs.map((job) => (
+              <div
+                key={job.attempt.id}
+                className="flex items-start justify-between gap-3 border-t py-2 text-sm"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{job.attempt.file.name}</div>
+                  <div
+                    className={
+                      job.status === "failed" ? "text-destructive" : "text-muted-foreground"
+                    }
+                  >
+                    {job.status === "queued"
+                      ? "Aguardando"
+                      : job.status === "uploading"
+                        ? "Otimizando e enviando..."
+                        : job.status === "saved"
+                          ? "Salva"
+                          : job.error}
+                  </div>
+                </div>
+                {job.status === "saved" ? (
+                  <Check className="h-4 w-4 shrink-0 text-success" />
+                ) : job.status === "uploading" ? (
+                  <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" />
+                ) : job.status === "failed" ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isBusy}
+                    onClick={() => uploadMutation.mutate([job.attempt])}
+                  >
+                    <RotateCcw /> Tentar novamente
+                  </Button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {canManage && pendingPaths.length > 0 && (
+          <div className="space-y-2 rounded-md border border-warning/30 bg-warning/5 p-3 text-sm">
+            <p>Há arquivos de tentativas anteriores aguardando verificação.</p>
+            {pendingPaths.map((path, index) => (
+              <Button
+                key={path}
+                variant="outline"
+                size="sm"
+                disabled={isBusy}
+                onClick={() => cleanupMutation.mutate(path)}
+              >
+                <RotateCcw /> Verificar arquivo pendente {index + 1}
+              </Button>
+            ))}
+          </div>
+        )}
+      </CardContent>
       <ConfirmActionDialog
-        open={confirmRemove}
-        onOpenChange={setConfirmRemove}
+        open={!!confirmRemove}
+        onOpenChange={(open) => {
+          if (!open) setConfirmRemove(null);
+        }}
         title="Remover foto do veículo?"
-        description="A imagem será removida do armazenamento privado. Esta ação não pode ser desfeita."
+        description="A foto será removida da galeria. Esta ação não pode ser desfeita."
         confirmLabel={removeMutation.isPending ? "Removendo..." : "Remover foto"}
         confirmDisabled={removeMutation.isPending}
-        onConfirm={() => removeMutation.mutate()}
+        onConfirm={() => {
+          if (confirmRemove) removeMutation.mutate(confirmRemove);
+        }}
       />
     </Card>
   );

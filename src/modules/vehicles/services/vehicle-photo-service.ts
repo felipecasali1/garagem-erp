@@ -1,7 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { MAX_VEHICLE_PHOTO_BYTES, optimizeVehiclePhoto } from "./vehicle-photo-image.js";
+import {
+  MAX_VEHICLE_PHOTO_BYTES,
+  VEHICLE_PHOTO_INPUT_TYPES,
+  optimizeVehiclePhoto,
+} from "./vehicle-photo-image.js";
 
 export const VEHICLE_PHOTO_BUCKET = "vehicle-photos";
+export const MAX_VEHICLE_PHOTOS = 15;
 const SIGNED_URL_SECONDS = 60 * 60;
 
 type VehiclePhotoRow = {
@@ -10,19 +15,34 @@ type VehiclePhotoRow = {
   storage_path: string;
   content_type: "image/jpeg";
   file_size_bytes: number;
+  content_digest: string | null;
+  deletion_pending: boolean;
   pending_cleanup_paths: string[];
   created_at: string;
   updated_at: string;
 };
 
-export type VehiclePhoto = Omit<VehiclePhotoRow, "pending_cleanup_paths"> & {
-  signed_url: string;
-  pending_cleanup_paths: string[];
+export type VehiclePhoto = VehiclePhotoRow & {
+  signed_url: string | null;
+  preview_error: string | null;
 };
+
+export type VehiclePhotoUpload = {
+  id: string;
+  file: File;
+  replaces?: { photoId: string; storagePath: string };
+};
+
+export type VehiclePhotoUploadResult =
+  | { id: string; status: "saved"; photo: VehiclePhoto }
+  | { id: string; status: "failed"; error: string; cleanupPath?: string };
+
+export type VehiclePhotoUploadProgress =
+  | VehiclePhotoUploadResult
+  | { id: string; status: "uploading" };
 
 export class VehiclePhotoServiceError extends Error {
   cleanupPath?: string;
-
   constructor(message: string, options: { cleanupPath?: string } = {}) {
     super(message);
     this.name = "VehiclePhotoServiceError";
@@ -30,13 +50,9 @@ export class VehiclePhotoServiceError extends Error {
   }
 }
 
-type VehiclePhotoServiceOptions = {
-  optimize?: (file: File) => Promise<Blob>;
-  createObjectId?: () => string;
-};
-
+type VehiclePhotoServiceOptions = { optimize?: (file: File) => Promise<Blob> };
 const photoColumns =
-  "id, vehicle_id, storage_path, content_type, file_size_bytes, pending_cleanup_paths, created_at, updated_at";
+  "id, vehicle_id, storage_path, content_type, file_size_bytes, content_digest, deletion_pending, pending_cleanup_paths, created_at, updated_at";
 
 function requireVehicleId(vehicleId: number) {
   if (!Number.isSafeInteger(vehicleId) || vehicleId < 1) {
@@ -45,7 +61,9 @@ function requireVehicleId(vehicleId: number) {
 }
 
 function errorText(error: unknown) {
-  return error instanceof Error ? error.message : "erro desconhecido";
+  return error && typeof error === "object" && "message" in error
+    ? String(error.message)
+    : "erro desconhecido";
 }
 
 function isMissingObject(error: unknown) {
@@ -54,65 +72,73 @@ function isMissingObject(error: unknown) {
   return value.status === 404 || value.statusCode === "404" || value.error === "not_found";
 }
 
+async function imageDigest(blob: Blob) {
+  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
+
+function rpcPhoto(data: unknown): VehiclePhotoRow | null {
+  return (Array.isArray(data) ? data[0] : data) as VehiclePhotoRow | null;
+}
+
 export function createVehiclePhotoService(
   client: SupabaseClient,
   options: VehiclePhotoServiceOptions = {},
 ) {
   const optimize = options.optimize ?? optimizeVehiclePhoto;
-  const createObjectId = options.createObjectId ?? (() => crypto.randomUUID());
   const storage = client.storage.from(VEHICLE_PHOTO_BUCKET);
 
-  async function findCurrentPhoto(vehicleId: number): Promise<VehiclePhotoRow | null> {
+  async function readRows(vehicleId: number): Promise<VehiclePhotoRow[]> {
     const { data, error } = await client
       .from("vehicle_photos")
       .select(photoColumns)
       .eq("vehicle_id", vehicleId)
-      .maybeSingle();
-    if (error) {
-      throw new VehiclePhotoServiceError(
-        `Não foi possível carregar a foto do veículo: ${error.message}`,
-      );
-    }
-    return (data as VehiclePhotoRow | null) ?? null;
+      .order("created_at")
+      .order("id");
+    if (error)
+      throw new VehiclePhotoServiceError(`Não foi possível carregar a galeria: ${error.message}`);
+    return (data ?? []) as VehiclePhotoRow[];
   }
 
-  async function signedPhoto(row: VehiclePhotoRow): Promise<VehiclePhoto> {
+  async function findPhoto(vehicleId: number, photoId: string): Promise<VehiclePhotoRow | null> {
+    const { data, error } = await client
+      .from("vehicle_photos")
+      .select(photoColumns)
+      .eq("vehicle_id", vehicleId)
+      .eq("id", photoId)
+      .maybeSingle();
+    if (error)
+      throw new VehiclePhotoServiceError(`Não foi possível confirmar a foto: ${error.message}`);
+    return data as VehiclePhotoRow | null;
+  }
+
+  async function withSignedUrl(row: VehiclePhotoRow): Promise<VehiclePhoto> {
     const { data, error } = await storage.createSignedUrl(row.storage_path, SIGNED_URL_SECONDS);
-    if (error || !data?.signedUrl) {
-      throw new VehiclePhotoServiceError(
-        `A foto está salva, mas não foi possível gerar uma visualização: ${error?.message ?? "URL indisponível"}. Atualize a tela para tentar novamente.`,
-      );
-    }
-    return { ...row, signed_url: data.signedUrl };
+    return {
+      ...row,
+      signed_url: data?.signedUrl ?? null,
+      preview_error: error ? `Não foi possível visualizar a foto: ${error.message}` : null,
+    };
+  }
+
+  async function listVehiclePhotos(vehicleId: number) {
+    requireVehicleId(vehicleId);
+    return Promise.all((await readRows(vehicleId)).map(withSignedUrl));
   }
 
   async function removeObjects(paths: string[]) {
-    if (!paths.length) return null;
-    const { error: removeError } = await storage.remove(paths);
-    const stillPresent: string[] = [];
+    if (!paths.length) return;
+    const { error: removalError } = await storage.remove(paths);
     for (const path of paths) {
       const { data, error } = await storage.download(path);
-      if (data) {
-        stillPresent.push(path);
-      } else if (error && !isMissingObject(error)) {
-        return error;
+      if (data || (error && !isMissingObject(error))) {
+        throw new VehiclePhotoServiceError(
+          `O arquivo ainda não foi removido: ${errorText(error ?? removalError ?? new Error("armazenamento indisponível"))}`,
+        );
       }
     }
-    if (stillPresent.length) {
-      const source = removeError ?? new Error("O armazenamento ainda retorna o arquivo.");
-      return Object.assign(
-        new Error(`${source.message} Os arquivos não removidos: ${stillPresent.join(", ")}`),
-        { stillPresentPaths: stillPresent },
-      );
-    }
-    return null;
-  }
-
-  async function getVehiclePhoto(vehicleId: number) {
-    requireVehicleId(vehicleId);
-    const row = await findCurrentPhoto(vehicleId);
-    if (!row) return null;
-    return signedPhoto(row);
   }
 
   async function retryCleanup(path: string) {
@@ -120,57 +146,50 @@ export function createVehiclePhotoService(
       throw new VehiclePhotoServiceError("O caminho do arquivo pendente é inválido.");
     }
     const vehicleId = Number(path.split("/")[1]);
-    if (!Number.isSafeInteger(vehicleId)) {
-      throw new VehiclePhotoServiceError("O caminho do arquivo pendente é inválido.");
-    }
-
-    let current: VehiclePhotoRow | null;
+    requireVehicleId(vehicleId);
     try {
-      current = await findCurrentPhoto(vehicleId);
-    } catch {
+      const rows = await readRows(vehicleId);
+      if (rows.some((photo) => photo.storage_path === path)) return "referenced" as const;
+      await removeObjects([path]);
+      const { error } = await client.rpc("clear_vehicle_photo_cleanup", {
+        p_vehicle_id: vehicleId,
+        p_storage_path: path,
+      });
+      if (error) throw error;
+      return "removed" as const;
+    } catch (error) {
       throw new VehiclePhotoServiceError(
-        "Não foi possível confirmar se este arquivo já está associado ao veículo. Verifique novamente quando a conexão estiver estável; o arquivo foi mantido.",
+        `A verificação ou limpeza do arquivo ainda está pendente: ${errorText(error)}. Tente novamente.`,
         { cleanupPath: path },
       );
     }
-    if (current?.storage_path === path) return "referenced" as const;
-
-    const error = await removeObjects([path]);
-    if (error) {
-      throw new VehiclePhotoServiceError(
-        `A limpeza ainda não foi concluída. Tente novamente quando a conexão estiver estável: ${error.message}`,
-        { cleanupPath: path },
-      );
-    }
-
-    if (current?.pending_cleanup_paths.includes(path)) {
-      const { error: updateError } = await client
-        .from("vehicle_photos")
-        .update({
-          pending_cleanup_paths: current.pending_cleanup_paths.filter((item) => item !== path),
-        })
-        .eq("id", current.id)
-        .eq("storage_path", current.storage_path);
-      if (updateError) {
-        throw new VehiclePhotoServiceError(
-          `O arquivo foi removido, mas não foi possível atualizar a fila de limpeza: ${updateError.message}. Tente novamente.`,
-          { cleanupPath: path },
-        );
-      }
-    }
-    return "removed" as const;
   }
 
-  async function replaceVehiclePhoto(vehicleId: number, file: File) {
-    requireVehicleId(vehicleId);
-    const current = await findCurrentPhoto(vehicleId);
-    let optimized: Blob;
+  async function failedSave(message: string, path: string): Promise<never> {
     try {
-      optimized = await optimize(file);
-    } catch (error) {
-      throw new VehiclePhotoServiceError(errorText(error));
+      await retryCleanup(path);
+    } catch {
+      throw new VehiclePhotoServiceError(
+        `${message} O arquivo ainda precisa ser verificado; tente novamente.`,
+        { cleanupPath: path },
+      );
     }
+    throw new VehiclePhotoServiceError(`${message} As fotos já salvas foram mantidas.`);
+  }
 
+  async function uploadPhoto(vehicleId: number, attempt: VehiclePhotoUpload) {
+    if (!/^[0-9a-f-]{36}$/i.test(attempt.id))
+      throw new VehiclePhotoServiceError("A identificação da tentativa de envio é inválida.");
+    if (
+      !VEHICLE_PHOTO_INPUT_TYPES.includes(
+        attempt.file.type as (typeof VEHICLE_PHOTO_INPUT_TYPES)[number],
+      )
+    ) {
+      throw new VehiclePhotoServiceError(
+        "Envie uma imagem JPEG, PNG ou WebP. Vídeos e outros arquivos não são aceitos.",
+      );
+    }
+    const optimized = await optimize(attempt.file);
     if (
       optimized.type !== "image/jpeg" ||
       optimized.size < 1 ||
@@ -178,185 +197,141 @@ export function createVehiclePhotoService(
     ) {
       throw new VehiclePhotoServiceError("A foto otimizada precisa ser JPEG e ter no máximo 5 MB.");
     }
-
-    const newPath = `vehicles/${vehicleId}/${createObjectId()}.jpg`;
-    const { error: uploadError } = await storage.upload(newPath, optimized, {
+    const digest = await imageDigest(optimized);
+    const photoId = attempt.replaces?.photoId ?? attempt.id;
+    const path = `vehicles/${vehicleId}/${attempt.id}.jpg`;
+    const current = await findPhoto(vehicleId, photoId);
+    if (current?.deletion_pending)
+      throw new VehiclePhotoServiceError(
+        "Esta foto está em remoção. Conclua a remoção antes de enviar outra.",
+      );
+    if (current?.storage_path === path) {
+      if (current.content_digest !== digest)
+        throw new VehiclePhotoServiceError(
+          "Esta tentativa já foi usada para outra imagem. Selecione a nova foto novamente.",
+        );
+      return withSignedUrl(current);
+    }
+    if (attempt.replaces && current?.storage_path !== attempt.replaces.storagePath) {
+      throw new VehiclePhotoServiceError(
+        "Esta foto mudou ou foi removida em outra sessão. Atualize a galeria.",
+      );
+    }
+    const { error: uploadError } = await storage.upload(path, optimized, {
       contentType: "image/jpeg",
       cacheControl: "3600",
       upsert: false,
     });
     if (uploadError) {
-      const cleanupError = await removeObjects([newPath]);
-      throw new VehiclePhotoServiceError(
-        `Não foi possível enviar a foto: ${uploadError.message}. ${cleanupError ? "O arquivo enviado ainda precisa ser limpo." : "A foto já salva foi mantida."}`,
-        cleanupError ? { cleanupPath: newPath } : {},
-      );
-    }
-
-    let signedUrl: string;
-    try {
-      const { data, error } = await storage.createSignedUrl(newPath, SIGNED_URL_SECONDS);
-      if (error || !data?.signedUrl) {
-        throw new Error(error?.message ?? "URL indisponível");
-      }
-      signedUrl = data.signedUrl;
-    } catch (error) {
-      const cleanupError = await removeObjects([newPath]);
-      throw new VehiclePhotoServiceError(
-        `Não foi possível preparar a visualização da foto: ${errorText(error)}. ${cleanupError ? "O arquivo enviado ainda precisa ser limpo." : "A foto anterior foi mantida."}`,
-        cleanupError ? { cleanupPath: newPath } : {},
-      );
-    }
-
-    const pendingPaths = current
-      ? [...new Set([...(current.pending_cleanup_paths ?? []), current.storage_path])]
-      : [];
-    let saved: VehiclePhotoRow | null = null;
-    let writeError: unknown = null;
-    try {
-      const write = current
-        ? await client
-            .from("vehicle_photos")
-            .update({
-              storage_path: newPath,
-              content_type: "image/jpeg",
-              file_size_bytes: optimized.size,
-              pending_cleanup_paths: pendingPaths,
-            })
-            .eq("id", current.id)
-            .eq("storage_path", current.storage_path)
-            .select(photoColumns)
-            .maybeSingle()
-        : await client
-            .from("vehicle_photos")
-            .insert({
-              vehicle_id: vehicleId,
-              storage_path: newPath,
-              content_type: "image/jpeg",
-              file_size_bytes: optimized.size,
-            })
-            .select(photoColumns)
-            .maybeSingle();
-      saved = (write.data as VehiclePhotoRow | null) ?? null;
-      writeError = write.error;
-    } catch (error) {
-      writeError = error;
-    }
-
-    if (writeError || !saved) {
-      let latest: VehiclePhotoRow | null;
-      try {
-        latest = await findCurrentPhoto(vehicleId);
-      } catch {
-        throw new VehiclePhotoServiceError(
-          "Não foi possível confirmar se a foto foi salva. O arquivo foi mantido para evitar quebrar um registro; verifique novamente quando a conexão estiver estável.",
-          { cleanupPath: newPath },
-        );
-      }
-      if (latest?.storage_path === newPath) {
-        saved = latest;
+      const { data: uploaded } = await storage.download(path);
+      if (uploaded) {
+        if ((await imageDigest(uploaded)) !== digest) {
+          throw new VehiclePhotoServiceError(
+            "Esta tentativa já possui outro arquivo. Selecione a foto novamente.",
+          );
+        }
       } else {
-        const cleanupError = await removeObjects([newPath]);
-        const conflict =
-          (writeError as { code?: string } | null)?.code === "23505" || (!writeError && !saved);
-        throw new VehiclePhotoServiceError(
-          `${conflict ? "Outra sessão alterou a foto deste veículo." : `Não foi possível salvar os dados da foto: ${errorText(writeError)}.`} ${cleanupError ? "O arquivo enviado ainda precisa ser limpo." : "A foto anterior foi mantida."} Atualize a tela e tente novamente.`,
-          cleanupError ? { cleanupPath: newPath } : {},
-        );
+        return failedSave(`Não foi possível enviar a foto: ${uploadError.message}.`, path);
       }
     }
 
-    let cleanupPaths = saved.pending_cleanup_paths ?? [];
-    const cleanupError = await removeObjects(cleanupPaths);
-    if (!cleanupError && cleanupPaths.length) {
-      const { error } = await client
-        .from("vehicle_photos")
-        .update({ pending_cleanup_paths: [] })
-        .eq("id", saved.id)
-        .eq("storage_path", newPath);
-      if (!error) cleanupPaths = [];
+    let saved: VehiclePhotoRow | null = null;
+    let saveError: unknown;
+    try {
+      const { data, error } = await client.rpc("save_vehicle_photo", {
+        p_photo_id: photoId,
+        p_vehicle_id: vehicleId,
+        p_storage_path: path,
+        p_file_size_bytes: optimized.size,
+        p_content_digest: digest,
+        p_expected_storage_path: attempt.replaces?.storagePath ?? null,
+      });
+      saved = rpcPhoto(data);
+      saveError = error;
+    } catch (error) {
+      saveError = error;
     }
-
-    return { ...saved, signed_url: signedUrl, pending_cleanup_paths: cleanupPaths };
-  }
-
-  async function removeVehiclePhoto(vehicleId: number) {
-    requireVehicleId(vehicleId);
-    const current = await findCurrentPhoto(vehicleId);
-    if (!current) return;
-
-    const { data: previousFile, error: downloadError } = await storage.download(
-      current.storage_path,
-    );
-    if (downloadError || !previousFile) {
-      throw new VehiclePhotoServiceError(
-        `Não foi possível preservar a foto antes da remoção: ${downloadError?.message ?? "arquivo indisponível"}. Nenhum dado foi alterado.`,
-      );
-    }
-
-    const removalPaths = [
-      ...new Set([current.storage_path, ...(current.pending_cleanup_paths ?? [])]),
-    ];
-    const removal = await removeObjects(removalPaths);
-    if (removal) {
-      const stillPresentPaths = (removal as Error & { stillPresentPaths?: string[] })
-        .stillPresentPaths;
-      const currentStillPresent = stillPresentPaths?.includes(current.storage_path) ?? false;
-      const restoreError = currentStillPresent
-        ? null
-        : (
-            await storage.upload(current.storage_path, previousFile, {
-              contentType: current.content_type,
-              cacheControl: "3600",
-              upsert: true,
-            })
-          ).error;
-      throw new VehiclePhotoServiceError(
-        `Não foi possível remover a foto do armazenamento: ${removal.message}.${restoreError ? ` A restauração também falhou: ${restoreError.message}.` : currentStillPresent ? " A imagem atual continua disponível." : " A imagem atual foi restaurada."} Atualize a tela e tente novamente.`,
-      );
-    }
-
-    const { data: deleted, error: deleteError } = await client
-      .from("vehicle_photos")
-      .delete()
-      .eq("id", current.id)
-      .eq("storage_path", current.storage_path)
-      .select("id")
-      .maybeSingle();
-
-    if (deleteError || !deleted) {
+    if (saveError || !saved) {
       let latest: VehiclePhotoRow | null;
       try {
-        latest = await findCurrentPhoto(vehicleId);
+        latest = await findPhoto(vehicleId, photoId);
       } catch {
-        latest = current;
-      }
-      if (!latest) return;
-      if (latest.storage_path !== current.storage_path) {
         throw new VehiclePhotoServiceError(
-          "A foto mudou em outra sessão. Atualize a tela para ver a versão atual.",
+          "Não foi possível confirmar se a foto foi salva. Verifique o arquivo ou repita esta tentativa quando a conexão voltar.",
+          { cleanupPath: path },
         );
       }
-      const { error: restoreError } = await storage.upload(current.storage_path, previousFile, {
-        contentType: current.content_type,
-        cacheControl: "3600",
-        upsert: true,
-      });
-      if (restoreError) {
-        throw new VehiclePhotoServiceError(
-          `Não foi possível concluir a remoção nem restaurar o arquivo. O registro ainda aponta para ${current.storage_path}; tente novamente ou peça ajuda ao administrador.`,
-        );
+      if (latest?.storage_path === path && latest.content_digest === digest) saved = latest;
+      else return failedSave(`Não foi possível salvar a foto: ${errorText(saveError)}.`, path);
+    }
+    const pending = [];
+    for (const oldPath of saved.pending_cleanup_paths) {
+      try {
+        await retryCleanup(oldPath);
+      } catch {
+        pending.push(oldPath);
       }
+    }
+    return withSignedUrl({ ...saved, pending_cleanup_paths: pending });
+  }
+
+  async function uploadVehiclePhotos(
+    vehicleId: number,
+    attempts: VehiclePhotoUpload[],
+    onProgress?: (progress: VehiclePhotoUploadProgress) => void,
+  ): Promise<VehiclePhotoUploadResult[]> {
+    requireVehicleId(vehicleId);
+    const results: VehiclePhotoUploadResult[] = [];
+    for (const attempt of attempts) {
+      onProgress?.({ id: attempt.id, status: "uploading" });
+      let result: VehiclePhotoUploadResult;
+      try {
+        result = { id: attempt.id, status: "saved", photo: await uploadPhoto(vehicleId, attempt) };
+      } catch (error) {
+        result = {
+          id: attempt.id,
+          status: "failed",
+          error: errorText(error),
+          cleanupPath: error instanceof VehiclePhotoServiceError ? error.cleanupPath : undefined,
+        };
+      }
+      results.push(result);
+      onProgress?.(result);
+    }
+    return results;
+  }
+
+  async function removeVehiclePhoto(vehicleId: number, photoId: string) {
+    requireVehicleId(vehicleId);
+    const current = await findPhoto(vehicleId, photoId);
+    if (!current) return;
+    const { data, error } = await client.rpc("begin_vehicle_photo_removal", {
+      p_vehicle_id: vehicleId,
+      p_photo_id: photoId,
+      p_expected_storage_path: current.storage_path,
+    });
+    if (error)
       throw new VehiclePhotoServiceError(
-        `Não foi possível remover os dados da foto: ${deleteError?.message ?? "a foto mudou em outra sessão"}. A imagem anterior foi restaurada. Atualize a tela e tente novamente.`,
+        `Não foi possível iniciar a remoção: ${error.message}. Atualize a galeria.`,
+      );
+    const removing = rpcPhoto(data);
+    if (!removing?.id) return;
+    try {
+      await removeObjects([...new Set([removing.storage_path, ...removing.pending_cleanup_paths])]);
+      const { error: finishError } = await client.rpc("finish_vehicle_photo_removal", {
+        p_vehicle_id: vehicleId,
+        p_photo_id: photoId,
+      });
+      if (finishError) {
+        if (!(await findPhoto(vehicleId, photoId))) return;
+        throw finishError;
+      }
+    } catch (error) {
+      throw new VehiclePhotoServiceError(
+        `A remoção está pendente: ${errorText(error)}. Use Tentar remoção para continuar.`,
       );
     }
   }
 
-  return {
-    getVehiclePhoto,
-    replaceVehiclePhoto,
-    removeVehiclePhoto,
-    retryCleanup,
-  };
+  return { listVehiclePhotos, uploadVehiclePhotos, removeVehiclePhoto, retryCleanup };
 }

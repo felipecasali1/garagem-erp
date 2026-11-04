@@ -49,6 +49,20 @@ O teste inicia um projeto Compose descartável, aplica as migrations e executa c
 
 Este recorte inclui Postgres, Auth, PostgREST, Storage, Studio, gateway e aplicação. A galeria usa um bucket privado e o backend de arquivos persiste no volume `garagem-erp-storage`; as imagens são otimizadas no navegador antes do envio. Realtime, Edge Functions, pooler, imgproxy e observabilidade não são iniciados. As imagens de Supabase estão fixadas na versão da configuração self-hosted `v0.8.3` (commit `bc27d2661edd09a5d0b8d76ce33da6d4071a756e`). Os pequenos arquivos de bootstrap do banco e do gateway são adaptações da configuração oficial Supabase, licenciada sob Apache-2.0. Um backup futuro precisa copiar o volume de Storage junto com o banco para manter registros e arquivos consistentes.
 
+## Galeria privada de veículos
+
+No detalhe do veículo, os papéis `admin`, `manager` e `seller` podem enviar várias fotos, selecionar uma imagem para visualização e substituir ou remover uma foto. A galeria acompanha o veículo, inclusive quando ele retorna ao estoque; não é criado um álbum por compra. O limite de 15 fotos é aplicado pelo PostgreSQL com bloqueio do veículo, inclusive em envios simultâneos. A escolha persistente de uma foto de prévia será tratada no ticket #31.
+
+Cada arquivo tem seu próprio resultado e sua própria tentativa de envio. **Tentar novamente** reutiliza essa identificação para evitar duplicar fotos já confirmadas. Os formatos de entrada são JPEG, PNG e WebP; o navegador gera apenas um JPEG otimizado com até 1920 px no lado maior e 5 MB, sem guardar o original.
+
+Se a remoção for interrompida, a foto aparece como **Remoção pendente** até **Tentar remoção** concluir a exclusão dos arquivos e do registro. Essa vaga continua ocupada enquanto a remoção não termina. Arquivos de envios ou substituições anteriores que ainda precisem de limpeza têm uma ação de verificação; ela confirma que o arquivo não está em uso antes de removê-lo.
+
+```bash
+npm run test:integration:vehicle-photos
+```
+
+O teste usa um banco e um volume de Storage descartáveis. Ele cobre os resultados por arquivo, repetição segura, concorrência na última vaga, substituição, remoção interrompida, autorização e persistência após reiniciar o Storage. As credenciais Cloud e os volumes da instalação habitual não são utilizados.
+
 ## Diagnóstico
 
 - Se o preflight não acessar o daemon, inicie o Docker e confirme que seu usuário pode executar `docker info`.
