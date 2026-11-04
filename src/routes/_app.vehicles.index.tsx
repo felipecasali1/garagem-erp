@@ -1,3 +1,5 @@
+import { useVehiclePhotoPreviews } from "@/modules/vehicles/hooks/use-vehicle-photo-previews";
+import { VehiclePhotoThumbnail } from "@/modules/vehicles/components/vehicle-photo-thumbnail";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -12,7 +14,6 @@ import {
   Search,
   MoreHorizontal,
   Pencil,
-  Car,
 } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -114,6 +115,9 @@ function VehiclesPage() {
     queryFn: countVehiclesByStatus,
   });
   const vehicles = vehiclesPage?.data ?? [];
+  const { data: photoPreviews = {} } = useVehiclePhotoPreviews(
+    vehicles.map((vehicle) => vehicle.id),
+  );
   const total = vehiclesPage?.total ?? 0;
   const totalPages = getTotalPages(total, vehiclesPage?.pageSize ?? DEFAULT_PAGE_SIZE);
   const displayPage = Math.min(page, totalPages);
@@ -277,7 +281,7 @@ function VehiclesPage() {
               className="overflow-hidden hover:shadow-md transition-shadow group cursor-pointer"
             >
               <div className="relative aspect-[16/10] bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
-                <div className="absolute top-3 left-3">
+                <div className="absolute top-3 left-3 z-10">
                   <StatusBadge kind="vehicle" value={v.status} />
                 </div>
                 <button
@@ -291,7 +295,7 @@ function VehiclesPage() {
                     });
                   }}
                   disabled={!v.published && v.status !== "available"}
-                  className="absolute top-3 right-3 h-8 w-8 rounded-full bg-background/80 backdrop-blur flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
+                  className="absolute top-3 right-3 z-10 h-8 w-8 rounded-full bg-background/80 backdrop-blur flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
                   title={
                     v.published
                       ? "Despublicar"
@@ -306,9 +310,10 @@ function VehiclesPage() {
                     <EyeOff className="h-4 w-4 text-muted-foreground" />
                   )}
                 </button>
-                <Car
-                  className="h-16 w-16 text-neutral-400 dark:text-neutral-600"
-                  aria-hidden="true"
+                <VehiclePhotoThumbnail
+                  preview={photoPreviews[v.id]}
+                  alt={`${v.brand} ${v.model} · ${v.plate}`}
+                  className="absolute inset-0"
                 />
               </div>
               <CardContent className="p-4 space-y-3">
@@ -380,10 +385,19 @@ function VehiclesPage() {
                       <span className="plate-chip">{v.plate}</span>
                     </TableCell>
                     <TableCell>
-                      <div className="font-medium">
-                        {v.brand} {v.model}
+                      <div className="flex items-center gap-3">
+                        <VehiclePhotoThumbnail
+                          preview={photoPreviews[v.id]}
+                          alt={`${v.brand} ${v.model}`}
+                          className="h-10 w-14 rounded"
+                        />
+                        <div>
+                          <div className="font-medium">
+                            {v.brand} {v.model}
+                          </div>
+                          <div className="text-xs text-muted-foreground">{v.version}</div>
+                        </div>
                       </div>
-                      <div className="text-xs text-muted-foreground">{v.version}</div>
                     </TableCell>
                     <TableCell className="text-muted-foreground">{v.model_year}</TableCell>
                     <TableCell className="text-muted-foreground">

@@ -1,3 +1,5 @@
+import { useVehiclePhotoPreviews } from "@/modules/vehicles/hooks/use-vehicle-photo-previews";
+import { VehiclePhotoThumbnail } from "@/modules/vehicles/components/vehicle-photo-thumbnail";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Building2, Calendar, Car, CheckCircle2, Receipt, XCircle } from "lucide-react";
@@ -41,6 +43,8 @@ function PurchaseDetail() {
     queryFn: () => getPurchaseById(purchaseId),
     enabled: Number.isFinite(purchaseId),
   });
+
+  const { data: photoPreviews = {} } = useVehiclePhotoPreviews(p ? [p.vehicle.id] : []);
 
   const refreshPurchase = async (vehicleId?: number) => {
     await queryClient.invalidateQueries({ queryKey: purchaseKeys.all });
@@ -174,9 +178,11 @@ function PurchaseDetail() {
                 <Car className="h-4 w-4" /> Veículo adquirido
               </div>
               <div className="flex items-start gap-4">
-                <div className="h-20 w-28 rounded-md bg-muted flex items-center justify-center">
-                  <Car className="h-8 w-8 text-muted-foreground" />
-                </div>
+                <VehiclePhotoThumbnail
+                  preview={photoPreviews[p.vehicle.id]}
+                  alt={`${p.vehicle.brand} ${p.vehicle.model}`}
+                  className="h-20 w-28 rounded-md"
+                />
                 <div className="flex-1">
                   <div className="font-display font-semibold text-lg">
                     {p.vehicle.brand} {p.vehicle.model}

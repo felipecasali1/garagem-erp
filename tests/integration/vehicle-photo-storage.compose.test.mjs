@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -117,8 +117,39 @@ async function initializeCompose() {
   );
 
   compose(["up", "--detach", "--wait", "api-gw"]);
-  compose(["run", "--rm", "migrations"]);
+  const priorDirectory = join(tempDirectory, "prior-migrations");
+  await mkdir(priorDirectory);
+  for (const file of await readdir(join(projectRoot, "supabase/migrations"))) {
+    if (file.endsWith(".sql") && file < "20261103100000") {
+      await copyFile(join(projectRoot, "supabase/migrations", file), join(priorDirectory, file));
+    }
+  }
+  compose(["run", "--rm", "--volume", `${priorDirectory}:/migrations:ro,z`, "migrations"]);
   config.apiUrl = `http://127.0.0.1:${config.apiPort}`;
+  const admin = createClient(config.apiUrl, config.serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+  config.legacy = {};
+  const sources = {
+    empty: null,
+    blank: "",
+    whitespace: "   ",
+    data: "data:image/jpeg;base64,bGVnYWN5LWltYWdl",
+    url: "https://legacy.example.test/vehicle.jpg",
+    broken: "https://legacy.example.test/missing.jpg",
+    unsupported: "/old-local-file.jpg",
+    full: "data:image/jpeg;base64,bGVnYWN5LWZ1bGw=",
+    confirmation: "data:image/jpeg;base64,Y29uZmlybWF0aW9u",
+    orphan: "data:image/jpeg;base64,b3JwaGFu",
+  };
+  let index = 1;
+  for (const [name, image] of Object.entries(sources)) {
+    config.legacy[name] = {
+      ...(await createVehicle(admin, `LEG${String(index++).padStart(4, "0")}`, { image })),
+      original: image,
+    };
+  }
+  compose(["run", "--rm", "migrations"]);
 }
 
 async function createInternalUser(admin, role, index) {
@@ -166,7 +197,7 @@ function uploadAttempt(name, type = "image/png") {
   return { id: randomUUID(), file: new File([name], name, { type }) };
 }
 
-async function createVehicle(admin, plate) {
+async function createVehicle(admin, plate, extra = {}) {
   const { data, error } = await admin
     .from("vehicles")
     .insert({
@@ -179,6 +210,7 @@ async function createVehicle(admin, plate) {
       manufacture_year: 2024,
       model_year: 2025,
       status: "available",
+      ...extra,
     })
     .select("id")
     .single();
@@ -243,6 +275,208 @@ test("VehiclePhotoService manages a private gallery", { timeout: 600_000 }, asyn
       .download(gallery[0].storage_path);
     assert.ifError(protectedFile.error);
   });
+
+  await t.test("User can choose and replace the single Vehicle preview", async () => {
+    const gallery = await photos.listVehiclePhotos(vehicle.id);
+    assert.ok(gallery.every((photo) => !photo.is_preview));
+    assert.deepEqual(await photos.listVehiclePhotoPreviews([vehicle.id]), {});
+    await photos.setVehiclePhotoPreview(vehicle.id, gallery[0].id);
+    await photos.setVehiclePhotoPreview(vehicle.id, gallery[1].id);
+    const selected = (await photos.listVehiclePhotos(vehicle.id)).filter(
+      (photo) => photo.is_preview,
+    );
+    assert.equal(selected.length, 1);
+    assert.equal(selected[0].id, gallery[1].id);
+    const previews = await photos.listVehiclePhotoPreviews([vehicle.id]);
+    assert.equal(previews[vehicle.id].id, gallery[1].id);
+    assert.equal((await fetch(previews[vehicle.id].signed_url)).status, 200);
+  });
+
+  await t.test("concurrent preview choices leave exactly one selection", async () => {
+    const gallery = await photos.listVehiclePhotos(vehicle.id);
+    const otherPhotos = createVehiclePhotoService(otherSeller, { optimize });
+    await Promise.all([
+      photos.setVehiclePhotoPreview(vehicle.id, gallery[0].id),
+      otherPhotos.setVehiclePhotoPreview(vehicle.id, gallery[1].id),
+    ]);
+    assert.equal(
+      (await photos.listVehiclePhotos(vehicle.id)).filter((photo) => photo.is_preview).length,
+      1,
+    );
+    const duplicate = await admin
+      .from("vehicle_photos")
+      .update({ is_preview: true })
+      .eq("vehicle_id", vehicle.id);
+    assert.equal(duplicate.error?.code, "23505");
+  });
+
+  await t.test("replacing a preview retains its choice and removing it clears it", async () => {
+    const target = await createVehicle(admin, "PRV1234");
+    const results = await photos.uploadVehiclePhotos(target.id, [
+      uploadAttempt("old-preview.png"),
+      uploadAttempt("other-preview.png"),
+    ]);
+    const [first, second] = results.map((result) => result.photo);
+    await photos.setVehiclePhotoPreview(target.id, first.id);
+    const [replaced] = await photos.uploadVehiclePhotos(target.id, [
+      {
+        ...uploadAttempt("new-preview.png"),
+        replaces: { photoId: first.id, storagePath: first.storage_path },
+      },
+    ]);
+    assert.equal(replaced.photo.is_preview, true);
+    assert.equal(
+      (await photos.listVehiclePhotoPreviews([target.id]))[target.id].storage_path,
+      replaced.photo.storage_path,
+    );
+    const failing = createVehiclePhotoService(
+      await faultClient(seller, (url, init, run) =>
+        init?.method === "DELETE" && url.includes("/storage/v1/object/") ? unavailable() : run(),
+      ),
+      { optimize },
+    );
+    await assert.rejects(failing.removeVehiclePhoto(target.id, first.id), /remoção está pendente/);
+    assert.deepEqual(await photos.listVehiclePhotoPreviews([target.id]), {});
+    await assert.rejects(photos.setVehiclePhotoPreview(target.id, first.id), /em remoção/);
+    await photos.setVehiclePhotoPreview(target.id, second.id);
+    await photos.removeVehiclePhoto(target.id, first.id);
+    assert.equal((await photos.listVehiclePhotoPreviews([target.id]))[target.id].id, second.id);
+    await assert.rejects(
+      photos.setVehiclePhotoPreview(vehicle.id, second.id),
+      /Atualize a galeria/,
+    );
+  });
+
+  await t.test(
+    "migration inspects and preserves populated references and retires empty legacy values",
+    async () => {
+      const removed = await admin.from("vehicles").select("image").limit(1);
+      assert.ok(removed.error, "vehicles.image foi retirado do esquema após a captura");
+      for (const name of ["empty", "blank", "whitespace"]) {
+        assert.equal(await photos.getLegacyPhotoImport(config.legacy[name].id), null);
+      }
+      const preserved = await photos.getLegacyPhotoImport(config.legacy.data.id);
+      assert.equal(preserved.original_value, config.legacy.data.original);
+      assert.equal(preserved.status, "pending");
+      const unsupported = await photos.getLegacyPhotoImport(config.legacy.unsupported.id);
+      assert.equal(unsupported.original_value, config.legacy.unsupported.original);
+      assert.equal(unsupported.status, "recovery_required");
+    },
+  );
+
+  await t.test("usable data and remote images migrate once into private Storage", async () => {
+    const dataVehicle = config.legacy.data;
+    const imported = await photos.importLegacyPhoto(dataVehicle.id);
+    assert.equal(imported.status, "imported");
+    await photos.importLegacyPhoto(dataVehicle.id);
+    const gallery = await photos.listVehiclePhotos(dataVehicle.id);
+    assert.equal(gallery.length, 1);
+    assert.equal(gallery[0].id, imported.photo_id);
+    assert.equal(gallery[0].is_preview, false, "a escolha da principal continua explícita");
+    assert.equal((await fetch(gallery[0].signed_url)).status, 200);
+    const remote = createVehiclePhotoService(seller, {
+      optimize,
+      fetchLegacy: async () =>
+        new Response("remote-image", { headers: { "Content-Type": "image/jpeg" } }),
+    });
+    assert.equal((await remote.importLegacyPhoto(config.legacy.url.id)).status, "imported");
+    assert.equal((await remote.listVehiclePhotos(config.legacy.url.id)).length, 1);
+  });
+
+  await t.test(
+    "unavailable or unsupported references remain recoverable with a local file",
+    async () => {
+      const failing = createVehiclePhotoService(seller, {
+        optimize,
+        fetchLegacy: async () => new Response("missing", { status: 404 }),
+      });
+      await assert.rejects(
+        failing.importLegacyPhoto(config.legacy.broken.id),
+        /referência original continua preservada/,
+      );
+      const recorded = await photos.getLegacyPhotoImport(config.legacy.broken.id);
+      assert.equal(recorded.status, "recovery_required");
+      assert.equal(recorded.original_value, config.legacy.broken.original);
+      assert.ok(recorded.last_error);
+      await assert.rejects(photos.importLegacyPhoto(config.legacy.unsupported.id), /preservada/);
+      for (const name of ["broken", "unsupported"]) {
+        const recovered = await photos.importLegacyPhoto(
+          config.legacy[name].id,
+          uploadAttempt("recovered.png").file,
+        );
+        assert.equal(recovered.status, "imported");
+        assert.equal((await photos.listVehiclePhotos(config.legacy[name].id)).length, 1);
+      }
+    },
+  );
+
+  await t.test(
+    "manual recovery can replace an unreferenced file from an interrupted legacy import",
+    async () => {
+      const target = config.legacy.orphan;
+      const interrupted = createVehiclePhotoService(
+        await faultClient(seller, (url, init, run) =>
+          url.endsWith("/rpc/save_vehicle_photo") ||
+          (init?.method === "DELETE" && url.includes("/storage/v1/object/"))
+            ? unavailable()
+            : run(),
+        ),
+        { optimize },
+      );
+      await assert.rejects(interrupted.importLegacyPhoto(target.id), /preservada/);
+      assert.equal((await photos.listVehiclePhotos(target.id)).length, 0);
+      assert.equal((await photos.getLegacyPhotoImport(target.id)).status, "recovery_required");
+      assert.equal(
+        (await photos.importLegacyPhoto(target.id, uploadAttempt("different-recovery.png").file))
+          .status,
+        "imported",
+      );
+      assert.equal((await photos.listVehiclePhotos(target.id)).length, 1);
+    },
+  );
+
+  await t.test(
+    "legacy import preserves its reference at capacity and succeeds after a slot is freed",
+    async () => {
+      const target = config.legacy.full;
+      const filled = await photos.uploadVehiclePhotos(
+        target.id,
+        Array.from({ length: 15 }, (_, index) => uploadAttempt(`full-${index}.png`)),
+      );
+      assert.ok(filled.every((result) => result.status === "saved"));
+      await assert.rejects(photos.importLegacyPhoto(target.id), /15 fotos/);
+      assert.equal((await photos.getLegacyPhotoImport(target.id)).original_value, target.original);
+      await photos.removeVehiclePhoto(target.id, filled[0].photo.id);
+      assert.equal((await photos.importLegacyPhoto(target.id)).status, "imported");
+      assert.equal((await photos.listVehiclePhotos(target.id)).length, 15);
+    },
+  );
+
+  await t.test(
+    "legacy confirmation can be retried without fetching or duplicating its saved photo",
+    async () => {
+      const target = config.legacy.confirmation;
+      const interrupted = createVehiclePhotoService(
+        await faultClient(seller, (url, _init, run) =>
+          url.endsWith("/rpc/record_vehicle_legacy_photo_import") ? unavailable() : run(),
+        ),
+        { optimize },
+      );
+      await assert.rejects(
+        interrupted.importLegacyPhoto(target.id),
+        /confirmação da importação está pendente/,
+      );
+      assert.equal((await photos.listVehiclePhotos(target.id)).length, 1);
+      const recovered = createVehiclePhotoService(seller, {
+        optimize,
+        fetchLegacy: async () => {
+          throw new Error("a origem não está mais acessível");
+        },
+      });
+      assert.equal((await recovered.importLegacyPhoto(target.id)).status, "imported");
+      assert.equal((await photos.listVehiclePhotos(target.id)).length, 1);
+    },
+  );
 
   await t.test(
     "partial uploads report each file and retry without duplicating successes",
@@ -496,6 +730,13 @@ test("VehiclePhotoService manages a private gallery", { timeout: 600_000 }, asyn
     assert.equal(anonymous.ok, false);
     const restricted = createVehiclePhotoService(financial, { optimize });
     assert.deepEqual(await restricted.listVehiclePhotos(vehicle.id), []);
+    assert.deepEqual(await restricted.listVehiclePhotoPreviews([vehicle.id]), {});
+    await assert.rejects(restricted.setVehiclePhotoPreview(vehicle.id, selected.id), /permissão/);
+    assert.equal(await restricted.getLegacyPhotoImport(config.legacy.data.id), null);
+    const deniedImport = await financial.rpc("record_vehicle_legacy_photo_import", {
+      p_import_id: (await photos.getLegacyPhotoImport(config.legacy.data.id)).id,
+    });
+    assert.equal(deniedImport.error?.code, "42501");
     assert.ok(
       (await financial.storage.from(VEHICLE_PHOTO_BUCKET).download(selected.storage_path)).error,
     );
@@ -524,6 +765,7 @@ test("VehiclePhotoService manages a private gallery", { timeout: 600_000 }, asyn
 
   await t.test("the gallery survives Storage restart", async () => {
     const before = await photos.listVehiclePhotos(vehicle.id);
+    await photos.setVehiclePhotoPreview(vehicle.id, before[0].id);
     compose(["restart", "storage"]);
     compose(["up", "--detach", "--wait", "storage"]);
     const after = await photos.listVehiclePhotos(vehicle.id);
@@ -532,5 +774,7 @@ test("VehiclePhotoService manages a private gallery", { timeout: 600_000 }, asyn
       before.map((photo) => photo.id),
     );
     for (const photo of after) assert.equal((await fetch(photo.signed_url)).status, 200);
+    assert.equal(after.filter((photo) => photo.is_preview).length, 1);
+    assert.equal(after.find((photo) => photo.is_preview).id, before[0].id);
   });
 });

@@ -86,7 +86,6 @@ export interface Vehicle {
   published: boolean;
   status: VehicleStatus;
   updated_at: string;
-  image?: string;
   accessories?: string[];
   notes?: string;
 }

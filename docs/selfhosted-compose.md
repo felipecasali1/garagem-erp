@@ -51,7 +51,7 @@ Este recorte inclui Postgres, Auth, PostgREST, Storage, Studio, gateway e aplica
 
 ## Galeria privada de veículos
 
-No detalhe do veículo, os papéis `admin`, `manager` e `seller` podem enviar várias fotos, selecionar uma imagem para visualização e substituir ou remover uma foto. A galeria acompanha o veículo, inclusive quando ele retorna ao estoque; não é criado um álbum por compra. O limite de 15 fotos é aplicado pelo PostgreSQL com bloqueio do veículo, inclusive em envios simultâneos. A escolha persistente de uma foto de prévia será tratada no ticket #31.
+No detalhe do veículo, os papéis `admin`, `manager` e `seller` podem enviar várias fotos, selecionar uma imagem para visualização e substituir ou remover uma foto. A galeria acompanha o veículo, inclusive quando ele retorna ao estoque; não é criado um álbum por compra. O limite de 15 fotos é aplicado pelo PostgreSQL com bloqueio do veículo, inclusive em envios simultâneos. Use **Definir como principal** na foto desejada para escolher a imagem das prévias compactas de veículos, vendas e compras. A seleção é persistente e única por veículo; substituir a imagem mantém sua seleção, enquanto remover a principal deixa o veículo sem uma prévia até uma nova escolha explícita.
 
 Cada arquivo tem seu próprio resultado e sua própria tentativa de envio. **Tentar novamente** reutiliza essa identificação para evitar duplicar fotos já confirmadas. Os formatos de entrada são JPEG, PNG e WebP; o navegador gera apenas um JPEG otimizado com até 1920 px no lado maior e 5 MB, sem guardar o original.
 
@@ -61,7 +61,26 @@ Se a remoção for interrompida, a foto aparece como **Remoção pendente** até
 npm run test:integration:vehicle-photos
 ```
 
-O teste usa um banco e um volume de Storage descartáveis. Ele cobre os resultados por arquivo, repetição segura, concorrência na última vaga, substituição, remoção interrompida, autorização e persistência após reiniciar o Storage. As credenciais Cloud e os volumes da instalação habitual não são utilizados.
+O teste usa um banco e um volume de Storage descartáveis. Ele cobre os resultados por arquivo, repetição segura, concorrência na última vaga, seleção concorrente de principal, substituição, remoção interrompida, importação do campo antigo, autorização e persistência após reiniciar o Storage. As credenciais Cloud e os volumes da instalação habitual não são utilizados.
+
+## Migração das imagens antigas
+
+A migration `20261103100000_select_vehicle_photo_preview_and_retire_legacy_image.sql` inspeciona `vehicles.image`, preserva cada valor não vazio em `vehicle_legacy_photo_imports` e informa as contagens de referências e valores vazios. Ela atualiza os comandos transacionais de cadastro/edição antes de retirar a coluna antiga. A galeria passa a ser a única fonte de imagens exibidas pela aplicação; as referências preservadas são um registro de importação e recuperação.
+
+Se houver uma referência, o detalhe do veículo mostra **Imagem antiga aguardando importação**. **Importar imagem antiga** busca um link HTTP(S) ou uma imagem `data:`, aplica a mesma otimização dos novos envios e salva uma única foto privada. A imagem original externa não é apagada. Repetir a importação ou retomar uma confirmação interrompida reutiliza a mesma identificação para evitar duplicações. A importação não escolhe a principal automaticamente.
+
+Links expirados, bloqueios de CORS do servidor de origem, formatos não suportados ou uma galeria cheia mantêm a referência e o motivo da falha em estado de recuperação. Use o link de recuperação para baixar a imagem e **Selecionar arquivo para recuperação**, ou libere uma vaga e tente novamente. O download de referências antigas é limitado a 20 MB antes da otimização. A captura de referências acontece na migration; o download é iniciado pelo usuário na tela.
+
+Para conferir referências ainda pendentes no SQL Editor:
+
+```sql
+select vehicle_id, source_kind, status, last_error, captured_at
+from public.vehicle_legacy_photo_imports
+where status <> 'imported'
+order by vehicle_id;
+```
+
+O campo `original_value` permanece disponível nessa tabela para recuperação explícita, inclusive quando uma referência não é um link válido. Seu acesso segue as permissões de veículos. Nenhuma referência é descartada silenciosamente por falha de download ou processamento.
 
 ## Diagnóstico
 

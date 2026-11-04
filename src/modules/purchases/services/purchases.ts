@@ -26,7 +26,6 @@ type VehicleRow = Omit<Vehicle, "accessories"> & {
   chassis: string | null;
   vin: string | null;
   version: string | null;
-  image: string | null;
   notes: string | null;
 };
 
@@ -118,7 +117,6 @@ function mapVehicle(row: VehicleRow): Vehicle {
     published: row.published,
     status: row.status,
     updated_at: row.updated_at,
-    image: row.image ?? undefined,
     notes: row.notes ?? undefined,
     accessories: [],
   };

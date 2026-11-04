@@ -25,7 +25,6 @@ type VehicleRow = {
   published: boolean;
   status: Vehicle["status"];
   updated_at: string;
-  image: string | null;
   notes: string | null;
   vehicle_accessories?: Array<{
     active?: boolean;
@@ -81,7 +80,6 @@ function mapVehicle(row: VehicleRow): Vehicle {
     published: row.published,
     status: row.status,
     updated_at: row.updated_at,
-    image: row.image ?? undefined,
     notes: row.notes ?? undefined,
     accessories:
       row.vehicle_accessories

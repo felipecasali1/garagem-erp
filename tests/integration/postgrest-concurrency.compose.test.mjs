@@ -504,7 +504,6 @@ function vehicleConfigurationArguments(index, key = randomUUID(), overrides = {}
       model_year: 2025,
       cost_price: 50000,
       sale_price: 65000,
-      image: null,
       notes: null,
     },
     p_accessories: ["Teto solar", `Acessório ${index}`],

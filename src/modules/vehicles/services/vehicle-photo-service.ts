@@ -17,6 +17,7 @@ type VehiclePhotoRow = {
   file_size_bytes: number;
   content_digest: string | null;
   deletion_pending: boolean;
+  is_preview: boolean;
   pending_cleanup_paths: string[];
   created_at: string;
   updated_at: string;
@@ -41,6 +42,16 @@ export type VehiclePhotoUploadProgress =
   | VehiclePhotoUploadResult
   | { id: string; status: "uploading" };
 
+export type LegacyVehiclePhotoImport = {
+  id: string;
+  vehicle_id: number;
+  original_value: string;
+  source_kind: "url" | "data" | "unsupported";
+  status: "pending" | "imported" | "recovery_required";
+  photo_id: string | null;
+  last_error: string | null;
+};
+
 export class VehiclePhotoServiceError extends Error {
   cleanupPath?: string;
   constructor(message: string, options: { cleanupPath?: string } = {}) {
@@ -50,9 +61,12 @@ export class VehiclePhotoServiceError extends Error {
   }
 }
 
-type VehiclePhotoServiceOptions = { optimize?: (file: File) => Promise<Blob> };
+type VehiclePhotoServiceOptions = {
+  optimize?: (file: File) => Promise<Blob>;
+  fetchLegacy?: typeof fetch;
+};
 const photoColumns =
-  "id, vehicle_id, storage_path, content_type, file_size_bytes, content_digest, deletion_pending, pending_cleanup_paths, created_at, updated_at";
+  "id, vehicle_id, storage_path, content_type, file_size_bytes, content_digest, deletion_pending, is_preview, pending_cleanup_paths, created_at, updated_at";
 
 function requireVehicleId(vehicleId: number) {
   if (!Number.isSafeInteger(vehicleId) || vehicleId < 1) {
@@ -89,6 +103,7 @@ export function createVehiclePhotoService(
 ) {
   const optimize = options.optimize ?? optimizeVehiclePhoto;
   const storage = client.storage.from(VEHICLE_PHOTO_BUCKET);
+  const fetchLegacy = options.fetchLegacy ?? fetch;
 
   async function readRows(vehicleId: number): Promise<VehiclePhotoRow[]> {
     const { data, error } = await client
@@ -126,6 +141,155 @@ export function createVehiclePhotoService(
   async function listVehiclePhotos(vehicleId: number) {
     requireVehicleId(vehicleId);
     return Promise.all((await readRows(vehicleId)).map(withSignedUrl));
+  }
+
+  async function listVehiclePhotoPreviews(
+    vehicleIds: number[],
+  ): Promise<Record<number, VehiclePhoto>> {
+    const ids = [...new Set(vehicleIds)];
+    ids.forEach(requireVehicleId);
+    if (!ids.length) return {};
+    const { data, error } = await client
+      .from("vehicle_photos")
+      .select(photoColumns)
+      .in("vehicle_id", ids)
+      .eq("is_preview", true)
+      .eq("deletion_pending", false);
+    if (error)
+      throw new VehiclePhotoServiceError(
+        `Não foi possível carregar as fotos principais: ${error.message}`,
+      );
+    const photos = await Promise.all(((data ?? []) as VehiclePhotoRow[]).map(withSignedUrl));
+    return Object.fromEntries(photos.map((photo) => [photo.vehicle_id, photo]));
+  }
+
+  async function setVehiclePhotoPreview(vehicleId: number, photoId: string) {
+    requireVehicleId(vehicleId);
+    const { data, error } = await client.rpc("set_vehicle_photo_preview", {
+      p_vehicle_id: vehicleId,
+      p_photo_id: photoId,
+    });
+    if (error)
+      throw new VehiclePhotoServiceError(
+        `Não foi possível escolher a foto principal: ${error.message}`,
+      );
+    const photo = rpcPhoto(data);
+    if (!photo) throw new VehiclePhotoServiceError("Foto não encontrada. Atualize a galeria.");
+    return withSignedUrl(photo);
+  }
+
+  async function getLegacyPhotoImport(vehicleId: number): Promise<LegacyVehiclePhotoImport | null> {
+    requireVehicleId(vehicleId);
+    const { data, error } = await client
+      .from("vehicle_legacy_photo_imports")
+      .select("id, vehicle_id, original_value, source_kind, status, photo_id, last_error")
+      .eq("vehicle_id", vehicleId)
+      .maybeSingle();
+    if (error)
+      throw new VehiclePhotoServiceError(
+        `Não foi possível consultar a imagem antiga: ${error.message}`,
+      );
+    return data as LegacyVehiclePhotoImport | null;
+  }
+
+  async function loadLegacyFile(source: string) {
+    const url = new URL(source.trim());
+    if (
+      url.username ||
+      url.password ||
+      !["http:", "https:", "data:"].includes(url.protocol) ||
+      (url.protocol === "data:" && !url.href.startsWith("data:image/"))
+    ) {
+      throw new VehiclePhotoServiceError(
+        "A referência antiga não é suportada. Selecione o arquivo para recuperá-la.",
+      );
+    }
+    const response = await fetchLegacy(url.href, {
+      credentials: "omit",
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok)
+      throw new VehiclePhotoServiceError(
+        "A imagem antiga não está acessível pelo link. Selecione o arquivo para recuperá-la.",
+      );
+    const maxSourceBytes = 20 * 1024 * 1024;
+    if (Number(response.headers.get("content-length")) > maxSourceBytes) {
+      throw new VehiclePhotoServiceError(
+        "A imagem antiga excede 20 MB. Selecione uma cópia menor para recuperação.",
+      );
+    }
+    const type = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase() ?? "";
+    if (!VEHICLE_PHOTO_INPUT_TYPES.includes(type as (typeof VEHICLE_PHOTO_INPUT_TYPES)[number])) {
+      throw new VehiclePhotoServiceError(
+        "A referência antiga não retornou JPEG, PNG ou WebP. Selecione o arquivo para recuperação.",
+      );
+    }
+    const parts: ArrayBuffer[] = [];
+    let size = 0;
+    if (response.body) {
+      const reader = response.body.getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > maxSourceBytes) {
+            await reader.cancel();
+            throw new VehiclePhotoServiceError(
+              "A imagem antiga excede 20 MB. Selecione uma cópia menor para recuperação.",
+            );
+          }
+          parts.push(value.slice().buffer as ArrayBuffer);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+    return new File(
+      parts,
+      `legacy-image.${type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg"}`,
+      { type },
+    );
+  }
+
+  async function importLegacyPhoto(vehicleId: number, recoveryFile?: File) {
+    const legacy = await getLegacyPhotoImport(vehicleId);
+    if (!legacy || legacy.status === "imported") return legacy;
+    const existing = await findPhoto(vehicleId, legacy.id);
+    if (!existing) {
+      try {
+        if (recoveryFile) await retryCleanup(`vehicles/${vehicleId}/${legacy.id}.jpg`);
+        const file = recoveryFile ?? (await loadLegacyFile(legacy.original_value));
+        const [result] = await uploadVehiclePhotos(vehicleId, [{ id: legacy.id, file }]);
+        if (result.status === "failed")
+          throw new VehiclePhotoServiceError(result.error, { cleanupPath: result.cleanupPath });
+      } catch (error) {
+        const message =
+          error instanceof VehiclePhotoServiceError
+            ? error.message
+            : "Não foi possível buscar ou processar a imagem antiga. Selecione o arquivo para recuperação.";
+        await client.rpc("record_vehicle_legacy_photo_import", {
+          p_import_id: legacy.id,
+          p_error: message,
+        });
+        throw new VehiclePhotoServiceError(
+          `${message} A referência original continua preservada.`,
+          {
+            cleanupPath: error instanceof VehiclePhotoServiceError ? error.cleanupPath : undefined,
+          },
+        );
+      }
+    }
+    const { data, error } = await client.rpc("record_vehicle_legacy_photo_import", {
+      p_import_id: legacy.id,
+      p_photo_id: legacy.id,
+    });
+    if (error)
+      throw new VehiclePhotoServiceError(
+        "A foto está salva, mas a confirmação da importação está pendente. Tente importar novamente para concluir.",
+      );
+    return (Array.isArray(data) ? data[0] : data) as LegacyVehiclePhotoImport;
   }
 
   async function removeObjects(paths: string[]) {
@@ -333,5 +497,14 @@ export function createVehiclePhotoService(
     }
   }
 
-  return { listVehiclePhotos, uploadVehiclePhotos, removeVehiclePhoto, retryCleanup };
+  return {
+    listVehiclePhotos,
+    listVehiclePhotoPreviews,
+    setVehiclePhotoPreview,
+    getLegacyPhotoImport,
+    importLegacyPhoto,
+    uploadVehiclePhotos,
+    removeVehiclePhoto,
+    retryCleanup,
+  };
 }

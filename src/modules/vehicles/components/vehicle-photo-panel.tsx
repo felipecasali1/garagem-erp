@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ImagePlus, LoaderCircle, RotateCcw, Trash2, Upload } from "lucide-react";
+import { Check, ImagePlus, LoaderCircle, RotateCcw, Star, Trash2, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
@@ -26,8 +26,9 @@ type VehiclePhotoPanelProps = { vehicleId: number; alt: string; canManage: boole
 export function VehiclePhotoPanel({ vehicleId, alt, canManage }: VehiclePhotoPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const replacementRef = useRef<HTMLInputElement>(null);
+  const recoveryRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
-  const queryKey = ["vehicle-photos", vehicleId] as const;
+  const queryKey = ["vehicle-photos", "gallery", vehicleId] as const;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<VehiclePhoto | null>(null);
   const [replacementTarget, setReplacementTarget] = useState<VehiclePhoto | null>(null);
@@ -39,9 +40,49 @@ export function VehiclePhotoPanel({ vehicleId, alt, canManage }: VehiclePhotoPan
     queryFn: () => photoService.listVehiclePhotos(vehicleId),
   });
   const photos = galleryQuery.data ?? [];
-  const activePhoto = photos.find((photo) => photo.id === selectedId) ?? photos[0];
+  const activePhoto =
+    photos.find((photo) => photo.id === selectedId) ??
+    photos.find((photo) => photo.is_preview) ??
+    photos[0];
+  const legacyQuery = useQuery({
+    queryKey: ["vehicle-photos", "legacy", vehicleId],
+    queryFn: () => photoService.getLegacyPhotoImport(vehicleId),
+  });
+  const legacy = legacyQuery.data;
   const remaining = Math.max(0, MAX_VEHICLE_PHOTOS - photos.length);
-  const refresh = () => queryClient.invalidateQueries({ queryKey });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["vehicle-photos"] });
+
+  const previewMutation = useMutation({
+    mutationFn: (photo: VehiclePhoto) => photoService.setVehiclePhotoPreview(vehicleId, photo.id),
+    onSuccess: () => toast.success("Foto principal definida."),
+    onError: (error) =>
+      toast.error(
+        error instanceof Error ? error.message : "Não foi possível escolher a foto principal.",
+      ),
+    onSettled: refresh,
+  });
+
+  const importMutation = useMutation({
+    mutationFn: (file?: File) => photoService.importLegacyPhoto(vehicleId, file),
+    onSuccess: () => toast.success("Imagem antiga importada para a galeria."),
+    onError: (error) => {
+      if (
+        error &&
+        typeof error === "object" &&
+        "cleanupPath" in error &&
+        typeof error.cleanupPath === "string"
+      ) {
+        const path = error.cleanupPath;
+        setCleanupPaths((current) => [...new Set([...current, path])]);
+      }
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "A referência antiga foi preservada para recuperação.",
+      );
+    },
+    onSettled: refresh,
+  });
 
   function uploadProgress(progress: VehiclePhotoUploadProgress) {
     setJobs((current) =>
@@ -102,7 +143,12 @@ export function VehiclePhotoPanel({ vehicleId, alt, canManage }: VehiclePhotoPan
       toast.error(error instanceof Error ? error.message : "A verificação está pendente."),
   });
 
-  const isBusy = uploadMutation.isPending || removeMutation.isPending || cleanupMutation.isPending;
+  const isBusy =
+    uploadMutation.isPending ||
+    removeMutation.isPending ||
+    cleanupMutation.isPending ||
+    previewMutation.isPending ||
+    importMutation.isPending;
   const pendingPaths = [
     ...new Set([...cleanupPaths, ...photos.flatMap((photo) => photo.pending_cleanup_paths)]),
   ];
@@ -245,6 +291,14 @@ export function VehiclePhotoPanel({ vehicleId, alt, canManage }: VehiclePhotoPan
                     Removendo
                   </span>
                 )}
+                {photo.is_preview && (
+                  <span
+                    className="absolute top-1 right-1 rounded bg-background/90 p-1"
+                    title="Foto principal"
+                  >
+                    <Star className="h-3 w-3 fill-current text-warning" />
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -252,6 +306,17 @@ export function VehiclePhotoPanel({ vehicleId, alt, canManage }: VehiclePhotoPan
 
         {canManage && activePhoto && (
           <div className="flex flex-wrap justify-end gap-2">
+            {!activePhoto.deletion_pending && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isBusy || activePhoto.is_preview}
+                onClick={() => previewMutation.mutate(activePhoto)}
+              >
+                <Star className={activePhoto.is_preview ? "fill-current" : ""} />
+                {activePhoto.is_preview ? "Foto principal" : "Definir como principal"}
+              </Button>
+            )}
             {!activePhoto.deletion_pending && (
               <Button
                 variant="outline"
@@ -279,6 +344,63 @@ export function VehiclePhotoPanel({ vehicleId, alt, canManage }: VehiclePhotoPan
               {activePhoto.deletion_pending ? "Tentar remoção" : "Remover selecionada"}
             </Button>
           </div>
+        )}
+
+        {canManage && legacy && legacy.status !== "imported" && (
+          <div className="space-y-3 rounded-md border border-warning/30 bg-warning/5 p-3 text-sm">
+            <div className="font-medium">Imagem antiga aguardando importação</div>
+            <p className="text-muted-foreground">
+              {legacy.last_error ??
+                "A referência antiga foi preservada. Importe a imagem para incluí-la na galeria privada."}
+            </p>
+            {legacy.source_kind === "url" && (
+              <a
+                href={legacy.original_value.trim()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline"
+              >
+                Abrir imagem antiga para recuperação
+              </a>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isBusy}
+                onClick={() => importMutation.mutate(undefined)}
+              >
+                <RotateCcw />
+                {importMutation.isPending ? "Importando..." : "Importar imagem antiga"}
+              </Button>
+              <input
+                ref={recoveryRef}
+                type="file"
+                className="hidden"
+                accept="image/jpeg,image/png,image/webp"
+                aria-label="Recuperar imagem antiga com arquivo"
+                disabled={isBusy}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  if (file) importMutation.mutate(file);
+                  event.currentTarget.value = "";
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isBusy}
+                onClick={() => recoveryRef.current?.click()}
+              >
+                <Upload /> Selecionar arquivo para recuperação
+              </Button>
+            </div>
+          </div>
+        )}
+        {canManage && legacyQuery.isError && (
+          <Button variant="outline" size="sm" onClick={() => void legacyQuery.refetch()}>
+            Tentar consultar imagens antigas novamente
+          </Button>
         )}
 
         {canManage && jobs.length > 0 && (
