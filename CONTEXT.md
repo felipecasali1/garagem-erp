@@ -50,7 +50,7 @@ _Avoid_: tratar o checklist como apenas uma lista visual sem efeito no estado de
 Item de catálogo que pode ser associado a um `Vehicle` e fazer parte da sua configuração comercial ou da sua preparação.
 
 **VehiclePhoto**:
-Imagem associada a um `Vehicle` para armazenamento e download pelos usuários autorizados. Ela não representa uma evidência de `Preparation` nem uma publicação pública do veículo.
+Imagem da galeria atual de um `Vehicle`, acessível por `User`s autorizados conforme as permissões do veículo. Uma imagem pode ser escolhida como prévia; a galeria não mantém histórico por `Purchase` nem representa evidência de `Preparation` ou publicação pública do veículo.
 _Avoid_: tratar `VehiclePhoto` como `ChecklistItem` ou como arquivo público por padrão.
 
 ### Commercial and finance
