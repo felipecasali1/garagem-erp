@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Save, Plus, X, Trash2 } from "lucide-react";
+import { ArrowLeft, Save, Plus, X, Trash2, RotateCcw } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
@@ -29,7 +29,22 @@ import {
 } from "@/modules/checklist";
 import type { VehicleChecklistDraft, VehicleDraft } from "@/modules/vehicles/types";
 import { createVehicle, vehicleKeys } from "@/modules/vehicles/services/vehicles";
+import {
+  VehiclePhotoDrafts,
+  type VehiclePhotoDraft,
+} from "@/modules/vehicles/components/vehicle-photo-drafts";
+import {
+  createVehiclePhotoService,
+  MAX_VEHICLE_PHOTOS,
+  type VehiclePhotoUploadProgress,
+} from "@/modules/vehicles/services/vehicle-photo-service";
+import { VEHICLE_PHOTO_INPUT_TYPES } from "@/modules/vehicles/services/vehicle-photo-image";
+import { createVehicleEvaluationSaver } from "@/modules/vehicles/services/save-vehicle-evaluation";
+import { supabase } from "@/shared/supabase/client";
+import type { Vehicle } from "@/shared/types/domain";
 import { brl } from "@/shared/lib/format";
+
+const photoService = createVehiclePhotoService(supabase);
 
 export const Route = createFileRoute("/_app/vehicles/new")({
   head: () => ({ meta: [{ title: "Nova Avaliação | GaragemERP" }] }),
@@ -69,7 +84,14 @@ function NewVehicle() {
     checklist: [],
   });
   const [customAcc, setCustomAcc] = useState("");
-  const createAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
+  const createAttemptRef = useRef<{
+    fingerprint: string;
+    saver: ReturnType<typeof createVehicleEvaluationSaver>;
+  } | null>(null);
+  const savingRef = useRef(false);
+  const [photos, setPhotos] = useState<VehiclePhotoDraft[]>([]);
+  const [savedVehicle, setSavedVehicle] = useState<Vehicle | null>(null);
+  const [confirmOpenVehicle, setConfirmOpenVehicle] = useState(false);
   const [confirmAccessoryRemove, setConfirmAccessoryRemove] = useState<string | null>(null);
   const [confirmChecklistRemove, setConfirmChecklistRemove] = useState<string | null>(null);
   const patchVehicleDraft = (patch: Partial<VehicleDraft>) =>
@@ -128,31 +150,158 @@ function NewVehicle() {
   const totalEstimated = vehicleDraft.checklist.reduce((s, x) => s + (x.estimated_cost || 0), 0);
   const isEvaluation = vehicleDraft.status === "evaluating";
 
+  const photoProgress = (progress: VehiclePhotoUploadProgress) => {
+    setPhotos((current) =>
+      current.map((photo) => (photo.attempt.id === progress.id ? { ...photo, progress } : photo)),
+    );
+  };
+  const openVehicle = (vehicle: Vehicle) =>
+    void navigate({ to: "/vehicles/$id", params: { id: String(vehicle.id) } });
+
   const createMutation = useMutation({
-    mutationFn: ({ draft, idempotencyKey }: { draft: VehicleDraft; idempotencyKey: string }) =>
-      createVehicle(draft, idempotencyKey),
-    onSuccess: (vehicle, variables) => {
-      if (createAttemptRef.current?.key === variables.idempotencyKey) {
-        createAttemptRef.current = null;
+    mutationFn: ({
+      saver,
+      attempts,
+    }: {
+      saver: ReturnType<typeof createVehicleEvaluationSaver>;
+      attempts: VehiclePhotoDraft[];
+    }) =>
+      saver.save(
+        attempts.map((photo) => photo.attempt),
+        photoProgress,
+      ),
+    onSuccess: ({ vehicle, photos: results }) => {
+      setPhotos((current) =>
+        current.map((photo) => ({
+          ...photo,
+          progress: results.find((result) => result.id === photo.attempt.id) ?? photo.progress,
+        })),
+      );
+      void queryClient.invalidateQueries({ queryKey: ["vehicle-photos"] });
+      if (results.some((photo) => photo.status === "failed")) {
+        toast.error(
+          "Avaliação cadastrada. Algumas fotos não foram enviadas; tente novamente abaixo.",
+        );
+        return;
       }
-      void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
-      queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
-      toast.success("Avaliação de veículo cadastrada");
-      void navigate({ to: "/vehicles/$id", params: { id: String(vehicle.id) } });
+      toast.success(
+        results.length ? "Avaliação cadastrada com as fotos." : "Avaliação de veículo cadastrada",
+      );
+      openVehicle(vehicle);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Falha ao salvar veículo.");
     },
+    onSettled: () => {
+      savingRef.current = false;
+    },
   });
+
+  const saveEvaluation = () => {
+    if (savingRef.current) return;
+    const fingerprint = JSON.stringify(vehicleDraft);
+    if (
+      !createAttemptRef.current ||
+      (!savedVehicle && createAttemptRef.current.fingerprint !== fingerprint)
+    ) {
+      const idempotencyKey = crypto.randomUUID();
+      createAttemptRef.current = {
+        fingerprint,
+        saver: createVehicleEvaluationSaver(async () => {
+          const vehicle = await createVehicle(vehicleDraft, idempotencyKey);
+          setSavedVehicle(vehicle);
+          void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
+          queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
+          return vehicle;
+        }, photoService.uploadVehiclePhotos),
+      };
+    }
+    savingRef.current = true;
+    createMutation.mutate({ saver: createAttemptRef.current.saver, attempts: photos });
+  };
+
+  const selectPhotos = (files: File[]) => {
+    if (savingRef.current || savedVehicle || !files.length) return;
+    if (
+      files.some(
+        (file) =>
+          !VEHICLE_PHOTO_INPUT_TYPES.includes(
+            file.type as (typeof VEHICLE_PHOTO_INPUT_TYPES)[number],
+          ),
+      )
+    ) {
+      toast.error("Selecione apenas imagens JPEG, PNG ou WebP.");
+      return;
+    }
+    if (photos.length + files.length > MAX_VEHICLE_PHOTOS) {
+      toast.error(`Selecione no máximo ${MAX_VEHICLE_PHOTOS} fotos para a avaliação.`);
+      return;
+    }
+    setPhotos((current) => [
+      ...current,
+      ...files.map((file) => ({
+        attempt: { id: crypto.randomUUID(), file },
+      })),
+    ]);
+  };
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const fingerprint = JSON.stringify(vehicleDraft);
-    if (createAttemptRef.current?.fingerprint !== fingerprint) {
-      createAttemptRef.current = { fingerprint, key: crypto.randomUUID() };
-    }
-    createMutation.mutate({ draft: vehicleDraft, idempotencyKey: createAttemptRef.current.key });
+    saveEvaluation();
   };
+
+  if (savedVehicle) {
+    const pendingCount = photos.filter((photo) => photo.progress?.status !== "saved").length;
+    return (
+      <div className="max-w-4xl mx-auto space-y-6" aria-busy={createMutation.isPending}>
+        <div className="space-y-2">
+          <h1 className="font-display text-2xl font-semibold tracking-tight">
+            Avaliação cadastrada
+          </h1>
+          <p className="text-muted-foreground">
+            {savedVehicle.brand} {savedVehicle.model} · {savedVehicle.plate}
+          </p>
+          <p className="text-sm" role="status">
+            {createMutation.isPending
+              ? "Enviando as fotos selecionadas..."
+              : `${pendingCount} ${pendingCount === 1 ? "foto aguarda" : "fotos aguardam"} envio. Tentar novamente mantém a avaliação já cadastrada e envia apenas as fotos pendentes.`}
+          </p>
+        </div>
+        <VehiclePhotoDrafts
+          photos={photos}
+          editable={false}
+          onSelect={selectPhotos}
+          onRemove={() => {}}
+        />
+        <div className="flex flex-wrap justify-end gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={createMutation.isPending}
+            onClick={() => setConfirmOpenVehicle(true)}
+          >
+            Abrir veículo
+          </Button>
+          <Button
+            type="button"
+            disabled={createMutation.isPending || !pendingCount}
+            onClick={saveEvaluation}
+          >
+            <RotateCcw className="h-4 w-4" />{" "}
+            {createMutation.isPending ? "Enviando..." : "Tentar fotos pendentes"}
+          </Button>
+        </div>
+        <ConfirmActionDialog
+          open={confirmOpenVehicle}
+          onOpenChange={setConfirmOpenVehicle}
+          title="Abrir veículo com fotos pendentes?"
+          description="A avaliação e as fotos já salvas serão mantidas. Para adicionar as fotos pendentes depois, selecione os arquivos novamente na galeria do veículo."
+          confirmLabel="Abrir veículo"
+          onConfirm={() => openVehicle(savedVehicle)}
+        />
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={submit} className="max-w-4xl mx-auto space-y-6">
@@ -171,377 +320,391 @@ function NewVehicle() {
         </Button>
       </div>
 
-      <Card>
-        <CardContent className="p-6 space-y-4">
-          <h2 className="font-display font-semibold">Identificação</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Placa" required>
-              <PlateInput
-                placeholder="ABC-1D23"
-                required
-                value={vehicleDraft.plate}
-                onValueChange={(value) => patchVehicleDraft({ plate: value })}
-              />
-            </Field>
-            <Field label="Chassi">
-              <Input
-                placeholder="9BWZZZ377VT004251"
-                value={vehicleDraft.chassis}
-                onChange={(e) => patchVehicleDraft({ chassis: e.target.value })}
-              />
-            </Field>
-            <Field label="VIN">
-              <Input
-                placeholder="1HGBH41JXMN109186"
-                value={vehicleDraft.vin}
-                onChange={(e) => patchVehicleDraft({ vin: e.target.value })}
-              />
-            </Field>
-            <Field label="Marca" required>
-              <Input
-                placeholder="Toyota"
-                required
-                value={vehicleDraft.brand}
-                onChange={(e) => patchVehicleDraft({ brand: e.target.value })}
-              />
-            </Field>
-            <Field label="Modelo" required>
-              <Input
-                placeholder="Corolla"
-                required
-                value={vehicleDraft.model}
-                onChange={(e) => patchVehicleDraft({ model: e.target.value })}
-              />
-            </Field>
-            <Field label="Versão">
-              <Input
-                placeholder="XEi 2.0"
-                value={vehicleDraft.version}
-                onChange={(e) => patchVehicleDraft({ version: e.target.value })}
-              />
-            </Field>
-            <Field label="Cor" required>
-              <Input
-                placeholder="Prata"
-                required
-                value={vehicleDraft.color}
-                onChange={(e) => patchVehicleDraft({ color: e.target.value })}
-              />
-            </Field>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="p-6 space-y-4">
-          <h2 className="font-display font-semibold">Especificações</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Field label="Combustível">
-              <Select
-                value={vehicleDraft.fuel_type}
-                onValueChange={(value) =>
-                  patchVehicleDraft({ fuel_type: value as VehicleDraft["fuel_type"] })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="flex">Flex</SelectItem>
-                  <SelectItem value="gasoline">Gasolina</SelectItem>
-                  <SelectItem value="diesel">Diesel</SelectItem>
-                  <SelectItem value="electric">Elétrico</SelectItem>
-                  <SelectItem value="hybrid">Híbrido</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Câmbio">
-              <Select
-                value={vehicleDraft.transmission}
-                onValueChange={(value) =>
-                  patchVehicleDraft({ transmission: value as VehicleDraft["transmission"] })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="manual">Manual</SelectItem>
-                  <SelectItem value="automatic">Automático</SelectItem>
-                  <SelectItem value="cvt">CVT</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Quilometragem">
-              <Input
-                type="number"
-                placeholder="0"
-                value={vehicleDraft.current_mileage || ""}
-                onChange={(e) =>
-                  patchVehicleDraft({ current_mileage: Number(e.target.value) || 0 })
-                }
-              />
-            </Field>
-            <Field label="Ano fabricação">
-              <Input
-                type="number"
-                placeholder="2024"
-                value={vehicleDraft.manufacture_year || ""}
-                onChange={(e) =>
-                  patchVehicleDraft({ manufacture_year: Number(e.target.value) || 0 })
-                }
-              />
-            </Field>
-            <Field label="Ano modelo">
-              <Input
-                type="number"
-                placeholder="2024"
-                value={vehicleDraft.model_year || ""}
-                onChange={(e) => patchVehicleDraft({ model_year: Number(e.target.value) || 0 })}
-              />
-            </Field>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="p-6 space-y-4">
-          <h2 className="font-display font-semibold">Valores</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label={isEvaluation ? "Custo estimado de aquisição" : "Custo de aquisição"}>
-              <Input
-                type="number"
-                placeholder="0,00"
-                value={vehicleDraft.cost_price || ""}
-                onChange={(e) => patchVehicleDraft({ cost_price: Number(e.target.value) || 0 })}
-              />
-            </Field>
-            <Field label="Valor estimado de venda">
-              <Input
-                type="number"
-                placeholder="0,00"
-                value={vehicleDraft.sale_price || ""}
-                onChange={(e) => patchVehicleDraft({ sale_price: Number(e.target.value) || 0 })}
-              />
-            </Field>
-          </div>
-          <Field label="Observações">
-            <Textarea
-              rows={3}
-              placeholder="Anotações internas..."
-              value={vehicleDraft.notes}
-              onChange={(e) => patchVehicleDraft({ notes: e.target.value })}
-            />
-          </Field>
-        </CardContent>
-      </Card>
-
-      {/* Accessories */}
-      <Card>
-        <CardContent className="p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-display font-semibold">Acessórios</h2>
-              <p className="text-xs text-muted-foreground">
-                Selecione os acessórios presentes no veículo.
-              </p>
+      <fieldset disabled={createMutation.isPending} className="space-y-6 min-w-0">
+        <Card>
+          <CardContent className="p-6 space-y-4">
+            <h2 className="font-display font-semibold">Identificação</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Placa" required>
+                <PlateInput
+                  placeholder="ABC-1D23"
+                  required
+                  value={vehicleDraft.plate}
+                  onValueChange={(value) => patchVehicleDraft({ plate: value })}
+                />
+              </Field>
+              <Field label="Chassi">
+                <Input
+                  placeholder="9BWZZZ377VT004251"
+                  value={vehicleDraft.chassis}
+                  onChange={(e) => patchVehicleDraft({ chassis: e.target.value })}
+                />
+              </Field>
+              <Field label="VIN">
+                <Input
+                  placeholder="1HGBH41JXMN109186"
+                  value={vehicleDraft.vin}
+                  onChange={(e) => patchVehicleDraft({ vin: e.target.value })}
+                />
+              </Field>
+              <Field label="Marca" required>
+                <Input
+                  placeholder="Toyota"
+                  required
+                  value={vehicleDraft.brand}
+                  onChange={(e) => patchVehicleDraft({ brand: e.target.value })}
+                />
+              </Field>
+              <Field label="Modelo" required>
+                <Input
+                  placeholder="Corolla"
+                  required
+                  value={vehicleDraft.model}
+                  onChange={(e) => patchVehicleDraft({ model: e.target.value })}
+                />
+              </Field>
+              <Field label="Versão">
+                <Input
+                  placeholder="XEi 2.0"
+                  value={vehicleDraft.version}
+                  onChange={(e) => patchVehicleDraft({ version: e.target.value })}
+                />
+              </Field>
+              <Field label="Cor" required>
+                <Input
+                  placeholder="Prata"
+                  required
+                  value={vehicleDraft.color}
+                  onChange={(e) => patchVehicleDraft({ color: e.target.value })}
+                />
+              </Field>
             </div>
-            <Badge variant="secondary">{vehicleDraft.accessories.length} selecionado(s)</Badge>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {suggestedAccessories.map((a) => {
-              const active = vehicleDraft.accessories.includes(a);
-              return (
-                <button
-                  key={a}
-                  type="button"
-                  onClick={() => toggleAcc(a)}
-                  className={
-                    "px-3 py-1.5 rounded-full text-xs border transition-colors " +
-                    (active
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "bg-background text-foreground border-border hover:bg-accent")
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-6 space-y-4">
+            <h2 className="font-display font-semibold">Especificações</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field label="Combustível">
+                <Select
+                  value={vehicleDraft.fuel_type}
+                  onValueChange={(value) =>
+                    patchVehicleDraft({ fuel_type: value as VehicleDraft["fuel_type"] })
                   }
                 >
-                  {a}
-                </button>
-              );
-            })}
-          </div>
-          {vehicleDraft.accessories.filter((a) => !suggestedAccessories.includes(a)).length > 0 && (
-            <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
-              {vehicleDraft.accessories
-                .filter((a) => !suggestedAccessories.includes(a))
-                .map((a) => (
-                  <Badge key={a} variant="outline" className="gap-1">
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="flex">Flex</SelectItem>
+                    <SelectItem value="gasoline">Gasolina</SelectItem>
+                    <SelectItem value="diesel">Diesel</SelectItem>
+                    <SelectItem value="electric">Elétrico</SelectItem>
+                    <SelectItem value="hybrid">Híbrido</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Câmbio">
+                <Select
+                  value={vehicleDraft.transmission}
+                  onValueChange={(value) =>
+                    patchVehicleDraft({ transmission: value as VehicleDraft["transmission"] })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manual">Manual</SelectItem>
+                    <SelectItem value="automatic">Automático</SelectItem>
+                    <SelectItem value="cvt">CVT</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Quilometragem">
+                <Input
+                  type="number"
+                  placeholder="0"
+                  value={vehicleDraft.current_mileage || ""}
+                  onChange={(e) =>
+                    patchVehicleDraft({ current_mileage: Number(e.target.value) || 0 })
+                  }
+                />
+              </Field>
+              <Field label="Ano fabricação">
+                <Input
+                  type="number"
+                  placeholder="2024"
+                  value={vehicleDraft.manufacture_year || ""}
+                  onChange={(e) =>
+                    patchVehicleDraft({ manufacture_year: Number(e.target.value) || 0 })
+                  }
+                />
+              </Field>
+              <Field label="Ano modelo">
+                <Input
+                  type="number"
+                  placeholder="2024"
+                  value={vehicleDraft.model_year || ""}
+                  onChange={(e) => patchVehicleDraft({ model_year: Number(e.target.value) || 0 })}
+                />
+              </Field>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-6 space-y-4">
+            <h2 className="font-display font-semibold">Valores</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label={isEvaluation ? "Custo estimado de aquisição" : "Custo de aquisição"}>
+                <Input
+                  type="number"
+                  placeholder="0,00"
+                  value={vehicleDraft.cost_price || ""}
+                  onChange={(e) => patchVehicleDraft({ cost_price: Number(e.target.value) || 0 })}
+                />
+              </Field>
+              <Field label="Valor estimado de venda">
+                <Input
+                  type="number"
+                  placeholder="0,00"
+                  value={vehicleDraft.sale_price || ""}
+                  onChange={(e) => patchVehicleDraft({ sale_price: Number(e.target.value) || 0 })}
+                />
+              </Field>
+            </div>
+            <Field label="Observações">
+              <Textarea
+                rows={3}
+                placeholder="Anotações internas..."
+                value={vehicleDraft.notes}
+                onChange={(e) => patchVehicleDraft({ notes: e.target.value })}
+              />
+            </Field>
+          </CardContent>
+        </Card>
+
+        <VehiclePhotoDrafts
+          photos={photos}
+          editable={!createMutation.isPending}
+          onSelect={selectPhotos}
+          onRemove={(id) =>
+            setPhotos((current) => current.filter((photo) => photo.attempt.id !== id))
+          }
+        />
+
+        {/* Accessories */}
+        <Card>
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-display font-semibold">Acessórios</h2>
+                <p className="text-xs text-muted-foreground">
+                  Selecione os acessórios presentes no veículo.
+                </p>
+              </div>
+              <Badge variant="secondary">{vehicleDraft.accessories.length} selecionado(s)</Badge>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {suggestedAccessories.map((a) => {
+                const active = vehicleDraft.accessories.includes(a);
+                return (
+                  <button
+                    key={a}
+                    type="button"
+                    onClick={() => toggleAcc(a)}
+                    className={
+                      "px-3 py-1.5 rounded-full text-xs border transition-colors " +
+                      (active
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-foreground border-border hover:bg-accent")
+                    }
+                  >
                     {a}
-                    <button type="button" onClick={() => setConfirmAccessoryRemove(a)}>
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                ))}
+                  </button>
+                );
+              })}
             </div>
-          )}
-          <div className="flex gap-2">
-            <Input
-              placeholder="Adicionar acessório personalizado..."
-              value={customAcc}
-              onChange={(e) => setCustomAcc(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addCustomAcc();
-                }
-              }}
-            />
-            <Button type="button" variant="outline" onClick={addCustomAcc}>
-              <Plus className="h-4 w-4" /> Adicionar
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Preparation checklist */}
-      <Card>
-        <CardContent className="p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-display font-semibold">Checklist de Preparação</h2>
-              <p className="text-xs text-muted-foreground">
-                Cadastre tarefas iniciais (reparos, vistoria, fotos, etc).
-              </p>
-            </div>
-            <div className="text-sm">
-              Custo estimado: <span className="font-semibold">{brl(totalEstimated)}</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
-            <div className="md:col-span-4">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                Título
-              </Label>
-              <Input
-                placeholder="Ex.: Polimento"
-                value={checklistDraft.title}
-                onChange={(e) => setChecklistDraft({ ...checklistDraft, title: e.target.value })}
-              />
-            </div>
-            <div className="md:col-span-3">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                Categoria
-              </Label>
-              <Select
-                value={checklistDraft.category}
-                onValueChange={(v) =>
-                  setChecklistDraft({ ...checklistDraft, category: v as ChecklistCategory })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(CATEGORY_LABEL).map(([k, label]) => (
-                    <SelectItem key={k} value={k}>
-                      {label}
-                    </SelectItem>
+            {vehicleDraft.accessories.filter((a) => !suggestedAccessories.includes(a)).length >
+              0 && (
+              <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
+                {vehicleDraft.accessories
+                  .filter((a) => !suggestedAccessories.includes(a))
+                  .map((a) => (
+                    <Badge key={a} variant="outline" className="gap-1">
+                      {a}
+                      <button type="button" onClick={() => setConfirmAccessoryRemove(a)}>
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="md:col-span-2">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                Prioridade
-              </Label>
-              <Select
-                value={checklistDraft.priority}
-                onValueChange={(v) =>
-                  setChecklistDraft({ ...checklistDraft, priority: v as ChecklistPriority })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(PRIORITY_META).map(([k, m]) => (
-                    <SelectItem key={k} value={k}>
-                      {m.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="md:col-span-2">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                Custo est.
-              </Label>
+              </div>
+            )}
+            <div className="flex gap-2">
               <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={checklistDraft.estimated_cost || ""}
-                onChange={(e) =>
-                  setChecklistDraft({
-                    ...checklistDraft,
-                    estimated_cost: Number(e.target.value) || 0,
-                  })
-                }
+                placeholder="Adicionar acessório personalizado..."
+                value={customAcc}
+                onChange={(e) => setCustomAcc(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addCustomAcc();
+                  }
+                }}
               />
-            </div>
-            <div className="md:col-span-1">
-              <Button type="button" className="w-full" onClick={addChecklist}>
-                <Plus className="h-4 w-4" />
+              <Button type="button" variant="outline" onClick={addCustomAcc}>
+                <Plus className="h-4 w-4" /> Adicionar
               </Button>
             </div>
-            <div className="md:col-span-4">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Prazo</Label>
-              <DatePicker
-                value={checklistDraft.due_date}
-                onChange={(v) => setChecklistDraft({ ...checklistDraft, due_date: v })}
-              />
-            </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          {vehicleDraft.checklist.length === 0 ? (
-            <div className="text-sm text-muted-foreground border border-dashed border-border rounded-md p-6 text-center">
-              Nenhum item adicionado ao checklist ainda.
+        {/* Preparation checklist */}
+        <Card>
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-display font-semibold">Checklist de Preparação</h2>
+                <p className="text-xs text-muted-foreground">
+                  Cadastre tarefas iniciais (reparos, vistoria, fotos, etc).
+                </p>
+              </div>
+              <div className="text-sm">
+                Custo estimado: <span className="font-semibold">{brl(totalEstimated)}</span>
+              </div>
             </div>
-          ) : (
-            <div className="space-y-2">
-              {vehicleDraft.checklist.map((c) => (
-                <div
-                  key={c.id}
-                  className="flex items-center gap-3 rounded-md border border-border p-3"
+
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
+              <div className="md:col-span-4">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Título
+                </Label>
+                <Input
+                  placeholder="Ex.: Polimento"
+                  value={checklistDraft.title}
+                  onChange={(e) => setChecklistDraft({ ...checklistDraft, title: e.target.value })}
+                />
+              </div>
+              <div className="md:col-span-3">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Categoria
+                </Label>
+                <Select
+                  value={checklistDraft.category}
+                  onValueChange={(v) =>
+                    setChecklistDraft({ ...checklistDraft, category: v as ChecklistCategory })
+                  }
                 >
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm truncate">{c.title}</div>
-                    <div className="text-xs text-muted-foreground flex flex-wrap gap-2 mt-0.5">
-                      <span>{CATEGORY_LABEL[c.category]}</span>
-                      <span>•</span>
-                      <span>{PRIORITY_META[c.priority].label}</span>
-                      {c.due_date && (
-                        <>
-                          <span>•</span>
-                          <span>Prazo: {c.due_date}</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-sm font-medium">{brl(c.estimated_cost)}</div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setConfirmChecklistRemove(c.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(CATEGORY_LABEL).map(([k, label]) => (
+                      <SelectItem key={k} value={k}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="md:col-span-2">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Prioridade
+                </Label>
+                <Select
+                  value={checklistDraft.priority}
+                  onValueChange={(v) =>
+                    setChecklistDraft({ ...checklistDraft, priority: v as ChecklistPriority })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(PRIORITY_META).map(([k, m]) => (
+                      <SelectItem key={k} value={k}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="md:col-span-2">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Custo est.
+                </Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={checklistDraft.estimated_cost || ""}
+                  onChange={(e) =>
+                    setChecklistDraft({
+                      ...checklistDraft,
+                      estimated_cost: Number(e.target.value) || 0,
+                    })
+                  }
+                />
+              </div>
+              <div className="md:col-span-1">
+                <Button type="button" className="w-full" onClick={addChecklist}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="md:col-span-4">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Prazo
+                </Label>
+                <DatePicker
+                  value={checklistDraft.due_date}
+                  onChange={(v) => setChecklistDraft({ ...checklistDraft, due_date: v })}
+                />
+              </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+
+            {vehicleDraft.checklist.length === 0 ? (
+              <div className="text-sm text-muted-foreground border border-dashed border-border rounded-md p-6 text-center">
+                Nenhum item adicionado ao checklist ainda.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {vehicleDraft.checklist.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center gap-3 rounded-md border border-border p-3"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{c.title}</div>
+                      <div className="text-xs text-muted-foreground flex flex-wrap gap-2 mt-0.5">
+                        <span>{CATEGORY_LABEL[c.category]}</span>
+                        <span>•</span>
+                        <span>{PRIORITY_META[c.priority].label}</span>
+                        {c.due_date && (
+                          <>
+                            <span>•</span>
+                            <span>Prazo: {c.due_date}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-sm font-medium">{brl(c.estimated_cost)}</div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setConfirmChecklistRemove(c.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </fieldset>
       <ConfirmActionDialog
         open={confirmAccessoryRemove != null}
         onOpenChange={(open) => {
