@@ -257,7 +257,7 @@ function EditVehicle() {
 
   return (
     <form onSubmit={submit} className="max-w-4xl mx-auto space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <Button variant="ghost" size="sm" asChild type="button">
           <Link to="/vehicles/$id" params={{ id }}>
             <ArrowLeft className="h-4 w-4" /> Voltar
@@ -274,7 +274,7 @@ function EditVehicle() {
         >
           <Archive className="h-4 w-4" /> Arquivar
         </Button>
-        <Button type="submit" disabled={updateMutation.isPending}>
+        <Button className="hidden sm:inline-flex" type="submit" disabled={updateMutation.isPending}>
           <Save className="h-4 w-4" /> {updateMutation.isPending ? "Salvando..." : "Salvar"}
         </Button>
       </div>
@@ -593,6 +593,9 @@ function EditVehicle() {
         </p>
         <VehicleChecklist vehicleId={v.id} />
       </div>
+      <Button className="w-full sm:hidden" type="submit" disabled={updateMutation.isPending}>
+        <Save className="h-4 w-4" /> {updateMutation.isPending ? "Salvando..." : "Salvar"}
+      </Button>
     </form>
   );
 }

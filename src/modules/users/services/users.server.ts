@@ -100,7 +100,7 @@ async function createAuthUser(input: {
     },
   });
   if (error) throw new Error(error.message);
-  if (!data.user) throw new Error("Supabase Auth não retornou a conta criada.");
+  if (!data.user) throw new Error("Não foi possível criar o acesso do usuário.");
   return { id: data.user.id };
 }
 

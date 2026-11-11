@@ -100,7 +100,7 @@ function EditEmployee() {
 
   return (
     <form onSubmit={submit} className="max-w-3xl mx-auto space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <Button variant="ghost" size="sm" asChild type="button">
           <Link to="/employees/$id" params={{ id }}>
             <ArrowLeft className="h-4 w-4" /> Voltar
@@ -109,7 +109,7 @@ function EditEmployee() {
         <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">
           Editar Funcionário
         </h1>
-        <Button type="submit" disabled={updateMutation.isPending}>
+        <Button className="hidden sm:inline-flex" type="submit" disabled={updateMutation.isPending}>
           <Save className="h-4 w-4" /> {updateMutation.isPending ? "Salvando..." : "Salvar"}
         </Button>
       </div>
@@ -274,6 +274,9 @@ function EditEmployee() {
           </div>
         </CardContent>
       </Card>
+      <Button className="w-full sm:hidden" type="submit" disabled={updateMutation.isPending}>
+        <Save className="h-4 w-4" /> {updateMutation.isPending ? "Salvando..." : "Salvar"}
+      </Button>
     </form>
   );
 }

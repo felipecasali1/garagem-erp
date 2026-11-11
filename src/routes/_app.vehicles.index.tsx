@@ -165,7 +165,7 @@ function VehiclesPage() {
   if (isLoading) {
     return (
       <div className="max-w-[1600px] mx-auto py-10 text-sm text-muted-foreground">
-        Carregando veículos do Supabase...
+        Carregando veículos...
       </div>
     );
   }

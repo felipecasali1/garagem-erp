@@ -136,8 +136,7 @@ function ClientDetail() {
         <CardContent className="p-6 space-y-3">
           <h2 className="font-display font-semibold">Histórico de compras</h2>
           <div className="text-sm text-muted-foreground text-center py-8">
-            O histórico de compras será exibido quando o módulo de vendas estiver conectado ao
-            Supabase.
+            O histórico de compras ainda não está disponível.
           </div>
           <div className="flex items-center justify-between rounded-md border border-border px-4 py-3 text-sm">
             <span>Total acumulado</span>

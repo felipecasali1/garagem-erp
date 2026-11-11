@@ -82,7 +82,7 @@ function EditSupplier() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
         <Button variant="ghost" size="sm" asChild type="button">
           <Link to="/suppliers/$id" params={{ id }}>
             <ArrowLeft className="h-4 w-4" /> Voltar

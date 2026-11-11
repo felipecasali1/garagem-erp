@@ -84,14 +84,14 @@ function NewClient() {
 
   return (
     <form onSubmit={submit} className="max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
         <Button variant="ghost" size="sm" asChild type="button">
           <Link to="/clients">
             <ArrowLeft className="h-4 w-4" /> Clientes
           </Link>
         </Button>
         <h1 className="font-display text-2xl font-semibold tracking-tight flex-1">Novo Cliente</h1>
-        <Button type="submit" disabled={createMutation.isPending}>
+        <Button className="hidden sm:inline-flex" type="submit" disabled={createMutation.isPending}>
           <Save className="h-4 w-4" /> {createMutation.isPending ? "Salvando..." : "Salvar"}
         </Button>
       </div>
@@ -225,6 +225,9 @@ function NewClient() {
           </div>
         </CardContent>
       </Card>
+      <Button className="w-full sm:hidden" type="submit" disabled={createMutation.isPending}>
+        <Save className="h-4 w-4" /> {createMutation.isPending ? "Salvando..." : "Salvar"}
+      </Button>
     </form>
   );
 }
