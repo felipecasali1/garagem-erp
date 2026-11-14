@@ -19,7 +19,6 @@ import {
 import { toast } from "sonner";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { StatusBadge } from "@/shared/components/status-badge";
-import { DEFAULT_ACCESSORIES } from "@/shared/lib/accessories";
 import { brl } from "@/shared/lib/format";
 import { PlateInput } from "@/shared/components/form/field-inputs";
 import { accessoryKeys, listActiveAccessories } from "@/modules/settings/services/accessories";
@@ -83,10 +82,7 @@ function EditVehicle() {
     queryKey: accessoryKeys.active,
     queryFn: listActiveAccessories,
   });
-  const suggestedAccessories =
-    catalogAccessories.length > 0
-      ? catalogAccessories.map((accessory) => accessory.name)
-      : DEFAULT_ACCESSORIES;
+  const suggestedAccessories = catalogAccessories.map((accessory) => accessory.name);
   const [draft, setDraft] = useState<VehicleDraft | null>(null);
   const [baselineUpdatedAt, setBaselineUpdatedAt] = useState<string | null>(null);
   const updateAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);

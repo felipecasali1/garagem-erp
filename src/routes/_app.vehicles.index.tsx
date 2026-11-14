@@ -11,6 +11,7 @@ import {
   Fuel,
   Gauge,
   Calendar,
+  Palette,
   Search,
   MoreHorizontal,
   Pencil,
@@ -281,9 +282,6 @@ function VehiclesPage() {
               className="overflow-hidden hover:shadow-md transition-shadow group cursor-pointer"
             >
               <div className="relative aspect-[16/10] bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
-                <div className="absolute top-3 left-3 z-10">
-                  <StatusBadge kind="vehicle" value={v.status} />
-                </div>
                 <button
                   type="button"
                   onClick={(e) => {
@@ -319,26 +317,32 @@ function VehiclesPage() {
               <CardContent className="p-4 space-y-3">
                 <div>
                   <div className="font-display font-semibold leading-tight">
-                    {v.brand} {v.model}
+                    {v.brand} {v.model}{" "}
+                    {v.version && (
+                      <span className="text-xs font-normal text-muted-foreground">{v.version}</span>
+                    )}
                   </div>
-                  <div className="text-xs text-muted-foreground">{v.version}</div>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="plate-chip">{v.plate}</span>
-                  <span className="text-xs text-muted-foreground">{v.color}</span>
+                  <StatusBadge kind="vehicle" value={v.status} />
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground border-t pt-3">
+                <div className="flex flex-wrap justify-between gap-x-3 gap-y-2 text-xs text-muted-foreground border-t pt-3">
                   <div className="flex items-center gap-1">
                     <Calendar className="h-3 w-3" />
                     {v.model_year}
                   </div>
                   <div className="flex items-center gap-1">
                     <Gauge className="h-3 w-3" />
-                    {(v.current_mileage / 1000).toFixed(0)}k km
+                    {v.current_mileage.toLocaleString("pt-BR")} km
                   </div>
                   <div className="flex items-center gap-1">
                     <Fuel className="h-3 w-3" />
                     {fuelLabel[v.fuel_type]}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Palette className="h-3 w-3" />
+                    {v.color}
                   </div>
                 </div>
                 <div className="flex items-end justify-between pt-1">

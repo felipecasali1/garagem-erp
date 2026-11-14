@@ -18,7 +18,6 @@ import {
 } from "@/shared/components/ui/select";
 import { toast } from "sonner";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
-import { DEFAULT_ACCESSORIES } from "@/shared/lib/accessories";
 import { accessoryKeys, listActiveAccessories } from "@/modules/settings/services/accessories";
 import { PlateInput } from "@/shared/components/form/field-inputs";
 import {
@@ -58,10 +57,7 @@ function NewVehicle() {
     queryKey: accessoryKeys.active,
     queryFn: listActiveAccessories,
   });
-  const suggestedAccessories =
-    catalogAccessories.length > 0
-      ? catalogAccessories.map((accessory) => accessory.name)
-      : DEFAULT_ACCESSORIES;
+  const suggestedAccessories = catalogAccessories.map((accessory) => accessory.name);
   const [vehicleDraft, setVehicleDraft] = useState<VehicleDraft>({
     plate: "",
     chassis: "",

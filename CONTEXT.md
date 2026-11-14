@@ -82,6 +82,10 @@ _Avoid_: usar `FinancialTransaction` para representar a operação comercial que
 Visão histórica das `Sale` atribuídas a um `Employee`, formada por vendas pendentes e concluídas; vendas canceladas não fazem parte desta visão.
 _Avoid_: tratar o histórico comercial como folha salarial ou como um extrato completo de `FinancialTransaction`.
 
+**CustomerPurchaseHistory**:
+Visão das `Sale` pendentes e concluídas atribuídas a um `Customer`; vendas canceladas não fazem parte desta visão. Seu total acumulado soma os valores das vendas concluídas, independentemente da quitação do `Payment`.
+_Avoid_: confundir o histórico de compras do cliente com as operações de `Purchase` da garagem ou com os recebimentos efetivos.
+
 ### Operational follow-up
 
 **OperationalAlert**:
