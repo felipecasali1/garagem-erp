@@ -1,3 +1,4 @@
+import { purchaseHistoryKeys } from "@/modules/customers/services/purchase-history";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -131,6 +132,7 @@ function NewSale() {
     mutationFn: createSale,
     onSuccess: async (saleId) => {
       await queryClient.invalidateQueries({ queryKey: saleKeys.all });
+      await queryClient.invalidateQueries({ queryKey: purchaseHistoryKeys.all });
       await queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
       await queryClient.invalidateQueries({ queryKey: customerKeys.all });
       toast.success(`Venda registrada - ${brl(total)}`);

@@ -31,6 +31,10 @@ import {
   listCustomersPage,
   setCustomerActive,
 } from "@/modules/customers/services/customers";
+import {
+  getCustomerPurchaseTotals,
+  purchaseHistoryKeys,
+} from "@/modules/customers/services/purchase-history";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { ListPagination } from "@/shared/components/list-pagination";
 import { DEFAULT_PAGE_SIZE, getPaginationState, normalizePage } from "@/shared/lib/pagination";
@@ -61,6 +65,12 @@ function ClientsPage() {
     queryFn: () => listCustomersPage(page),
   });
   const customers = customersPage?.data ?? [];
+  const customerIds = customers.map((customer) => customer.id);
+  const totals = useQuery({
+    queryKey: purchaseHistoryKeys.totals(customerIds),
+    queryFn: () => getCustomerPurchaseTotals(customerIds),
+    enabled: !!customersPage && customerIds.length > 0,
+  });
   const total = customersPage?.total ?? 0;
   const pageSize = customersPage?.pageSize ?? DEFAULT_PAGE_SIZE;
   const { totalPages, displayPage, range } = getPaginationState(page, total, pageSize);
@@ -98,6 +108,14 @@ function ClientsPage() {
         }
         action={{ label: "Novo Cliente", to: "/clients/new" }}
       />
+      {totals.isError && (
+        <div className="text-sm text-destructive mb-3">
+          Falha ao calcular totais.{" "}
+          <Button variant="outline" size="sm" onClick={() => void totals.refetch()}>
+            Tentar novamente
+          </Button>
+        </div>
+      )}
       <Card>
         {isLoading ? (
           <div className="p-8 text-sm text-muted-foreground">Carregando clientes...</div>
@@ -156,7 +174,11 @@ function ClientsPage() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">{c.person.email}</TableCell>
                     <TableCell className="text-muted-foreground">
-                      {brl(c.total_purchases)}
+                      {totals.isError
+                        ? "Indisponível"
+                        : totals.data
+                          ? brl(totals.data[c.id])
+                          : "Carregando..."}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {fmtDate(c.created_at)}

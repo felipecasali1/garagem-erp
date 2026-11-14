@@ -550,6 +550,102 @@ test(
     const fixtures = await seedFixtures();
 
     await t.test(
+      "CustomerPurchaseHistory paginates visible sales and totals completed sales for financial users",
+      async () => {
+        const person = await restInsert("people", {
+          name: "Cliente histórico",
+          type: "individual",
+        });
+        const customer = await restInsert("customers", {
+          person_id: person.id,
+          total_purchases: 999999,
+        });
+        const person2 = await restInsert("people", {
+          name: "Cliente reatribuído",
+          type: "individual",
+        });
+        const customer2 = await restInsert("customers", { person_id: person2.id });
+        const sales = [];
+        for (let i = 0; i < 12; i++) {
+          const vehicle = await createVehicle(9000 + i);
+          sales.push(
+            await restInsert("sales", {
+              customer_id: customer.id,
+              vehicle_id: vehicle.id,
+              employee_id: fixtures.users[0].employeeId,
+              sale_date: "2020-01-01",
+              created_at: "2020-01-01T00:00:00Z",
+              total_value: 1000,
+              discount: 100,
+              status: i < 10 ? "completed" : "pending",
+            }),
+          );
+        }
+        const canceledVehicle = await createVehicle(9012);
+        await restInsert("sales", {
+          customer_id: customer.id,
+          vehicle_id: canceledVehicle.id,
+          employee_id: fixtures.users[0].employeeId,
+          sale_date: "2021-01-01",
+          total_value: 9000,
+          status: "canceled",
+        });
+        const user = fixtures.financialOnlyUser;
+        const history = async (offset) =>
+          requestJson(
+            `${apiBase.rest}/rpc/customer_purchase_history?order=sale_date.desc,created_at.desc,id.desc&limit=10&offset=${offset}`,
+            {
+              method: "POST",
+              token: user.accessToken,
+              body: { customer_id_input: customer.id },
+            },
+          );
+        const first = await history(0);
+        const second = await history(10);
+        assert.equal(first.response.status, 200, JSON.stringify(first.data));
+        assert.equal(second.response.status, 200, JSON.stringify(second.data));
+        assert.deepEqual(
+          [...first.data, ...second.data].map((row) => row.id),
+          sales.map((row) => row.id).reverse(),
+        );
+        assert.equal(first.data[0].model, "Corolla Teste 9011");
+        const totals = async () =>
+          callRpc(user, "customer_purchase_totals", { customer_ids: [customer.id, customer2.id] });
+        let result = await totals();
+        assert.equal(result.response.status, 200, JSON.stringify(result.data));
+        assert.deepEqual(
+          result.data.map((row) => Number(row.total)).sort((a, b) => a - b),
+          [0, 10000],
+        );
+        const updates = await Promise.all([
+          requestJson(`${apiBase.rest}/sales?id=eq.${sales[0].id}`, {
+            method: "PATCH",
+            admin: true,
+            body: { customer_id: customer2.id, total_value: 2500 },
+          }),
+          requestJson(`${apiBase.rest}/sales?id=eq.${sales[1].id}`, {
+            method: "PATCH",
+            admin: true,
+            body: { status: "canceled" },
+          }),
+        ]);
+        for (const update of updates)
+          assert.equal(update.response.status, 204, JSON.stringify(update.data));
+        result = await totals();
+        const byCustomer = Object.fromEntries(
+          result.data.map((row) => [row.customer_id, Number(row.total)]),
+        );
+        assert.equal(byCustomer[customer.id], 8000);
+        assert.equal(byCustomer[customer2.id], 2500);
+        const unauthorized = await requestJson(`${apiBase.rest}/rpc/customer_purchase_totals`, {
+          method: "POST",
+          body: { customer_ids: [customer.id] },
+        });
+        assert.ok(unauthorized.response.status >= 400);
+      },
+    );
+
+    await t.test(
       "concurrent CompanySettings creation leaves one row and an authorized User can edit it",
       async () => {
         const user = fixtures.managerUser;

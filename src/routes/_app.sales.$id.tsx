@@ -1,3 +1,4 @@
+import { purchaseHistoryKeys } from "@/modules/customers/services/purchase-history";
 import { useVehiclePhotoPreviews } from "@/modules/vehicles/hooks/use-vehicle-photo-previews";
 import { VehiclePhotoThumbnail } from "@/modules/vehicles/components/vehicle-photo-thumbnail";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
@@ -74,6 +75,7 @@ function SaleDetail() {
 
   const refreshSale = async (vehicleId?: number) => {
     await queryClient.invalidateQueries({ queryKey: saleKeys.all });
+    await queryClient.invalidateQueries({ queryKey: purchaseHistoryKeys.all });
     await queryClient.invalidateQueries({ queryKey: saleKeys.detail(saleId) });
     if (vehicleId) {
       await queryClient.invalidateQueries({ queryKey: vehicleKeys.all });

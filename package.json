@@ -25,7 +25,8 @@
     "test:integration:sales": "npm run test:integration:concurrency",
     "test:integration:financial": "npm run test:integration:concurrency",
     "test:integration:vehicle-photos": "tsc -p tsconfig.tests.json && node --test tests/integration/vehicle-photo-storage.compose.test.mjs",
-    "test": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js tests/unit/selfhosted-compose.test.mjs .test-dist/tests/integration/*.test.js"
+    "test": "tsc -p tsconfig.tests.json && node --test .test-dist/tests/unit/*.test.js tests/unit/selfhosted-compose.test.mjs .test-dist/tests/integration/*.test.js && npm run test:ui",
+    "test:ui": "vitest run"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -86,6 +87,8 @@
   "devDependencies": {
     "@eslint/js": "^9.32.0",
     "@lovable.dev/vite-tanstack-config": "^1.5.1",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^22.16.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
@@ -96,10 +99,12 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
+    "jsdom": "^26.1.0",
     "prettier": "^3.7.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vitest": "^3.2.7"
   },
   "engines": {
     "node": ">=22.12.0"

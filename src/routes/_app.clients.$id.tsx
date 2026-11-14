@@ -7,6 +7,12 @@ import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { Badge } from "@/shared/components/ui/badge";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
 import { formatDocument, formatPhone, formatCep } from "@/shared/lib/field-format";
+import { useAuth } from "@/shared/supabase/auth";
+import {
+  getCustomerPurchaseTotals,
+  purchaseHistoryKeys,
+} from "@/modules/customers/services/purchase-history";
+import { CustomerPurchaseHistory } from "@/modules/customers/components/customer-purchase-history";
 import { customerKeys, getCustomerById } from "@/modules/customers/services/customers";
 
 export const Route = createFileRoute("/_app/clients/$id")({
@@ -18,6 +24,17 @@ function ClientDetail() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
   const customerId = Number(id);
+  const { accessRole } = useAuth();
+  const totals = useQuery({
+    queryKey: purchaseHistoryKeys.totals([customerId]),
+    queryFn: () => getCustomerPurchaseTotals([customerId]),
+    enabled: Number.isFinite(customerId),
+  });
+  const total = totals.isError
+    ? "Indisponível"
+    : totals.data
+      ? brl(totals.data[customerId])
+      : "Carregando...";
   const {
     data: customer,
     isLoading,
@@ -98,7 +115,7 @@ function ClientDetail() {
               />
               <Row icon={Mail} value={customer.person.email} />
               <Row icon={Calendar} value={`Cliente desde ${fmtDate(customer.created_at)}`} />
-              <Row icon={ShoppingBag} value={`Total: ${brl(customer.total_purchases)}`} />
+              <Row icon={ShoppingBag} value={`Total: ${total}`} />
             </div>
           </CardContent>
         </Card>
@@ -135,12 +152,17 @@ function ClientDetail() {
       <Card>
         <CardContent className="p-6 space-y-3">
           <h2 className="font-display font-semibold">Histórico de compras</h2>
-          <div className="text-sm text-muted-foreground text-center py-8">
-            O histórico de compras ainda não está disponível.
-          </div>
+          <CustomerPurchaseHistory customerId={customerId} accessRole={accessRole} />
           <div className="flex items-center justify-between rounded-md border border-border px-4 py-3 text-sm">
             <span>Total acumulado</span>
-            <span className="font-semibold">{brl(customer.total_purchases)}</span>
+            <span className="font-semibold">
+              {total}{" "}
+              {totals.isError && (
+                <Button variant="outline" size="sm" onClick={() => void totals.refetch()}>
+                  Tentar novamente
+                </Button>
+              )}
+            </span>
           </div>
         </CardContent>
       </Card>
