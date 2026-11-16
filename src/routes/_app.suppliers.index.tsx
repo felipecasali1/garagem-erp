@@ -26,12 +26,16 @@ import {
 } from "@/shared/components/ui/table";
 import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { formatDocument, formatPhone } from "@/shared/lib/field-format";
-import { fmtDate, initials } from "@/shared/lib/format";
+import { brl, fmtDate, initials } from "@/shared/lib/format";
 import {
   listSuppliersPage,
   setSupplierActive,
   supplierKeys,
 } from "@/modules/suppliers/services/suppliers";
+import {
+  getSupplierPurchaseTotals,
+  purchaseHistoryKeys,
+} from "@/modules/suppliers/services/purchase-history";
 import { getSupplierTypeLabel } from "@/modules/suppliers/components/supplier-form";
 import { ListPagination } from "@/shared/components/list-pagination";
 import { DEFAULT_PAGE_SIZE, getPaginationState, normalizePage } from "@/shared/lib/pagination";
@@ -62,6 +66,12 @@ function SuppliersPage() {
     queryFn: () => listSuppliersPage(page),
   });
   const suppliers = suppliersPage?.data ?? [];
+  const supplierIds = suppliers.map((supplier) => supplier.id);
+  const totals = useQuery({
+    queryKey: purchaseHistoryKeys.totals(supplierIds),
+    queryFn: () => getSupplierPurchaseTotals(supplierIds),
+    enabled: !!suppliersPage && supplierIds.length > 0,
+  });
   const total = suppliersPage?.total ?? 0;
   const pageSize = suppliersPage?.pageSize ?? DEFAULT_PAGE_SIZE;
   const { totalPages, displayPage, range } = getPaginationState(page, total, pageSize);
@@ -99,6 +109,14 @@ function SuppliersPage() {
         }
         action={{ label: "Novo Fornecedor", to: "/suppliers/new" }}
       />
+      {totals.isError && (
+        <div className="text-sm text-destructive mb-3">
+          Falha ao calcular totais.{" "}
+          <Button variant="outline" size="sm" onClick={() => void totals.refetch()}>
+            Tentar novamente
+          </Button>
+        </div>
+      )}
       <Card>
         {isLoading ? (
           <div className="p-8 text-sm text-muted-foreground">Carregando fornecedores...</div>
@@ -128,6 +146,7 @@ function SuppliersPage() {
                   <TableHead>CPF/CNPJ</TableHead>
                   <TableHead>Telefone</TableHead>
                   <TableHead>Email</TableHead>
+                  <TableHead>Total compras</TableHead>
                   <TableHead>Cadastro</TableHead>
                   <TableHead>Ações</TableHead>
                 </TableRow>
@@ -165,6 +184,13 @@ function SuppliersPage() {
                       {formatPhone(supplier.person.phone)}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{supplier.person.email}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {totals.isError
+                        ? "Indisponível"
+                        : totals.data
+                          ? brl(totals.data[supplier.id])
+                          : "Carregando..."}
+                    </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {fmtDate(supplier.created_at)}
                     </TableCell>

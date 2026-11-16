@@ -1,13 +1,28 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Calendar, FileText, Mail, MapPin, Phone, Tags } from "lucide-react";
+import {
+  ArrowLeft,
+  Calendar,
+  FileText,
+  Mail,
+  MapPin,
+  Phone,
+  Tags,
+  ShoppingBag,
+} from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { Badge } from "@/shared/components/ui/badge";
 import { formatCep, formatDocument, formatPhone } from "@/shared/lib/field-format";
-import { fmtDate, initials } from "@/shared/lib/format";
+import { brl, fmtDate, initials } from "@/shared/lib/format";
 import { getSupplierTypeLabel } from "@/modules/suppliers/components/supplier-form";
+import { useAuth } from "@/shared/supabase/auth";
+import { SupplierPurchaseHistory } from "@/modules/suppliers/components/supplier-purchase-history";
+import {
+  getSupplierPurchaseTotals,
+  purchaseHistoryKeys,
+} from "@/modules/suppliers/services/purchase-history";
 import { getSupplierById, supplierKeys } from "@/modules/suppliers/services/suppliers";
 
 export const Route = createFileRoute("/_app/suppliers/$id")({
@@ -19,6 +34,17 @@ function SupplierDetail() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
   const supplierId = Number(id);
+  const { accessRole } = useAuth();
+  const totals = useQuery({
+    queryKey: purchaseHistoryKeys.totals([supplierId]),
+    queryFn: () => getSupplierPurchaseTotals([supplierId]),
+    enabled: Number.isFinite(supplierId),
+  });
+  const total = totals.isError
+    ? "Indisponível"
+    : totals.data
+      ? brl(totals.data[supplierId])
+      : "Carregando...";
   const {
     data: supplier,
     isLoading,
@@ -100,6 +126,7 @@ function SupplierDetail() {
               <Row icon={Mail} value={supplier.person.email || "-"} />
               <Row icon={Tags} value={getSupplierTypeLabel(supplier.supplier_type)} />
               <Row icon={Calendar} value={`Fornecedor desde ${fmtDate(supplier.created_at)}`} />
+              <Row icon={ShoppingBag} value={`Total: ${total}`} />
             </div>
           </CardContent>
         </Card>
@@ -132,6 +159,24 @@ function SupplierDetail() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardContent className="p-6 space-y-3">
+          <h2 className="font-display font-semibold">Histórico de compras</h2>
+          <SupplierPurchaseHistory supplierId={supplierId} accessRole={accessRole} />
+          <div className="flex items-center justify-between rounded-md border border-border px-4 py-3 text-sm">
+            <span>Total acumulado</span>
+            <span className="font-semibold">
+              {total}{" "}
+              {totals.isError && (
+                <Button variant="outline" size="sm" onClick={() => void totals.refetch()}>
+                  Tentar novamente
+                </Button>
+              )}
+            </span>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="p-6 space-y-3">

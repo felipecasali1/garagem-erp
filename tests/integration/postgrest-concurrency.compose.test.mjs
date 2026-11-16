@@ -550,6 +550,175 @@ test(
     const fixtures = await seedFixtures();
 
     await t.test(
+      "SupplierPurchaseHistory follows pending purchase edits and completion",
+      async () => {
+        const firstSupplier = await createSupplier(93);
+        const secondSupplier = await createSupplier(94);
+        const vehicle = await createVehicle(9101, "evaluating");
+        const user = fixtures.managerUser;
+        const created = await callCreatePurchase(
+          user,
+          purchaseArguments({ fixtures, vehicle, overrides: { p_supplier_id: firstSupplier.id } }),
+        );
+        assert.equal(created.response.status, 200, JSON.stringify(created.data));
+        const firstHistory = await callRpc(user, "supplier_purchase_history", {
+          supplier_id_input: firstSupplier.id,
+        });
+        assert.equal(firstHistory.data.length, 1);
+        const [before] = await authenticatedRows(
+          user,
+          "purchases",
+          `select=id,updated_at&id=eq.${created.data}`,
+        );
+        const edited = await updatePurchase(user, created.data, before.updated_at, fixtures, {
+          supplierId: secondSupplier.id,
+          totalValue: 38000,
+        });
+        assert.equal(edited.response.status, 200, JSON.stringify(edited.data));
+        assert.equal(
+          (
+            await callRpc(user, "supplier_purchase_history", {
+              supplier_id_input: firstSupplier.id,
+            })
+          ).data.length,
+          0,
+        );
+        assert.equal(
+          (
+            await callRpc(user, "supplier_purchase_history", {
+              supplier_id_input: secondSupplier.id,
+            })
+          ).data.length,
+          1,
+        );
+        const [after] = await authenticatedRows(
+          user,
+          "purchases",
+          `select=id,updated_at&id=eq.${created.data}`,
+        );
+        const completed = await transitionPurchase(
+          user,
+          created.data,
+          "complete",
+          after.updated_at,
+        );
+        assert.equal(completed.response.status, 200, JSON.stringify(completed.data));
+        const totals = await callRpc(user, "supplier_purchase_totals", {
+          supplier_ids: [firstSupplier.id, secondSupplier.id],
+        });
+        assert.deepEqual(
+          Object.fromEntries(totals.data.map((row) => [row.supplier_id, Number(row.total)])),
+          { [firstSupplier.id]: 0, [secondSupplier.id]: 38000 },
+        );
+        const vehicles = await Promise.all([
+          createVehicle(9102, "evaluating"),
+          createVehicle(9103, "evaluating"),
+        ]);
+        const concurrent = await Promise.all(
+          vehicles.map((v) =>
+            callCreatePurchase(
+              user,
+              purchaseArguments({
+                fixtures,
+                vehicle: v,
+                overrides: { p_supplier_id: secondSupplier.id, p_status: "completed" },
+              }),
+            ),
+          ),
+        );
+        for (const result of concurrent)
+          assert.equal(result.response.status, 200, JSON.stringify(result.data));
+        const updatedTotals = await callRpc(user, "supplier_purchase_totals", {
+          supplier_ids: [secondSupplier.id],
+        });
+        assert.equal(Number(updatedTotals.data[0].total), 122000);
+      },
+    );
+
+    await t.test(
+      "SupplierPurchaseHistory shows purchases and completed totals to supplier profiles",
+      async () => {
+        const supplier = await createSupplier(91);
+        const other = await createSupplier(92);
+        const vehicle = await createVehicle(9100);
+        const purchases = [];
+        for (let i = 0; i < 13; i++) {
+          purchases.push(
+            await restInsert("purchases", {
+              supplier_id: supplier.id,
+              vehicle_id: vehicle.id,
+              total_value: 1000,
+              purchase_date: "2020-01-01",
+              created_at: "2020-01-01T00:00:00Z",
+              status: i < 10 ? "completed" : i < 12 ? "pending" : "canceled",
+            }),
+          );
+        }
+        for (const user of [fixtures.managerUser, fixtures.users[0], fixtures.financialOnlyUser]) {
+          const history = async (offset) =>
+            requestJson(
+              `${apiBase.rest}/rpc/supplier_purchase_history?order=purchase_date.desc,created_at.desc,id.desc&limit=10&offset=${offset}`,
+              {
+                method: "POST",
+                token: user.accessToken,
+                body: { supplier_id_input: supplier.id },
+              },
+            );
+          const first = await history(0);
+          const second = await history(10);
+          assert.equal(first.response.status, 200, JSON.stringify(first.data));
+          assert.equal(second.response.status, 200, JSON.stringify(second.data));
+          assert.deepEqual(
+            [...first.data, ...second.data].map((row) => row.id),
+            purchases
+              .slice(0, 12)
+              .map((row) => row.id)
+              .reverse(),
+          );
+          const totals = await callRpc(user, "supplier_purchase_totals", {
+            supplier_ids: [supplier.id, other.id],
+          });
+          assert.equal(totals.response.status, 200, JSON.stringify(totals.data));
+          assert.deepEqual(
+            totals.data.map((row) => Number(row.total)).sort((a, b) => a - b),
+            [0, 10000],
+          );
+        }
+        const updates = await Promise.all([
+          requestJson(`${apiBase.rest}/purchases?id=eq.${purchases[10].id}`, {
+            method: "PATCH",
+            admin: true,
+            body: { supplier_id: other.id, total_value: 2500, status: "completed" },
+          }),
+          requestJson(`${apiBase.rest}/vehicles?id=eq.${vehicle.id}`, {
+            method: "PATCH",
+            admin: true,
+            body: { model: "Corrigido" },
+          }),
+        ]);
+        for (const update of updates)
+          assert.equal(update.response.status, 204, JSON.stringify(update.data));
+        const totals = await callRpc(fixtures.financialOnlyUser, "supplier_purchase_totals", {
+          supplier_ids: [supplier.id, other.id],
+        });
+        assert.deepEqual(
+          Object.fromEntries(totals.data.map((row) => [row.supplier_id, Number(row.total)])),
+          { [supplier.id]: 10000, [other.id]: 2500 },
+        );
+        const updated = await callRpc(fixtures.financialOnlyUser, "supplier_purchase_history", {
+          supplier_id_input: other.id,
+        });
+        assert.equal(updated.data.length, 1);
+        assert.equal(updated.data[0].model, "Corrigido");
+        const anonymous = await requestJson(`${apiBase.rest}/rpc/supplier_purchase_totals`, {
+          method: "POST",
+          body: { supplier_ids: [supplier.id] },
+        });
+        assert.ok(anonymous.response.status >= 400);
+      },
+    );
+
+    await t.test(
       "CustomerPurchaseHistory paginates visible sales and totals completed sales for financial users",
       async () => {
         const person = await restInsert("people", {

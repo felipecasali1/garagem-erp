@@ -1,3 +1,4 @@
+import { purchaseHistoryKeys } from "@/modules/suppliers/services/purchase-history";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Car, Plus, Save, Search, UserPlus } from "lucide-react";
@@ -140,6 +141,7 @@ function NewPurchase() {
     onSuccess: async (purchaseId) => {
       createAttemptRef.current = null;
       await queryClient.invalidateQueries({ queryKey: purchaseKeys.all });
+      await queryClient.invalidateQueries({ queryKey: purchaseHistoryKeys.all });
       await queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
       if (selectedVehicleId) {
         await queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(selectedVehicleId) });
