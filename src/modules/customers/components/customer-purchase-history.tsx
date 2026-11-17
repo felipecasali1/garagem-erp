@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ExternalLink } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/shared/components/ui/button";
@@ -55,7 +56,7 @@ export function CustomerPurchaseHistory({
                 <th>Placa</th>
                 <th>Valor final</th>
                 <th>Status</th>
-                <th />
+                <th className="text-right">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -70,11 +71,11 @@ export function CustomerPurchaseHistory({
                   <td>
                     <StatusBadge kind="sale" value={sale.status} />
                   </td>
-                  <td>
+                  <td className="text-right">
                     {canAccessPath(accessRole, "/sales") && (
-                      <Button variant="link" asChild>
+                      <Button variant="ghost" size="icon" aria-label="Ver venda" asChild>
                         <Link to="/sales/$id" params={{ id: String(sale.id) }}>
-                          Ver venda
+                          <ExternalLink className="h-4 w-4" />
                         </Link>
                       </Button>
                     )}

@@ -86,6 +86,10 @@ _Avoid_: tratar o histórico comercial como folha salarial ou como um extrato co
 Visão das `Sale` pendentes e concluídas atribuídas a um `Customer`; vendas canceladas não fazem parte desta visão. Seu total acumulado soma os valores das vendas concluídas, independentemente da quitação do `Payment`.
 _Avoid_: confundir o histórico de compras do cliente com as operações de `Purchase` da garagem ou com os recebimentos efetivos.
 
+**SupplierPurchaseHistory**:
+Visão das `Purchase` pendentes e concluídas atribuídas a um `Supplier`; compras canceladas não fazem parte desta visão. Seu total acumulado soma os valores das compras concluídas, independentemente da quitação das obrigações financeiras.
+_Avoid_: confundir as aquisições da garagem com as vendas ao cliente ou com os pagamentos efetuados.
+
 ### Operational follow-up
 
 **OperationalAlert**:
