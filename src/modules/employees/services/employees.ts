@@ -37,6 +37,7 @@ type EmployeeRow = {
   commission_rate: number;
   commission_type: Employee["commission_type"];
   active: boolean;
+  updated_at: string;
   hired_at: string;
   notes: string | null;
   person: PersonRow | null;
@@ -55,9 +56,10 @@ type UserRow = {
 };
 
 const EMPLOYEE_SELECT =
-  "id, person_id, position, salary, commission_rate, commission_type, active, hired_at, notes, person:people(id, name, type, cpf, cnpj, phone, email, notes)";
+  "id, person_id, position, salary, commission_rate, commission_type, active, updated_at, hired_at, notes, person:people(id, name, type, cpf, cnpj, phone, email, notes)";
 
 export type EmployeeRecord = Employee & {
+  updated_at: string;
   access_role?: EmployeeAccessRole;
   user_id?: number;
   user_active?: boolean;
@@ -101,6 +103,7 @@ function mapEmployee(row: EmployeeRow, user?: UserRow, address?: AddressRow): Em
     commission_rate: Number(row.commission_rate),
     commission_type: row.commission_type,
     active: row.active,
+    updated_at: row.updated_at,
     hired_at: row.hired_at,
     notes: row.notes ?? undefined,
     access_role: user?.access_role,
@@ -352,7 +355,6 @@ export async function updateEmployee(id: number, draft: EmployeeDraft) {
       salary: draft.salary,
       commission_rate: draft.commission_rate,
       commission_type: draft.commission_type,
-      active: draft.active,
       hired_at: draft.hired_at ?? employee.hired_at,
     })
     .eq("id", id);
@@ -364,10 +366,11 @@ export async function updateEmployee(id: number, draft: EmployeeDraft) {
   return getEmployeeById(id);
 }
 
-export async function setEmployeeActive(id: number, active: boolean) {
+export async function setEmployeeActive(id: number, active: boolean, expectedUpdatedAt: string) {
   const { error } = await supabase.rpc("set_employee_active_status", {
     p_employee_id: id,
     p_active: active,
+    p_expected_updated_at: expectedUpdatedAt,
   });
 
   if (error) {

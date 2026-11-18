@@ -50,6 +50,7 @@ function EmployeesPage() {
   const [confirmToggle, setConfirmToggle] = useState<{
     id: number;
     nextActive: boolean;
+    updatedAt: string;
   } | null>(null);
   const {
     data: employeesPage,
@@ -77,12 +78,20 @@ function EmployeesPage() {
     await queryClient.invalidateQueries({ queryKey: employeeKeys.active });
   };
   const toggleMutation = useMutation({
-    mutationFn: ({ id, active }: { id: number; active: boolean }) => setEmployeeActive(id, active),
+    mutationFn: ({ id, active, updatedAt }: { id: number; active: boolean; updatedAt: string }) =>
+      setEmployeeActive(id, active, updatedAt),
     onSuccess: async () => {
       await invalidate();
       toast.success("Status do funcionário atualizado");
     },
-    onError: (error) => {
+    onError: async (error) => {
+      if (error instanceof Error && error.message.includes("STALE_RECORD")) {
+        await invalidate();
+        toast.error(
+          "O funcionário foi alterado. A lista foi atualizada; confira o status e decida novamente.",
+        );
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Falha ao atualizar status.");
     },
   });
@@ -140,7 +149,11 @@ function EmployeesPage() {
                       employee={employee}
                       navigate={navigate}
                       onToggleActive={() =>
-                        setConfirmToggle({ id: employee.id, nextActive: !employee.active })
+                        setConfirmToggle({
+                          id: employee.id,
+                          nextActive: !employee.active,
+                          updatedAt: employee.updated_at,
+                        })
                       }
                     />
                   ))}
@@ -178,7 +191,11 @@ function EmployeesPage() {
           if (confirmToggle == null) return;
           const next = confirmToggle;
           setConfirmToggle(null);
-          toggleMutation.mutate({ id: next.id, active: next.nextActive });
+          toggleMutation.mutate({
+            id: next.id,
+            active: next.nextActive,
+            updatedAt: next.updatedAt,
+          });
         }}
       />
     </div>

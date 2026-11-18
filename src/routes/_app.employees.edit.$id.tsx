@@ -6,7 +6,6 @@ import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
-import { Switch } from "@/shared/components/ui/switch";
 import { DatePicker } from "@/shared/components/ui/date-picker";
 import { toast } from "sonner";
 import { CepInput, CpfCnpjInput, PhoneInput, UfInput } from "@/shared/components/form/field-inputs";
@@ -267,10 +266,9 @@ function EditEmployee() {
                 Inativos não aparecem em novas vendas nem nos responsáveis
               </div>
             </div>
-            <Switch
-              checked={draft.active}
-              onCheckedChange={(value) => patchDraft({ active: value })}
-            />
+            <Button type="button" variant="outline" asChild>
+              <Link to="/employees">Alterar status na lista</Link>
+            </Button>
           </div>
         </CardContent>
       </Card>

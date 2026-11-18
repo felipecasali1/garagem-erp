@@ -995,6 +995,54 @@ test(
       },
     );
 
+    await t.test("stale Employee status changes cannot override a newer decision", async () => {
+      const email = `race-${randomUUID()}@example.test`;
+      const { person, employee } = await createEmployeeWithoutUser("status-race", email);
+      const authUser = await createAuthAccount(email, `${randomSecret(12)}Aa1!`);
+      const user = await restInsert("users", {
+        auth_user_id: authUser.id,
+        person_id: person.id,
+        employee_id: employee.id,
+        access_role: "seller",
+        active: true,
+      });
+      const loaded = await requestJson(
+        `${apiBase.rest}/employees?id=eq.${employee.id}&select=updated_at,active`,
+        { admin: true },
+      );
+      const args = {
+        p_employee_id: employee.id,
+        p_active: false,
+        p_expected_updated_at: loaded.data[0].updated_at,
+      };
+      const [first, second] = await Promise.all([
+        callRpc(fixtures.managerUser, "set_employee_active_status", args),
+        callRpc(fixtures.managerUser, "set_employee_active_status", args),
+      ]);
+      assert.deepEqual([first.response.status, second.response.status].sort(), [204, 409]);
+      const current = await requestJson(
+        `${apiBase.rest}/employees?id=eq.${employee.id}&select=active,updated_at`,
+        { admin: true },
+      );
+      assert.equal(current.data[0].active, false);
+      const suspended = await requestJson(`${apiBase.rest}/users?id=eq.${user.id}&select=active`, {
+        admin: true,
+      });
+      assert.equal(suspended.data[0].active, false);
+      const denied = await callRpc(fixtures.financialOnlyUser, "set_employee_active_status", {
+        ...args,
+        p_active: true,
+        p_expected_updated_at: current.data[0].updated_at,
+      });
+      assert.equal(denied.response.status, 403);
+      const bypass = await requestJson(`${apiBase.rest}/employees?id=eq.${employee.id}`, {
+        method: "PATCH",
+        token: fixtures.managerUser.accessToken,
+        body: { active: true },
+      });
+      assert.equal(bypass.response.ok, false);
+    });
+
     await t.test(
       "Employee deactivation suspends User and reactivation leaves it suspended",
       async () => {
@@ -1009,9 +1057,14 @@ test(
           active: true,
         });
 
+        const beforeStatus = await requestJson(
+          `${apiBase.rest}/employees?id=eq.${employee.id}&select=updated_at`,
+          { admin: true },
+        );
         const deactivated = await callRpc(fixtures.managerUser, "set_employee_active_status", {
           p_employee_id: employee.id,
           p_active: false,
+          p_expected_updated_at: beforeStatus.data[0].updated_at,
         });
         assert.equal(deactivated.response.ok, true, JSON.stringify(deactivated.data));
 
@@ -1034,10 +1087,18 @@ test(
         });
         assert.equal(blockedReactivation.response.ok, false);
 
+        const inactiveEmployee = await requestJson(
+          `${apiBase.rest}/employees?id=eq.${employee.id}&select=updated_at`,
+          { admin: true },
+        );
         const reactivatedEmployee = await callRpc(
           fixtures.managerUser,
           "set_employee_active_status",
-          { p_employee_id: employee.id, p_active: true },
+          {
+            p_employee_id: employee.id,
+            p_active: true,
+            p_expected_updated_at: inactiveEmployee.data[0].updated_at,
+          },
         );
         assert.equal(
           reactivatedEmployee.response.ok,
