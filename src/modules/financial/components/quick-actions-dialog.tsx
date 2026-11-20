@@ -22,6 +22,8 @@ import {
 import { DatePicker } from "@/shared/components/ui/date-picker";
 import {
   createManualFinancialTransaction,
+  discardManualFinancialAttempt,
+  getPendingManualFinancialAttempt,
   financialTransactionKeys,
   type ManualFinancialTransactionDraft,
 } from "@/modules/financial/services/transactions";
@@ -73,18 +75,92 @@ export function FinancialActionDialog({
 
 function useCreateTransaction(onDone: () => void, successMessage: string) {
   const queryClient = useQueryClient();
+  const [pendingAttempt, setPendingAttempt] = useState<ManualFinancialTransactionDraft | null>(
+    null,
+  );
+  const [attemptReady, setAttemptReady] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    void getPendingManualFinancialAttempt()
+      .then((pending) => {
+        if (mounted) {
+          setPendingAttempt(pending);
+          setAttemptReady(true);
+        }
+      })
+      .catch(() => {
+        if (mounted)
+          toast.error(
+            "Não foi possível verificar tentativas pendentes. Confira sua sessão e reabra o formulário.",
+          );
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: createManualFinancialTransaction,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: financialTransactionKeys.all });
-      toast.success(successMessage);
+      toast.success(pendingAttempt ? "Tentativa anterior recuperada" : successMessage);
       onDone();
     },
     onError: (error) => {
+      void getPendingManualFinancialAttempt()
+        .then(setPendingAttempt)
+        .catch(() => {});
       toast.error(error instanceof Error ? error.message : "Falha ao salvar lançamento.");
     },
   });
+  async function startNewAttempt() {
+    try {
+      await discardManualFinancialAttempt();
+      setPendingAttempt(null);
+      mutation.reset();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Não foi possível iniciar outra tentativa.",
+      );
+    }
+  }
+  return { ...mutation, startNewAttempt, pendingAttempt, attemptReady };
+}
+
+function RetryNotice({
+  onStartNew,
+  onRetry,
+  pending,
+  disabled,
+}: {
+  onStartNew: () => void;
+  onRetry: () => void;
+  pending: ManualFinancialTransactionDraft;
+  disabled: boolean;
+}) {
+  return (
+    <div className="rounded-md border p-3 text-sm space-y-2" role="alert">
+      <p>
+        Há um lançamento sem confirmação nesta aba. Recupere a tentativa anterior ou confira se ela
+        já foi registrada antes de iniciar outro lançamento.
+      </p>
+      <p>
+        Descrição: {pending.description} · Valor: {brl(pending.amount)} · Data:{" "}
+        {pending.transaction_date} · Situação: {pending.status === "paid" ? "pago" : "pendente"}
+      </p>
+      <p>
+        Categoria: {pending.category} · Tipo: {pending.type} · Vencimento:{" "}
+        {pending.due_date || "não informado"} · Referência: {pending.related || "não informada"} ·
+        Funcionário: {pending.employee_id ?? "não informado"}
+      </p>
+      <Button type="button" onClick={onRetry} disabled={disabled}>
+        Recuperar tentativa anterior
+      </Button>
+      <Button type="button" variant="outline" onClick={onStartNew} disabled={disabled}>
+        Iniciar outro lançamento
+      </Button>
+    </div>
+  );
 }
 
 function Field({
@@ -118,7 +194,12 @@ function IncomeForm({ onDone }: { onDone: () => void }) {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const parsedAmount = parseAmount(amount);
-    if (!description.trim() || !transactionDate || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    if (
+      !description.trim() ||
+      !transactionDate ||
+      !Number.isFinite(parsedAmount) ||
+      parsedAmount <= 0
+    ) {
       toast.error("Preencha descrição, data e valor corretamente.");
       return;
     }
@@ -137,6 +218,16 @@ function IncomeForm({ onDone }: { onDone: () => void }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {mutation.pendingAttempt && (
+        <RetryNotice
+          pending={mutation.pendingAttempt}
+          disabled={mutation.isPending}
+          onStartNew={() => void mutation.startNewAttempt()}
+          onRetry={() => {
+            if (mutation.pendingAttempt) mutation.mutate(mutation.pendingAttempt);
+          }}
+        />
+      )}
       <Field label="Descrição" required>
         <Input
           required
@@ -169,7 +260,11 @@ function IncomeForm({ onDone }: { onDone: () => void }) {
           </Select>
         </Field>
         <Field label="Data" required>
-          <DatePicker value={transactionDate} onChange={(value) => setTransactionDate(value ?? "")} required />
+          <DatePicker
+            value={transactionDate}
+            onChange={(value) => setTransactionDate(value ?? "")}
+            required
+          />
         </Field>
         <Field label="Vencimento">
           <DatePicker
@@ -188,7 +283,7 @@ function IncomeForm({ onDone }: { onDone: () => void }) {
         />
       </Field>
       <DialogFooter>
-        <Button type="submit" disabled={mutation.isPending}>
+        <Button type="submit" disabled={mutation.isPending || !mutation.attemptReady}>
           {mutation.isPending ? "Salvando..." : "Salvar"}
         </Button>
       </DialogFooter>
@@ -209,7 +304,12 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const parsedAmount = parseAmount(amount);
-    if (!description.trim() || !transactionDate || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    if (
+      !description.trim() ||
+      !transactionDate ||
+      !Number.isFinite(parsedAmount) ||
+      parsedAmount <= 0
+    ) {
       toast.error("Preencha descrição, data e valor corretamente.");
       return;
     }
@@ -228,6 +328,16 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {mutation.pendingAttempt && (
+        <RetryNotice
+          pending={mutation.pendingAttempt}
+          disabled={mutation.isPending}
+          onStartNew={() => void mutation.startNewAttempt()}
+          onRetry={() => {
+            if (mutation.pendingAttempt) mutation.mutate(mutation.pendingAttempt);
+          }}
+        />
+      )}
       <Field label="Descrição" required>
         <Input
           required
@@ -272,7 +382,11 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
           </Select>
         </Field>
         <Field label="Data" required>
-          <DatePicker value={transactionDate} onChange={(value) => setTransactionDate(value ?? "")} required />
+          <DatePicker
+            value={transactionDate}
+            onChange={(value) => setTransactionDate(value ?? "")}
+            required
+          />
         </Field>
         <Field label="Vencimento">
           <DatePicker value={dueDate} onChange={setDueDate} placeholder="Opcional" />
@@ -287,7 +401,7 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
         />
       </Field>
       <DialogFooter>
-        <Button type="submit" disabled={mutation.isPending}>
+        <Button type="submit" disabled={mutation.isPending || !mutation.attemptReady}>
           {mutation.isPending ? "Salvando..." : "Salvar"}
         </Button>
       </DialogFooter>
@@ -307,7 +421,12 @@ function FixedCostForm({ onDone }: { onDone: () => void }) {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const parsedAmount = parseAmount(amount);
-    if (!description.trim() || !transactionDate || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    if (
+      !description.trim() ||
+      !transactionDate ||
+      !Number.isFinite(parsedAmount) ||
+      parsedAmount <= 0
+    ) {
       toast.error("Preencha descrição, data e valor corretamente.");
       return;
     }
@@ -326,6 +445,16 @@ function FixedCostForm({ onDone }: { onDone: () => void }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {mutation.pendingAttempt && (
+        <RetryNotice
+          pending={mutation.pendingAttempt}
+          disabled={mutation.isPending}
+          onStartNew={() => void mutation.startNewAttempt()}
+          onRetry={() => {
+            if (mutation.pendingAttempt) mutation.mutate(mutation.pendingAttempt);
+          }}
+        />
+      )}
       <Field label="Descrição" required>
         <Select value={description} onValueChange={setDescription}>
           <SelectTrigger>
@@ -364,7 +493,11 @@ function FixedCostForm({ onDone }: { onDone: () => void }) {
           </Select>
         </Field>
         <Field label="Data" required>
-          <DatePicker value={transactionDate} onChange={(value) => setTransactionDate(value ?? "")} required />
+          <DatePicker
+            value={transactionDate}
+            onChange={(value) => setTransactionDate(value ?? "")}
+            required
+          />
         </Field>
         <Field label="Vencimento">
           <DatePicker value={dueDate} onChange={setDueDate} placeholder="Opcional" />
@@ -379,7 +512,7 @@ function FixedCostForm({ onDone }: { onDone: () => void }) {
         />
       </Field>
       <DialogFooter>
-        <Button type="submit" disabled={mutation.isPending}>
+        <Button type="submit" disabled={mutation.isPending || !mutation.attemptReady}>
           {mutation.isPending ? "Salvando..." : "Salvar"}
         </Button>
       </DialogFooter>
@@ -428,6 +561,16 @@ function SalaryForm({ onDone }: { onDone: () => void }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {mutation.pendingAttempt && (
+        <RetryNotice
+          pending={mutation.pendingAttempt}
+          disabled={mutation.isPending}
+          onStartNew={() => void mutation.startNewAttempt()}
+          onRetry={() => {
+            if (mutation.pendingAttempt) mutation.mutate(mutation.pendingAttempt);
+          }}
+        />
+      )}
       <Field label="Funcionário" required>
         <Select
           value={currentEmployeeId}
@@ -471,7 +614,11 @@ function SalaryForm({ onDone }: { onDone: () => void }) {
           />
         </Field>
         <Field label="Data de pagamento" required>
-          <DatePicker value={transactionDate} onChange={(value) => setTransactionDate(value ?? "")} required />
+          <DatePicker
+            value={transactionDate}
+            onChange={(value) => setTransactionDate(value ?? "")}
+            required
+          />
         </Field>
       </div>
       <div className="rounded-lg bg-muted p-3 text-sm flex justify-between">
@@ -487,7 +634,7 @@ function SalaryForm({ onDone }: { onDone: () => void }) {
         />
       </Field>
       <DialogFooter>
-        <Button type="submit" disabled={mutation.isPending || !employee}>
+        <Button type="submit" disabled={mutation.isPending || !mutation.attemptReady || !employee}>
           {mutation.isPending ? "Salvando..." : "Confirmar pagamento"}
         </Button>
       </DialogFooter>

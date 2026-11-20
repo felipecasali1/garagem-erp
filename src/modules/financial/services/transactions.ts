@@ -1,6 +1,10 @@
-import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabase } from "@/shared/supabase/client";
+import {
+  discardStoredAttempts,
+  storedAttemptPayloads,
+  runWithStoredAttempt,
+} from "@/shared/lib/idempotency";
 import type {
   FinancialTransaction,
   TransactionCategory,
@@ -296,35 +300,45 @@ export async function updateManualFinancialTransaction(
   return data as number;
 }
 
-const createManualFinancialTransactionServer = createServerFn({ method: "POST" })
-  .inputValidator(manualFinancialTransactionSchema)
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/shared/supabase/server");
-
-    const { data: transaction, error } = await supabaseAdmin
-      .from("financial_transactions")
-      .insert({
-        type: data.type,
-        category: data.category,
-        status: data.status,
-        amount: data.amount,
-        transaction_date: data.transaction_date,
-        due_date: data.due_date || null,
-        paid_at: data.status === "paid" ? new Date().toISOString() : null,
-        description: data.description.trim(),
-        related: data.related?.trim() || null,
-        employee_id: data.employee_id ?? null,
-      })
-      .select("id")
-      .single();
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    return transaction.id as number;
-  });
-
 export async function createManualFinancialTransaction(draft: ManualFinancialTransactionDraft) {
-  return createManualFinancialTransactionServer({ data: draft });
+  const input = manualFinancialTransactionSchema.parse(draft);
+  const { data: session, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) throw new Error(sessionError.message);
+  const userId = session.session?.user.id;
+  if (!userId) throw new Error("Sua sessão expirou. Entre novamente para continuar.");
+  return runWithStoredAttempt(
+    "manual-financial",
+    userId,
+    input,
+    async (key) => {
+      const { data, error } = await supabase.rpc("create_manual_financial_transaction", {
+        p_idempotency_key: key,
+        p_transaction: input,
+      });
+      if (error) throw new Error(error.message);
+      return data as number;
+    },
+    { exclusive: true, rememberPayload: true },
+  );
+}
+
+async function currentFinancialUserId() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw new Error(error.message);
+  if (!data.session?.user.id)
+    throw new Error("Sua sessão expirou. Entre novamente para continuar.");
+  return data.session.user.id;
+}
+
+export async function getPendingManualFinancialAttempt() {
+  return (
+    storedAttemptPayloads<ManualFinancialTransactionDraft>(
+      "manual-financial",
+      await currentFinancialUserId(),
+    )[0] ?? null
+  );
+}
+
+export async function discardManualFinancialAttempt() {
+  discardStoredAttempts("manual-financial", await currentFinancialUserId());
 }

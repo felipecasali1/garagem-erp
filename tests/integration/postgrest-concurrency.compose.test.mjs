@@ -549,6 +549,145 @@ test(
 
     const fixtures = await seedFixtures();
 
+    await t.test("manual financial creation safely replays the same logical request", async () => {
+      const args = {
+        p_idempotency_key: randomUUID(),
+        p_transaction: {
+          type: "expense",
+          category: "other",
+          status: "pending",
+          amount: 123.45,
+          transaction_date: "2026-11-01",
+          description: `Teste ${randomUUID()}`,
+        },
+      };
+      const [first, retry] = await Promise.all([
+        callRpc(fixtures.financialOnlyUser, "create_manual_financial_transaction", args),
+        callRpc(fixtures.financialOnlyUser, "create_manual_financial_transaction", args),
+      ]);
+      assert.equal(first.response.status, 200, JSON.stringify(first.data));
+      assert.equal(retry.response.status, 200, JSON.stringify(retry.data));
+      assert.equal(retry.data, first.data);
+      const changed = await callRpc(
+        fixtures.financialOnlyUser,
+        "create_manual_financial_transaction",
+        {
+          ...args,
+          p_transaction: { ...args.p_transaction, amount: 500 },
+        },
+      );
+      assert.equal(changed.response.status, 409);
+      const rows = await authenticatedRows(
+        fixtures.financialOnlyUser,
+        "financial_transactions",
+        `select=id&description=eq.${encodeURIComponent(args.p_transaction.description)}`,
+      );
+      assert.equal(rows.length, 1);
+      const denied = await callRpc(fixtures.users[0], "create_manual_financial_transaction", {
+        ...args,
+        p_idempotency_key: randomUUID(),
+      });
+      assert.equal(denied.response.status, 403);
+      const recoveryKey = randomUUID();
+      const invalid = await callRpc(
+        fixtures.financialOnlyUser,
+        "create_manual_financial_transaction",
+        {
+          ...args,
+          p_idempotency_key: recoveryKey,
+          p_transaction: { ...args.p_transaction, employee_id: 999999999 },
+        },
+      );
+      assert.equal(invalid.response.ok, false);
+      const recovered = await callRpc(
+        fixtures.financialOnlyUser,
+        "create_manual_financial_transaction",
+        {
+          ...args,
+          p_idempotency_key: recoveryKey,
+        },
+      );
+      assert.equal(recovered.response.status, 200, JSON.stringify(recovered.data));
+      assert.notEqual(recovered.data, first.data);
+    });
+
+    await t.test(
+      "checklist updates replay their original result without overwriting newer work",
+      async () => {
+        const user = fixtures.users[0];
+        const vehicle = await createVehicle(4123);
+        const created = await callRpc(
+          user,
+          "create_vehicle_checklist_item",
+          checklistItem(vehicle.id),
+        );
+        assert.equal(created.response.status, 200, JSON.stringify(created.data));
+        const args = {
+          p_idempotency_key: randomUUID(),
+          p_item_id: created.data.id,
+          p_expected_updated_at: created.data.updated_at,
+          p_changes: { status: "cancelled" },
+        };
+        const [first, retry] = await Promise.all([
+          callRpc(user, "update_vehicle_checklist_item_idempotent", args),
+          callRpc(user, "update_vehicle_checklist_item_idempotent", args),
+        ]);
+        assert.equal(first.response.status, 200, JSON.stringify(first.data));
+        assert.equal(retry.response.status, 200, JSON.stringify(retry.data));
+        assert.deepEqual(retry.data, first.data);
+        const changed = await callRpc(user, "update_vehicle_checklist_item_idempotent", {
+          ...args,
+          p_changes: { status: "completed" },
+        });
+        assert.equal(changed.response.status, 409);
+        const denied = await callRpc(
+          fixtures.financialOnlyUser,
+          "update_vehicle_checklist_item_idempotent",
+          {
+            ...args,
+            p_idempotency_key: randomUUID(),
+          },
+        );
+        assert.equal(denied.response.status, 403);
+        const legacy = await callRpc(user, "update_vehicle_checklist_item", {
+          p_item_id: created.data.id,
+          p_expected_updated_at: first.data.updated_at,
+          p_changes: { status: "pending" },
+        });
+        assert.equal(legacy.response.ok, false);
+        const next = await callRpc(user, "update_vehicle_checklist_item_idempotent", {
+          ...args,
+          p_idempotency_key: randomUUID(),
+          p_expected_updated_at: first.data.updated_at,
+          p_changes: { status: "pending" },
+        });
+        assert.equal(next.response.status, 200, JSON.stringify(next.data));
+        const replay = await callRpc(user, "update_vehicle_checklist_item_idempotent", args);
+        assert.deepEqual(replay.data, first.data);
+        const [current] = await authenticatedRows(
+          user,
+          "vehicle_checklist_items",
+          `select=status&id=eq.${created.data.id}`,
+        );
+        assert.equal(current.status, "pending");
+        const failedKey = randomUUID();
+        const failed = await callRpc(user, "update_vehicle_checklist_item_idempotent", {
+          ...args,
+          p_idempotency_key: failedKey,
+          p_expected_updated_at: next.data.updated_at,
+          p_changes: { status: "not-a-status" },
+        });
+        assert.equal(failed.response.ok, false);
+        const recovered = await callRpc(user, "update_vehicle_checklist_item_idempotent", {
+          ...args,
+          p_idempotency_key: failedKey,
+          p_expected_updated_at: next.data.updated_at,
+          p_changes: { status: "in_progress" },
+        });
+        assert.equal(recovered.response.status, 200, JSON.stringify(recovered.data));
+      },
+    );
+
     await t.test("the initial accessory catalog is available to authorized users", async () => {
       const result = await requestJson(`${apiBase.rest}/accessories?select=name,active`, {
         token: fixtures.managerUser.accessToken,
@@ -2377,7 +2516,8 @@ test(
         assert.equal(currentVehicle.status, "in_repair");
         assert.equal(currentVehicle.published, false);
 
-        const completed = await callRpc(user, "update_vehicle_checklist_item", {
+        const completed = await callRpc(user, "update_vehicle_checklist_item_idempotent", {
+          p_idempotency_key: randomUUID(),
           p_item_id: item.id,
           p_expected_updated_at: item.updated_at,
           p_changes: { status: "completed", completion_date: "2026-11-02" },
@@ -2391,7 +2531,8 @@ test(
         currentVehicle = finished.data;
         assert.equal(currentVehicle.status, "available");
 
-        const reopened = await callRpc(user, "update_vehicle_checklist_item", {
+        const reopened = await callRpc(user, "update_vehicle_checklist_item_idempotent", {
+          p_idempotency_key: randomUUID(),
           p_item_id: item.id,
           p_expected_updated_at: completed.data.updated_at,
           p_changes: { status: "pending", completion_date: null },
@@ -2485,13 +2626,15 @@ test(
         checklistItem(vehicle.id),
       );
       assert.equal(created.response.status, 200, JSON.stringify(created.data));
-      const firstItemSave = await callRpc(user, "update_vehicle_checklist_item", {
+      const firstItemSave = await callRpc(user, "update_vehicle_checklist_item_idempotent", {
+        p_idempotency_key: randomUUID(),
         p_item_id: created.data.id,
         p_expected_updated_at: created.data.updated_at,
         p_changes: { status: "in_progress", actual_cost: 50 },
       });
       assert.equal(firstItemSave.response.status, 200, JSON.stringify(firstItemSave.data));
-      const staleItemSave = await callRpc(user, "update_vehicle_checklist_item", {
+      const staleItemSave = await callRpc(user, "update_vehicle_checklist_item_idempotent", {
+        p_idempotency_key: randomUUID(),
         p_item_id: created.data.id,
         p_expected_updated_at: created.data.updated_at,
         p_changes: { status: "completed", actual_cost: 900 },

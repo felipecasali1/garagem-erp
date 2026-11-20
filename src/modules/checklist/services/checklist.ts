@@ -2,6 +2,11 @@ import { supabase } from "@/shared/supabase/client";
 import { summarizeChecklist } from "@/modules/checklist/lib/summarize-checklist";
 import type { ChecklistItem, ChecklistSummary } from "@/modules/checklist/types";
 import { StaleRecordError } from "@/shared/lib/stale-record";
+import {
+  discardStoredAttempt,
+  runWithStoredAttempt,
+  storedAttemptPayloads,
+} from "@/shared/lib/idempotency";
 
 type ChecklistRow = {
   id: string;
@@ -244,10 +249,12 @@ async function getChecklistItem(id: string): Promise<ChecklistItem | null> {
   return data ? mapChecklistItem(data as ChecklistRow) : null;
 }
 
+class DefinitiveChecklistError extends Error {}
+
 async function unwrapChecklistRpc(
   response: PromiseLike<{
     data: unknown;
-    error: { message: string } | null;
+    error: { message: string; code?: string } | null;
   }>,
   itemId?: string,
 ) {
@@ -267,6 +274,9 @@ async function unwrapChecklistRpc(
     }
     if (error.message.includes("VEHICLE_HAS_OPEN_PREPARATION:")) {
       throw new Error("Conclua ou cancele as tarefas pendentes antes de disponibilizar o veículo.");
+    }
+    if (error.code && /^(22|23|42)/.test(error.code)) {
+      throw new DefinitiveChecklistError(error.message);
     }
     throw new Error(error.message);
   }
@@ -367,14 +377,54 @@ export async function updateChecklistItem(
   patch: Partial<ChecklistItem>,
   expectedUpdatedAt: string,
 ) {
-  return unwrapChecklistRpc(
-    supabase.rpc("update_vehicle_checklist_item", {
-      p_item_id: id,
-      p_expected_updated_at: expectedUpdatedAt,
-      p_changes: toChecklistPatch(patch),
-    }),
-    id,
+  const changes = toChecklistPatch(patch);
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw new Error(error.message);
+  const userId = data.session?.user.id;
+  if (!userId) throw new Error("Sua sessão expirou. Entre novamente para continuar.");
+  const payload = { p_item_id: id, p_expected_updated_at: expectedUpdatedAt, p_changes: changes };
+  const namespace = `checklist-update:${id}`;
+  type UpdatePayload = typeof payload;
+  const execute = (command: UpdatePayload) =>
+    runWithStoredAttempt(
+      namespace,
+      userId,
+      command,
+      (key) =>
+        unwrapChecklistRpc(
+          supabase.rpc("update_vehicle_checklist_item_idempotent", {
+            p_idempotency_key: key,
+            ...command,
+          }),
+          id,
+        ),
+      { rememberPayload: true },
+    );
+  const pending = storedAttemptPayloads<UpdatePayload>(namespace, userId).find(
+    (command) => JSON.stringify(command) !== JSON.stringify(payload),
   );
+  if (pending) {
+    try {
+      await execute(pending);
+    } catch (failure) {
+      if (failure instanceof StaleRecordError || failure instanceof DefinitiveChecklistError)
+        await discardStoredAttempt(namespace, userId, pending);
+      else throw failure;
+    }
+    const current = await getChecklistItem(id);
+    throw new StaleRecordError(
+      "Uma tentativa anterior foi verificada. Confira a tarefa atual antes de aplicar sua alteração.",
+      current,
+    );
+  }
+  try {
+    return await execute(payload);
+  } catch (failure) {
+    if (failure instanceof StaleRecordError || failure instanceof DefinitiveChecklistError) {
+      await discardStoredAttempt(namespace, userId, payload);
+    }
+    throw failure;
+  }
 }
 
 export async function cancelChecklistItem(id: string, expectedUpdatedAt: string) {
