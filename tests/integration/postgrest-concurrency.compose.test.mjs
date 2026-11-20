@@ -549,6 +549,17 @@ test(
 
     const fixtures = await seedFixtures();
 
+    await t.test("the initial accessory catalog is available to authorized users", async () => {
+      const result = await requestJson(`${apiBase.rest}/accessories?select=name,active`, {
+        token: fixtures.managerUser.accessToken,
+      });
+      assert.equal(result.response.status, 200, JSON.stringify(result.data));
+      const activeNames = result.data.filter((item) => item.active).map((item) => item.name);
+      assert.ok(activeNames.includes("Ar-condicionado"));
+      assert.ok(activeNames.includes("Multimídia"));
+      assert.equal(new Set(activeNames.map((name) => name.toLowerCase())).size, activeNames.length);
+    });
+
     await t.test(
       "SupplierPurchaseHistory follows pending purchase edits and completion",
       async () => {
