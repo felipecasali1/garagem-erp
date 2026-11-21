@@ -15,7 +15,7 @@ import {
   ShoppingCart,
   AlertTriangle,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
@@ -70,6 +70,7 @@ function VehicleDetail() {
   const { accessRole } = useAuth();
   const [confirmFinishPreparation, setConfirmFinishPreparation] = useState(false);
   const [activeTab, setActiveTab] = useState("info");
+  const tabsRef = useRef<HTMLDivElement>(null);
   const [conflict, setConflict] = useState<{
     current: Vehicle | null;
     action: "publish" | "finish";
@@ -266,7 +267,18 @@ function VehicleDetail() {
                 <CheckCircle2 className="h-4 w-4" /> Finalizar preparação
               </Button>
             ) : (
-              <Button variant="outline" onClick={() => setActiveTab("checklist")}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setActiveTab("checklist");
+                  tabsRef.current?.scrollIntoView({
+                    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                      ? "instant"
+                      : "smooth",
+                    block: "start",
+                  });
+                }}
+              >
                 Ver checklist
               </Button>
             )}
@@ -351,7 +363,7 @@ function VehicleDetail() {
         </Card>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      <Tabs ref={tabsRef} className="scroll-mt-20" value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="info">Informações</TabsTrigger>
           <TabsTrigger value="checklist">Checklist ({checklistSummary.total})</TabsTrigger>
