@@ -47,6 +47,18 @@ O teste inicia um projeto Compose descartável, aplica as migrations e executa c
 
 `npm run test:integration:sales` permanece como alias de compatibilidade e executa a mesma suíte combinada.
 
+## Validar autorização no banco
+
+```bash
+npm run test:integration:authorization
+```
+
+O comando executa os arquivos `*_test.sql` de `supabase/tests/database` com pgTAP, usando a imagem PostgreSQL do projeto. Ele cria um projeto Compose, uma rede e volumes descartáveis com nomes próprios, aplica as migrations atuais e remove os recursos ao terminar, inclusive em caso de erro. Não usa a Supabase CLI no host, as credenciais Cloud, `.env.compose` ou os volumes da instalação habitual. Os pré-requisitos são Node.js e Docker Compose; as imagens podem ser baixadas na primeira execução.
+
+Cada resultado TAP é conferido: falhas de SQL, testes `not ok` e planos incompletos fazem o comando terminar com erro. Para executar um arquivo SQL específico no mesmo ambiente descartável, use `node scripts/test-sql-authorization.mjs caminho/do/teste.sql`.
+
+O teste de autorização espera que uma identidade sem vínculo interno não leia nem grave veículos. Como as migrations atuais exigem comandos autorizados para escrita e revogam a gravação direta na tabela, a tentativa de `INSERT` é negada pela permissão da tabela antes de chegar à política de linha.
+
 Este recorte inclui Postgres, Auth, PostgREST, Storage, Studio, gateway e aplicação. A galeria usa um bucket privado e o backend de arquivos persiste no volume `garagem-erp-storage`; as imagens são otimizadas no navegador antes do envio. Realtime, Edge Functions, pooler, imgproxy e observabilidade não são iniciados. As imagens de Supabase estão fixadas na versão da configuração self-hosted `v0.8.3` (commit `bc27d2661edd09a5d0b8d76ce33da6d4071a756e`). Os pequenos arquivos de bootstrap do banco e do gateway são adaptações da configuração oficial Supabase, licenciada sob Apache-2.0. Um backup futuro precisa copiar o volume de Storage junto com o banco para manter registros e arquivos consistentes.
 
 ## Galeria privada de veículos

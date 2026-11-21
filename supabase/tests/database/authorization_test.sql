@@ -103,7 +103,7 @@ select throws_ok(
     )
   $$,
   '42501',
-  'new row violates row-level security policy for table "vehicles"',
+  'permission denied for table vehicles',
   'authenticated users without an active internal account cannot write vehicles'
 );
 
