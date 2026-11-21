@@ -1,11 +1,9 @@
 import { supabase } from "@/shared/supabase/client";
+import { normalizeDocument, normalizePhone } from "@/shared/lib/field-format";
 import {
-  normalizeCep,
-  normalizeDocument,
-  normalizePhone,
-  normalizeUf,
-} from "@/shared/lib/field-format";
-import { createPersonConfiguration } from "@/shared/supabase/person-configuration";
+  createPersonConfiguration,
+  updatePersonConfiguration,
+} from "@/shared/supabase/person-configuration";
 import type { Address, Person, PersonType } from "@/shared/types/domain";
 import type { SupplierDraft, SupplierType } from "@/modules/suppliers/types";
 import { getPageBounds, type PaginatedResult } from "@/shared/lib/pagination";
@@ -201,42 +199,6 @@ async function fetchSupplierPage(pageInput: number): Promise<PaginatedResult<Sup
   };
 }
 
-async function upsertPrimaryAddress(personId: number, address: Address) {
-  const { data: existing, error: existingError } = await supabase
-    .from("addresses")
-    .select("id")
-    .eq("person_id", personId)
-    .eq("is_primary", true)
-    .maybeSingle();
-
-  if (existingError) {
-    throw new Error(existingError.message);
-  }
-
-  const payload = {
-    person_id: personId,
-    street: normalizeText(address.street),
-    number: normalizeText(address.number),
-    complement: normalizeText(address.complement),
-    neighborhood: normalizeText(address.neighborhood),
-    city: normalizeText(address.city),
-    state: normalizeText(normalizeUf(address.state)),
-    zip_code: normalizeText(normalizeCep(address.zip_code)),
-    is_primary: true,
-  };
-
-  if (existing) {
-    const { error } = await supabase.from("addresses").update(payload).eq("id", existing.id);
-    if (error) throw new Error(error.message);
-    return;
-  }
-
-  const { error } = await supabase.from("addresses").insert(payload);
-  if (error) {
-    throw new Error(error.message);
-  }
-}
-
 export async function listSuppliers() {
   return fetchSupplierRows();
 }
@@ -302,45 +264,23 @@ export async function createSupplierFromDraft(draft: SupplierDraft, idempotencyK
 }
 
 export async function updateSupplier(id: number, draft: SupplierDraft) {
-  const supplier = await getSupplierById(id);
-  const documentField = draft.type === "company" ? "cnpj" : "cpf";
-
-  const { error: personError } = await supabase
-    .from("people")
-    .update({
+  const existing = await getSupplierById(id);
+  const document = normalizeDocument(draft.document, draft.type) || null;
+  await updatePersonConfiguration({
+    role: "supplier",
+    roleId: id,
+    personId: existing.person.id,
+    person: {
       name: draft.name.trim(),
       type: draft.type,
-      cpf:
-        documentField === "cpf"
-          ? normalizeText(normalizeDocument(draft.document, "individual"))
-          : null,
-      cnpj:
-        documentField === "cnpj"
-          ? normalizeText(normalizeDocument(draft.document, "company"))
-          : null,
+      cpf: draft.type === "individual" ? document : null,
+      cnpj: draft.type === "company" ? document : null,
       phone: normalizeText(normalizePhone(draft.phone)),
       email: normalizeText(draft.email),
-    })
-    .eq("id", supplier.person.id);
-
-  if (personError) {
-    throw new Error(personError.message);
-  }
-
-  await upsertPrimaryAddress(supplier.person.id, draft.primary_address);
-
-  const { error: supplierError } = await supabase
-    .from("suppliers")
-    .update({
-      notes: normalizeText(draft.notes),
-      supplier_type: draft.supplier_type,
-    })
-    .eq("id", id);
-
-  if (supplierError) {
-    throw new Error(supplierError.message);
-  }
-
+    },
+    primaryAddress: draft.primary_address,
+    roleData: { notes: normalizeText(draft.notes), supplier_type: draft.supplier_type },
+  });
   return getSupplierById(id);
 }
 

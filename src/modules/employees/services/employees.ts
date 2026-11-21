@@ -1,6 +1,9 @@
 import { supabase } from "@/shared/supabase/client";
-import { normalizeCep, normalizeCpf, normalizePhone, normalizeUf } from "@/shared/lib/field-format";
-import { createPersonConfiguration } from "@/shared/supabase/person-configuration";
+import { normalizeCpf, normalizePhone } from "@/shared/lib/field-format";
+import {
+  createPersonConfiguration,
+  updatePersonConfiguration,
+} from "@/shared/supabase/person-configuration";
 import type { Address, Employee, PersonType } from "@/shared/types/domain";
 import type { EmployeeAccessRole, EmployeeDraft } from "@/modules/employees/types";
 import { getPageBounds, type PaginatedResult } from "@/shared/lib/pagination";
@@ -261,44 +264,6 @@ export async function getEmployeeById(id: number) {
   return employee;
 }
 
-async function upsertPrimaryAddress(personId: number, address: EmployeeDraft["primary_address"]) {
-  const { data: existing, error: existingError } = await supabase
-    .from("addresses")
-    .select("id")
-    .eq("person_id", personId)
-    .eq("is_primary", true)
-    .maybeSingle();
-
-  if (existingError) {
-    throw new Error(existingError.message);
-  }
-
-  const payload = {
-    person_id: personId,
-    street: normalizeText(address.street),
-    number: normalizeText(address.number),
-    complement: normalizeText(address.complement),
-    neighborhood: normalizeText(address.neighborhood),
-    city: normalizeText(address.city),
-    state: normalizeText(normalizeUf(address.state)),
-    zip_code: normalizeText(normalizeCep(address.zip_code)),
-    is_primary: true,
-  };
-
-  if (existing) {
-    const { error } = await supabase.from("addresses").update(payload).eq("id", existing.id);
-    if (error) {
-      throw new Error(error.message);
-    }
-    return;
-  }
-
-  const { error } = await supabase.from("addresses").insert(payload);
-  if (error) {
-    throw new Error(error.message);
-  }
-}
-
 export async function createEmployee(draft: EmployeeDraft, idempotencyKey: string) {
   const result = await createPersonConfiguration({
     idempotencyKey,
@@ -330,39 +295,26 @@ export async function createEmployee(draft: EmployeeDraft, idempotencyKey: strin
 }
 
 export async function updateEmployee(id: number, draft: EmployeeDraft) {
-  const employee = await getEmployeeById(id);
-
-  const { error: personError } = await supabase
-    .from("people")
-    .update({
+  const existing = await getEmployeeById(id);
+  await updatePersonConfiguration({
+    role: "employee",
+    roleId: id,
+    personId: existing.person.id,
+    person: {
       name: draft.name.trim(),
       cpf: normalizeText(normalizeCpf(draft.cpf)),
       phone: normalizeText(normalizePhone(draft.phone)),
       email: normalizeText(draft.email),
-    })
-    .eq("id", employee.person.id);
-
-  if (personError) {
-    throw new Error(personError.message);
-  }
-
-  await upsertPrimaryAddress(employee.person.id, draft.primary_address);
-
-  const { error: employeeError } = await supabase
-    .from("employees")
-    .update({
+    },
+    primaryAddress: draft.primary_address,
+    roleData: {
       position: draft.position.trim(),
       salary: draft.salary,
       commission_rate: draft.commission_rate,
       commission_type: draft.commission_type,
-      hired_at: draft.hired_at ?? employee.hired_at,
-    })
-    .eq("id", id);
-
-  if (employeeError) {
-    throw new Error(employeeError.message);
-  }
-
+      ...(draft.hired_at ? { hired_at: draft.hired_at } : {}),
+    },
+  });
   return getEmployeeById(id);
 }
 

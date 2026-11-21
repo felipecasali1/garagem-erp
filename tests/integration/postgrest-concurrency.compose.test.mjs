@@ -688,6 +688,143 @@ test(
       },
     );
 
+    await t.test(
+      "customer edits commit person, address and role together with safe retries",
+      async () => {
+        const user = fixtures.managerUser;
+        const args = {
+          p_idempotency_key: randomUUID(),
+          p_role: "customer",
+          p_role_id: fixtures.customerId,
+          p_person: {
+            name: "Cliente atualizado",
+            type: "individual",
+            cpf: null,
+            cnpj: null,
+            phone: null,
+            email: null,
+          },
+          p_primary_address: {
+            street: "Rua teste",
+            city: "Campo Grande",
+            state: "MS",
+            zip_code: "79000000",
+          },
+          p_role_data: { notes: "Observação atualizada" },
+        };
+        const [first, retry] = await Promise.all([
+          callRpc(user, "update_person_configuration", args),
+          callRpc(user, "update_person_configuration", args),
+        ]);
+        assert.equal(first.response.status, 200, JSON.stringify(first.data));
+        assert.equal(retry.response.status, 200, JSON.stringify(retry.data));
+        assert.deepEqual(retry.data, first.data);
+        const customers = await authenticatedRows(
+          user,
+          "customers",
+          `select=notes,person:people(name)&id=eq.${fixtures.customerId}`,
+        );
+        assert.equal(customers[0].notes, "Observação atualizada");
+        assert.equal(customers[0].person.name, "Cliente atualizado");
+        const changed = await callRpc(user, "update_person_configuration", {
+          ...args,
+          p_role_data: { notes: "outra" },
+        });
+        assert.equal(changed.response.status, 409);
+      },
+    );
+
+    await t.test("supplier edits preserve shared identity and respect authorization", async () => {
+      const supplier = await createSupplier(312);
+      const customer = await restInsert("customers", {
+        person_id: supplier.person_id,
+        active: true,
+      });
+      const args = {
+        p_idempotency_key: randomUUID(),
+        p_role: "supplier",
+        p_role_id: supplier.id,
+        p_person: { name: "Identidade compartilhada" },
+        p_primary_address: { street: "Rua compartilhada", city: "Campo Grande" },
+        p_role_data: { notes: "Fornecedor atualizado", supplier_type: "dealership" },
+      };
+      const denied = await callRpc(fixtures.financialOnlyUser, "update_person_configuration", args);
+      assert.equal(denied.response.status, 403);
+      const first = await callRpc(fixtures.users[0], "update_person_configuration", args);
+      assert.equal(first.response.status, 200, JSON.stringify(first.data));
+      const retry = await callRpc(fixtures.users[0], "update_person_configuration", args);
+      assert.deepEqual(retry.data, first.data);
+      const customerRows = await authenticatedRows(
+        fixtures.users[0],
+        "customers",
+        `select=person_id,person:people(name)&id=eq.${customer.id}`,
+      );
+      assert.equal(customerRows[0].person_id, supplier.person_id);
+      assert.equal(customerRows[0].person.name, "Identidade compartilhada");
+      const rows = await authenticatedRows(
+        fixtures.users[0],
+        "suppliers",
+        `select=notes,supplier_type&id=eq.${supplier.id}`,
+      );
+      assert.equal(rows[0].notes, "Fornecedor atualizado");
+      assert.equal(rows[0].supplier_type, "dealership");
+    });
+
+    await t.test("employee edit rolls back all changes and permits a corrected retry", async () => {
+      const { person, employee } = await createEmployeeWithoutUser(
+        "atomic-edit",
+        `edit-${randomUUID()}@example.test`,
+      );
+      await restInsert("addresses", {
+        person_id: person.id,
+        street: "Rua original",
+        is_primary: true,
+      });
+      const args = {
+        p_idempotency_key: randomUUID(),
+        p_role: "employee",
+        p_role_id: employee.id,
+        p_person: { name: "Nome alterado" },
+        p_primary_address: { street: "Rua alterada" },
+        p_role_data: { salary: null },
+      };
+      const denied = await callRpc(fixtures.users[0], "update_person_configuration", args);
+      assert.equal(denied.response.status, 403);
+      const failed = await callRpc(fixtures.managerUser, "update_person_configuration", args);
+      assert.equal(failed.response.ok, false);
+      const [unchanged] = await authenticatedRows(
+        fixtures.managerUser,
+        "people",
+        `select=name&id=eq.${person.id}`,
+      );
+      const [address] = await authenticatedRows(
+        fixtures.managerUser,
+        "addresses",
+        `select=street&person_id=eq.${person.id}&is_primary=eq.true`,
+      );
+      assert.equal(unchanged.name, person.name);
+      assert.equal(address.street, "Rua original");
+      const corrected = await callRpc(fixtures.managerUser, "update_person_configuration", {
+        ...args,
+        p_role_data: { salary: 1700 },
+      });
+      assert.equal(corrected.response.status, 200, JSON.stringify(corrected.data));
+      const [saved] = await authenticatedRows(
+        fixtures.managerUser,
+        "employees",
+        `select=salary,active,person:people(name)&id=eq.${employee.id}`,
+      );
+      assert.equal(Number(saved.salary), 1700);
+      assert.equal(saved.active, true);
+      assert.equal(saved.person.name, "Nome alterado");
+      const [savedAddress] = await authenticatedRows(
+        fixtures.managerUser,
+        "addresses",
+        `select=street&person_id=eq.${person.id}&is_primary=eq.true`,
+      );
+      assert.equal(savedAddress.street, "Rua alterada");
+    });
+
     await t.test("the initial accessory catalog is available to authorized users", async () => {
       const result = await requestJson(`${apiBase.rest}/accessories?select=name,active`, {
         token: fixtures.managerUser.accessToken,

@@ -60,7 +60,9 @@ export function storedAttemptPayloads<T>(namespace: string, userId: string): T[]
 }
 
 export async function discardStoredAttempt(namespace: string, userId: string, payload: object) {
-  sessionStorage.removeItem(await storedAttemptKey(namespace, userId, payload));
+  const storageKey = await storedAttemptKey(namespace, userId, payload);
+  if ((runningAttempts.get(storageKey) ?? 0) > 0) return;
+  sessionStorage.removeItem(storageKey);
 }
 
 export async function runWithStoredAttempt<T>(
@@ -68,7 +70,7 @@ export async function runWithStoredAttempt<T>(
   userId: string,
   payload: object,
   execute: (key: string) => Promise<T>,
-  options?: { exclusive?: boolean; rememberPayload?: boolean },
+  options?: { exclusive?: boolean; rememberPayload?: boolean; exclusiveMessage?: string },
 ): Promise<T> {
   const storageKey = await storedAttemptKey(namespace, userId, payload);
   let key: string;
@@ -78,7 +80,8 @@ export async function runWithStoredAttempt<T>(
       pendingAttemptKeys(namespace, userId).some((entry) => entry !== storageKey)
     ) {
       throw new Error(
-        "Há outro lançamento sem confirmação. Confira o resultado anterior antes de iniciar outro.",
+        options.exclusiveMessage ??
+          "Há outro lançamento sem confirmação. Confira o resultado anterior antes de iniciar outro.",
       );
     }
     const stored = sessionStorage.getItem(storageKey);
@@ -89,7 +92,12 @@ export async function runWithStoredAttempt<T>(
       options?.rememberPayload ? JSON.stringify({ key, payload }) : key,
     );
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Há outro lançamento")) throw error;
+    if (
+      error instanceof Error &&
+      (error.message.startsWith("Há outro lançamento") ||
+        error.message === options?.exclusiveMessage)
+    )
+      throw error;
     throw new Error(
       "O armazenamento desta aba está bloqueado. Habilite-o para continuar com segurança.",
     );
