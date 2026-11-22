@@ -5,6 +5,11 @@ import { normalizeVehicleDraft } from "@/modules/vehicles/lib/normalize-vehicle-
 import { currentOperationalDate } from "@/modules/alerts/lib/current-operational-date";
 import { DEFAULT_PAGE_SIZE, normalizePage, type PaginatedResult } from "@/shared/lib/pagination";
 import { StaleRecordError } from "@/shared/lib/stale-record";
+import {
+  getPendingStatusAttempt,
+  runStatusAttempt,
+  StatusCommandError,
+} from "@/shared/supabase/status-attempt";
 
 type VehicleRow = {
   id: number;
@@ -355,12 +360,46 @@ export async function setVehiclePublished(
   );
 }
 
+export type PreparationAttempt = { p_vehicle_id: number; p_expected_updated_at: string };
+
+export function getPendingPreparation(id: number) {
+  return getPendingStatusAttempt<PreparationAttempt>(`preparation:${id}`);
+}
+
 export async function finishVehiclePreparation(id: number, expectedUpdatedAt: string) {
-  return unwrapVehicleRpc(
-    supabase.rpc("finish_vehicle_preparation", {
-      p_vehicle_id: id,
-      p_expected_updated_at: expectedUpdatedAt,
-    }),
-    id,
-  );
+  const payload: PreparationAttempt = {
+    p_vehicle_id: id,
+    p_expected_updated_at: expectedUpdatedAt,
+  };
+  try {
+    return await runStatusAttempt(`preparation:${id}`, payload, async (key) => {
+      const { data, error } = await supabase.rpc("finish_vehicle_preparation_idempotent", {
+        p_idempotency_key: key,
+        ...payload,
+      });
+      if (error) throw new StatusCommandError(error.message, error.code);
+      if (!data) throw new Error("Veículo não encontrado.");
+      return getVehicleById(id);
+    });
+  } catch (error) {
+    if (error instanceof StatusCommandError && error.message.includes("STALE_RECORD:")) {
+      let current: Vehicle | null = null;
+      try {
+        current = await getVehicleById(id);
+      } catch {
+        /* The vehicle may have been removed. */
+      }
+      throw new StaleRecordError(
+        "O veículo mudou. Confira os dados atuais antes de continuar.",
+        current,
+      );
+    }
+    if (
+      error instanceof StatusCommandError &&
+      error.message.includes("VEHICLE_HAS_OPEN_PREPARATION:")
+    ) {
+      throw new Error("Conclua ou cancele as tarefas pendentes antes de disponibilizar o veículo.");
+    }
+    throw error;
+  }
 }

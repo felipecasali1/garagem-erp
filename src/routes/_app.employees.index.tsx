@@ -27,10 +27,11 @@ import { ConfirmActionDialog } from "@/shared/components/confirm-action-dialog";
 import { brl, fmtDate, initials } from "@/shared/lib/format";
 import {
   employeeKeys,
+  getPendingEmployeeStatus,
   listEmployeesPage,
   setEmployeeActive,
 } from "@/modules/employees/services/employees";
-import type { EmployeeRecord } from "@/modules/employees/services/employees";
+import type { EmployeeRecord, EmployeeStatusAttempt } from "@/modules/employees/services/employees";
 import { ListPagination } from "@/shared/components/list-pagination";
 import { DEFAULT_PAGE_SIZE, getPaginationState, normalizePage } from "@/shared/lib/pagination";
 
@@ -61,6 +62,23 @@ function EmployeesPage() {
     queryFn: () => listEmployeesPage(page),
   });
   const employees = employeesPage?.data ?? [];
+  const pendingStatusKey = [
+    "pending-employee-status",
+    employees.map((employee) => employee.id),
+  ] as const;
+  const pendingStatuses = useQuery({
+    queryKey: pendingStatusKey,
+    queryFn: async () =>
+      Object.fromEntries(
+        await Promise.all(
+          employees.map(
+            async (employee) => [employee.id, await getPendingEmployeeStatus(employee.id)] as const,
+          ),
+        ),
+      ),
+    enabled: Boolean(employeesPage),
+    retry: false,
+  });
   const total = employeesPage?.total ?? 0;
   const pageSize = employeesPage?.pageSize ?? DEFAULT_PAGE_SIZE;
   const { totalPages, displayPage, range } = getPaginationState(page, total, pageSize);
@@ -80,11 +98,15 @@ function EmployeesPage() {
   const toggleMutation = useMutation({
     mutationFn: ({ id, active, updatedAt }: { id: number; active: boolean; updatedAt: string }) =>
       setEmployeeActive(id, active, updatedAt),
-    onSuccess: async () => {
+    onSuccess: async ({ recovered }) => {
       await invalidate();
-      toast.success("Status do funcionário atualizado");
+      await queryClient.invalidateQueries({ queryKey: ["pending-employee-status"] });
+      toast.success(
+        recovered ? "Tentativa anterior de status recuperada" : "Status do funcionário atualizado",
+      );
     },
     onError: async (error) => {
+      await queryClient.invalidateQueries({ queryKey: ["pending-employee-status"] });
       if (error instanceof Error && error.message.includes("STALE_RECORD")) {
         await invalidate();
         toast.error(
@@ -108,6 +130,13 @@ function EmployeesPage() {
         }
         action={{ label: "Novo Funcionário", to: "/employees/new" }}
       />
+
+      {pendingStatuses.isError && (
+        <p className="mb-3 text-sm text-destructive">
+          Não foi possível verificar tentativas pendentes. Atualize a página antes de alterar um
+          status.
+        </p>
+      )}
 
       <Card>
         <CardContent className="p-0">
@@ -148,6 +177,19 @@ function EmployeesPage() {
                       key={employee.id}
                       employee={employee}
                       navigate={navigate}
+                      pending={pendingStatuses.data?.[employee.id] ?? null}
+                      statusDisabled={
+                        pendingStatuses.isLoading ||
+                        pendingStatuses.isError ||
+                        toggleMutation.isPending
+                      }
+                      onRecover={(attempt) =>
+                        toggleMutation.mutate({
+                          id: attempt.p_employee_id,
+                          active: attempt.p_active,
+                          updatedAt: attempt.p_expected_updated_at,
+                        })
+                      }
                       onToggleActive={() =>
                         setConfirmToggle({
                           id: employee.id,
@@ -206,10 +248,16 @@ function EmployeeRow({
   employee,
   navigate,
   onToggleActive,
+  pending,
+  statusDisabled,
+  onRecover,
 }: {
   employee: EmployeeRecord;
   navigate: ReturnType<typeof useNavigate>;
   onToggleActive: () => void;
+  pending: EmployeeStatusAttempt | null;
+  statusDisabled: boolean;
+  onRecover: (attempt: EmployeeStatusAttempt) => void;
 }) {
   return (
     <TableRow
@@ -243,6 +291,9 @@ function EmployeeRow({
           />
           <span className="text-sm">{employee.active ? "Ativo" : "Inativo"}</span>
         </div>
+        {pending && (
+          <span className="text-xs text-muted-foreground">Alteração sem confirmação</span>
+        )}
       </TableCell>
       <TableCell>
         {employee.access_role ? (
@@ -285,10 +336,20 @@ function EmployeeRow({
               >
                 <Pencil className="h-4 w-4" /> Editar
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={onToggleActive}>
-                {employee.active ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4" />}
-                {employee.active ? "Desativar" : "Ativar"}
-              </DropdownMenuItem>
+              {pending ? (
+                <DropdownMenuItem disabled={statusDisabled} onSelect={() => onRecover(pending)}>
+                  Recuperar tentativa de {pending.p_active ? "ativação" : "desativação"}
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem disabled={statusDisabled} onSelect={onToggleActive}>
+                  {employee.active ? (
+                    <PowerOff className="h-4 w-4" />
+                  ) : (
+                    <Power className="h-4 w-4" />
+                  )}
+                  {employee.active ? "Desativar" : "Ativar"}
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

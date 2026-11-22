@@ -1,4 +1,9 @@
 import { supabase } from "@/shared/supabase/client";
+import {
+  getPendingStatusAttempt,
+  runStatusAttempt,
+  StatusCommandError,
+} from "@/shared/supabase/status-attempt";
 import { normalizeCpf, normalizePhone } from "@/shared/lib/field-format";
 import {
   createPersonConfiguration,
@@ -318,16 +323,29 @@ export async function updateEmployee(id: number, draft: EmployeeDraft) {
   return getEmployeeById(id);
 }
 
+export type EmployeeStatusAttempt = {
+  p_employee_id: number;
+  p_active: boolean;
+  p_expected_updated_at: string;
+};
+
+export function getPendingEmployeeStatus(id: number) {
+  return getPendingStatusAttempt<EmployeeStatusAttempt>(`employee-status:${id}`);
+}
+
 export async function setEmployeeActive(id: number, active: boolean, expectedUpdatedAt: string) {
-  const { error } = await supabase.rpc("set_employee_active_status", {
+  const payload: EmployeeStatusAttempt = {
     p_employee_id: id,
     p_active: active,
     p_expected_updated_at: expectedUpdatedAt,
+  };
+  return runStatusAttempt(`employee-status:${id}`, payload, async (key) => {
+    const { data, error } = await supabase.rpc("set_employee_active_status_idempotent", {
+      p_idempotency_key: key,
+      ...payload,
+    });
+    if (error) throw new StatusCommandError(error.message, error.code);
+    if (!data) throw new Error("Funcionário não encontrado.");
+    return getEmployeeById(id);
   });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return getEmployeeById(id);
 }

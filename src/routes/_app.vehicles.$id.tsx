@@ -29,6 +29,7 @@ import { listPurchasesByVehicle, purchaseKeys } from "@/modules/purchases/servic
 import { listSalesByVehicle, saleKeys } from "@/modules/sales/services/sales";
 import {
   finishVehiclePreparation,
+  getPendingPreparation,
   getVehicleById,
   setVehiclePublished,
   vehicleKeys,
@@ -68,6 +69,13 @@ function VehicleDetail() {
   const numericId = Number(id);
   const queryClient = useQueryClient();
   const { accessRole } = useAuth();
+  const pendingPreparationKey = ["pending-preparation", numericId] as const;
+  const pendingPreparation = useQuery({
+    queryKey: pendingPreparationKey,
+    queryFn: () => getPendingPreparation(numericId),
+    enabled: Number.isFinite(numericId),
+    retry: false,
+  });
   const [confirmFinishPreparation, setConfirmFinishPreparation] = useState(false);
   const [activeTab, setActiveTab] = useState("info");
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -118,14 +126,18 @@ function VehicleDetail() {
   });
   const finishPreparationMutation = useMutation({
     mutationFn: (version: string) => finishVehiclePreparation(numericId, version),
-    onSuccess: async (nextVehicle) => {
+    onSuccess: async ({ value: nextVehicle, recovered }) => {
       queryClient.setQueryData(vehicleKeys.detail(nextVehicle.id), nextVehicle);
       await queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
       await queryClient.invalidateQueries({ queryKey: checklistKeys.byVehicle(nextVehicle.id) });
+      await queryClient.invalidateQueries({ queryKey: pendingPreparationKey });
       setConfirmFinishPreparation(false);
-      toast.success("Preparação finalizada");
+      toast.success(
+        recovered ? "Tentativa anterior de finalização recuperada" : "Preparação finalizada",
+      );
     },
     onError: async (mutationError) => {
+      await queryClient.invalidateQueries({ queryKey: pendingPreparationKey });
       if (mutationError instanceof StaleRecordError) {
         setConflict({ current: mutationError.current as Vehicle | null, action: "finish" });
         return;
@@ -232,7 +244,12 @@ function VehicleDetail() {
           <Button
             variant="outline"
             onClick={() => setConfirmFinishPreparation(true)}
-            disabled={finishPreparationMutation.isPending}
+            disabled={
+              finishPreparationMutation.isPending ||
+              pendingPreparation.isLoading ||
+              pendingPreparation.isError ||
+              Boolean(pendingPreparation.data)
+            }
           >
             <CheckCircle2 className="h-4 w-4" /> Finalizar preparação
           </Button>
@@ -248,6 +265,29 @@ function VehicleDetail() {
         </Button>
       </div>
 
+      {pendingPreparation.data && (
+        <Card className="border-warning/30 bg-warning/5">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+            <p>Há uma tentativa de finalizar a preparação sem confirmação nesta aba.</p>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={finishPreparationMutation.isPending}
+              onClick={() =>
+                finishPreparationMutation.mutate(pendingPreparation.data!.p_expected_updated_at)
+              }
+            >
+              Recuperar tentativa anterior
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+      {pendingPreparation.isError && (
+        <p className="text-sm text-destructive">
+          Não foi possível verificar tentativas pendentes. Atualize a página antes de finalizar a
+          preparação.
+        </p>
+      )}
       {isPreparing && (
         <Card className="border-warning/30 bg-warning/5">
           <CardContent className="flex flex-col gap-3 p-4 text-sm md:flex-row md:items-center md:justify-between">
@@ -262,7 +302,12 @@ function VehicleDetail() {
             {preparationBlockers === 0 ? (
               <Button
                 onClick={() => setConfirmFinishPreparation(true)}
-                disabled={finishPreparationMutation.isPending}
+                disabled={
+                  finishPreparationMutation.isPending ||
+                  pendingPreparation.isLoading ||
+                  pendingPreparation.isError ||
+                  Boolean(pendingPreparation.data)
+                }
               >
                 <CheckCircle2 className="h-4 w-4" /> Finalizar preparação
               </Button>
@@ -482,7 +527,12 @@ function VehicleDetail() {
         confirmLabel={
           finishPreparationMutation.isPending ? "Finalizando..." : "Finalizar preparação"
         }
-        confirmDisabled={finishPreparationMutation.isPending}
+        confirmDisabled={
+          finishPreparationMutation.isPending ||
+          pendingPreparation.isLoading ||
+          pendingPreparation.isError ||
+          Boolean(pendingPreparation.data)
+        }
         confirmVariant="default"
         onConfirm={() => finishPreparationMutation.mutate(vehicle.updated_at)}
       />

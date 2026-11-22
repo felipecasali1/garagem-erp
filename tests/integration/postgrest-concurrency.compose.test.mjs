@@ -825,6 +825,152 @@ test(
       assert.equal(savedAddress.street, "Rua alterada");
     });
 
+    await t.test("finishing preparation replays a confirmed attempt", async () => {
+      const user = fixtures.users[0];
+      const vehicle = await createVehicle(5091, "in_repair");
+      const args = {
+        p_idempotency_key: randomUUID(),
+        p_vehicle_id: vehicle.id,
+        p_expected_updated_at: vehicle.updated_at,
+      };
+      const [first, retry] = await Promise.all([
+        callRpc(user, "finish_vehicle_preparation_idempotent", args),
+        callRpc(user, "finish_vehicle_preparation_idempotent", args),
+      ]);
+      assert.equal(first.response.status, 200, JSON.stringify(first.data));
+      assert.equal(retry.response.status, 200, JSON.stringify(retry.data));
+      assert.deepEqual(retry.data, first.data);
+      assert.equal(first.data.status, "available");
+      const changed = await callRpc(user, "finish_vehicle_preparation_idempotent", {
+        ...args,
+        p_expected_updated_at: "2020-01-01T00:00:00Z",
+      });
+      assert.equal(changed.response.status, 409);
+      const denied = await callRpc(
+        fixtures.financialOnlyUser,
+        "finish_vehicle_preparation_idempotent",
+        { ...args, p_idempotency_key: randomUUID() },
+      );
+      assert.equal(denied.response.status, 403);
+      const blockedVehicle = await createVehicle(5092, "in_repair");
+      const task = await callRpc(
+        user,
+        "create_vehicle_checklist_item",
+        checklistItem(blockedVehicle.id),
+      );
+      assert.equal(task.response.status, 200, JSON.stringify(task.data));
+      const [before] = await authenticatedRows(
+        user,
+        "vehicles",
+        `select=updated_at,status&id=eq.${blockedVehicle.id}`,
+      );
+      const blockedArgs = {
+        p_idempotency_key: randomUUID(),
+        p_vehicle_id: blockedVehicle.id,
+        p_expected_updated_at: before.updated_at,
+      };
+      const blocked = await callRpc(user, "finish_vehicle_preparation_idempotent", blockedArgs);
+      assert.equal(blocked.response.status, 409);
+      const [unchanged] = await authenticatedRows(
+        user,
+        "vehicles",
+        `select=status&id=eq.${blockedVehicle.id}`,
+      );
+      assert.equal(unchanged.status, "in_repair");
+      const done = await callRpc(user, "update_vehicle_checklist_item_idempotent", {
+        p_idempotency_key: randomUUID(),
+        p_item_id: task.data.id,
+        p_expected_updated_at: task.data.updated_at,
+        p_changes: { status: "completed" },
+      });
+      assert.equal(done.response.status, 200, JSON.stringify(done.data));
+      const [ready] = await authenticatedRows(
+        user,
+        "vehicles",
+        `select=updated_at&id=eq.${blockedVehicle.id}`,
+      );
+      const recovered = await callRpc(user, "finish_vehicle_preparation_idempotent", {
+        ...blockedArgs,
+        p_expected_updated_at: ready.updated_at,
+      });
+      assert.equal(recovered.response.status, 200, JSON.stringify(recovered.data));
+    });
+
+    await t.test(
+      "employee status retries return the original result and do not duplicate effects",
+      async () => {
+        const email = `status-replay-${randomUUID()}@example.test`;
+        const { person, employee } = await createEmployeeWithoutUser("replay", email);
+        const authUser = await createAuthAccount(email, `${randomSecret(12)}Aa1!`);
+        const internalUser = await restInsert("users", {
+          auth_user_id: authUser.id,
+          person_id: person.id,
+          employee_id: employee.id,
+          access_role: "seller",
+          active: true,
+        });
+        const args = {
+          p_idempotency_key: randomUUID(),
+          p_employee_id: employee.id,
+          p_active: false,
+          p_expected_updated_at: employee.updated_at,
+        };
+        const [first, retry] = await Promise.all([
+          callRpc(fixtures.managerUser, "set_employee_active_status_idempotent", args),
+          callRpc(fixtures.managerUser, "set_employee_active_status_idempotent", args),
+        ]);
+        assert.equal(first.response.status, 200, JSON.stringify(first.data));
+        assert.equal(retry.response.status, 200, JSON.stringify(retry.data));
+        assert.deepEqual(retry.data, first.data);
+        const [user] = await authenticatedRows(
+          fixtures.managerUser,
+          "users",
+          `select=active&id=eq.${internalUser.id}`,
+        );
+        assert.equal(user.active, false);
+        const changed = await callRpc(
+          fixtures.managerUser,
+          "set_employee_active_status_idempotent",
+          { ...args, p_active: true },
+        );
+        assert.equal(changed.response.status, 409);
+        const denied = await callRpc(fixtures.users[0], "set_employee_active_status_idempotent", {
+          ...args,
+          p_idempotency_key: randomUUID(),
+        });
+        assert.equal(denied.response.status, 403);
+        const reactivation = await callRpc(
+          fixtures.managerUser,
+          "set_employee_active_status_idempotent",
+          {
+            ...args,
+            p_idempotency_key: randomUUID(),
+            p_active: true,
+            p_expected_updated_at: first.data.updated_at,
+          },
+        );
+        assert.equal(reactivation.response.status, 200, JSON.stringify(reactivation.data));
+        const oldReplay = await callRpc(
+          fixtures.managerUser,
+          "set_employee_active_status_idempotent",
+          args,
+        );
+        assert.deepEqual(oldReplay.data, first.data);
+        const [current] = await authenticatedRows(
+          fixtures.managerUser,
+          "employees",
+          `select=active&id=eq.${employee.id}`,
+        );
+        assert.equal(current.active, true);
+        const [stillSuspended] = await authenticatedRows(
+          fixtures.managerUser,
+          "users",
+          `select=active&id=eq.${internalUser.id}`,
+        );
+        assert.equal(stillSuspended.active, false);
+      },
+    );
+
     await t.test("the initial accessory catalog is available to authorized users", async () => {
       const result = await requestJson(`${apiBase.rest}/accessories?select=name,active`, {
         token: fixtures.managerUser.accessToken,
@@ -1303,10 +1449,16 @@ test(
         p_expected_updated_at: loaded.data[0].updated_at,
       };
       const [first, second] = await Promise.all([
-        callRpc(fixtures.managerUser, "set_employee_active_status", args),
-        callRpc(fixtures.managerUser, "set_employee_active_status", args),
+        callRpc(fixtures.managerUser, "set_employee_active_status_idempotent", {
+          ...args,
+          p_idempotency_key: randomUUID(),
+        }),
+        callRpc(fixtures.managerUser, "set_employee_active_status_idempotent", {
+          ...args,
+          p_idempotency_key: randomUUID(),
+        }),
       ]);
-      assert.deepEqual([first.response.status, second.response.status].sort(), [204, 409]);
+      assert.deepEqual([first.response.status, second.response.status].sort(), [200, 409]);
       const current = await requestJson(
         `${apiBase.rest}/employees?id=eq.${employee.id}&select=active,updated_at`,
         { admin: true },
@@ -1316,11 +1468,16 @@ test(
         admin: true,
       });
       assert.equal(suspended.data[0].active, false);
-      const denied = await callRpc(fixtures.financialOnlyUser, "set_employee_active_status", {
-        ...args,
-        p_active: true,
-        p_expected_updated_at: current.data[0].updated_at,
-      });
+      const denied = await callRpc(
+        fixtures.financialOnlyUser,
+        "set_employee_active_status_idempotent",
+        {
+          p_idempotency_key: randomUUID(),
+          ...args,
+          p_active: true,
+          p_expected_updated_at: current.data[0].updated_at,
+        },
+      );
       assert.equal(denied.response.status, 403);
       const bypass = await requestJson(`${apiBase.rest}/employees?id=eq.${employee.id}`, {
         method: "PATCH",
@@ -1348,11 +1505,16 @@ test(
           `${apiBase.rest}/employees?id=eq.${employee.id}&select=updated_at`,
           { admin: true },
         );
-        const deactivated = await callRpc(fixtures.managerUser, "set_employee_active_status", {
-          p_employee_id: employee.id,
-          p_active: false,
-          p_expected_updated_at: beforeStatus.data[0].updated_at,
-        });
+        const deactivated = await callRpc(
+          fixtures.managerUser,
+          "set_employee_active_status_idempotent",
+          {
+            p_idempotency_key: randomUUID(),
+            p_employee_id: employee.id,
+            p_active: false,
+            p_expected_updated_at: beforeStatus.data[0].updated_at,
+          },
+        );
         assert.equal(deactivated.response.ok, true, JSON.stringify(deactivated.data));
 
         const suspendedUser = await requestJson(
@@ -1380,8 +1542,9 @@ test(
         );
         const reactivatedEmployee = await callRpc(
           fixtures.managerUser,
-          "set_employee_active_status",
+          "set_employee_active_status_idempotent",
           {
+            p_idempotency_key: randomUUID(),
             p_employee_id: employee.id,
             p_active: true,
             p_expected_updated_at: inactiveEmployee.data[0].updated_at,
@@ -2660,7 +2823,8 @@ test(
           p_changes: { status: "completed", completion_date: "2026-11-02" },
         });
         assert.equal(completed.response.status, 200, JSON.stringify(completed.data));
-        const finished = await callRpc(user, "finish_vehicle_preparation", {
+        const finished = await callRpc(user, "finish_vehicle_preparation_idempotent", {
+          p_idempotency_key: randomUUID(),
           p_vehicle_id: vehicle.id,
           p_expected_updated_at: currentVehicle.updated_at,
         });
@@ -2795,7 +2959,8 @@ test(
         `select=id,status,updated_at&id=eq.${vehicle.id}`,
       );
       const [finish, openTask] = await Promise.all([
-        callRpc(user, "finish_vehicle_preparation", {
+        callRpc(user, "finish_vehicle_preparation_idempotent", {
+          p_idempotency_key: randomUUID(),
           p_vehicle_id: vehicle.id,
           p_expected_updated_at: loadedVehicle.updated_at,
         }),
