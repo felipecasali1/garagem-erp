@@ -2,9 +2,11 @@ import { webcrypto } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   getPendingStatusAttempt,
+  getPendingStatusAttemptsByPrefix,
   runStatusAttempt,
   StatusCommandError,
 } from "@/shared/supabase/status-attempt";
+import { runWithStoredAttempt } from "@/shared/lib/idempotency";
 
 vi.mock("@/shared/supabase/client", () => ({
   supabase: {
@@ -65,4 +67,27 @@ it("remove tentativa rejeitada definitivamente sem impedir uma ação corrigida"
     }),
   ).rejects.toThrow("STALE_RECORD");
   expect(await getPendingStatusAttempt("employee-status:1")).toBeNull();
+});
+
+it("lista tentativas de veículos de toda a aba somente para o usuário atual", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  const own = { action: "archive", vehicleId: 9, expectedUpdatedAt: "old" };
+  const other = { action: "archive", vehicleId: 10, expectedUpdatedAt: "old" };
+  await expect(
+    runStatusAttempt("vehicle-action:9", own, async () => {
+      throw new Error("offline");
+    }),
+  ).rejects.toThrow();
+  await expect(
+    runWithStoredAttempt(
+      "vehicle-action:10",
+      "other-user",
+      other,
+      async () => {
+        throw new Error("offline");
+      },
+      { rememberPayload: true },
+    ),
+  ).rejects.toThrow();
+  expect(await getPendingStatusAttemptsByPrefix("vehicle-action:")).toEqual([own]);
 });

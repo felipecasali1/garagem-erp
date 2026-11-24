@@ -2,6 +2,7 @@ import {
   discardStoredAttempt,
   runWithStoredAttempt,
   storedAttemptPayloads,
+  storedAttemptPayloadsByPrefix,
 } from "@/shared/lib/idempotency";
 import { supabase } from "@/shared/supabase/client";
 
@@ -24,6 +25,10 @@ async function currentUserId() {
 
 export async function getPendingStatusAttempt<T>(namespace: string): Promise<T | null> {
   return storedAttemptPayloads<T>(namespace, await currentUserId())[0] ?? null;
+}
+
+export async function getPendingStatusAttemptsByPrefix<T>(namespacePrefix: string): Promise<T[]> {
+  return storedAttemptPayloadsByPrefix<T>(namespacePrefix, await currentUserId());
 }
 
 export async function runStatusAttempt<T, P extends object>(

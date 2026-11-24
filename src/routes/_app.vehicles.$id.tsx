@@ -40,6 +40,8 @@ import { StaleRecordConflictDialog } from "@/shared/components/stale-record-conf
 import type { Vehicle } from "@/shared/types/domain";
 import { vehicleStatusLabel } from "@/modules/vehicles/lib/vehicle-status-label";
 import { VehiclePhotoPanel } from "@/modules/vehicles/components/vehicle-photo-panel";
+import { VehicleActionRecovery } from "@/modules/vehicles/components/vehicle-action-recovery";
+import { usePendingVehicleAction } from "@/modules/vehicles/hooks/use-pending-vehicle-action";
 import { canAccessPath } from "@/shared/auth/access-control";
 import { useAuth } from "@/shared/supabase/auth";
 
@@ -68,6 +70,7 @@ function VehicleDetail() {
   const navigate = useNavigate();
   const numericId = Number(id);
   const queryClient = useQueryClient();
+  const pendingVehicleAction = usePendingVehicleAction(numericId);
   const { accessRole } = useAuth();
   const pendingPreparationKey = ["pending-preparation", numericId] as const;
   const pendingPreparation = useQuery({
@@ -106,11 +109,14 @@ function VehicleDetail() {
   const publishMutation = useMutation({
     mutationFn: ({ published, version }: { published: boolean; version: string }) =>
       setVehiclePublished(numericId, published, version),
-    onSuccess: (nextVehicle) => {
+    onSuccess: ({ value: nextVehicle, recovered }) => {
       queryClient.setQueryData(vehicleKeys.detail(nextVehicle.id), nextVehicle);
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ["pending-vehicle-action"] });
+      if (recovered) toast.success("Tentativa anterior recuperada");
     },
     onError: (mutationError, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ["pending-vehicle-action"] });
       if (mutationError instanceof StaleRecordError) {
         setConflict({
           current: mutationError.current as Vehicle | null,
@@ -258,13 +264,26 @@ function VehicleDetail() {
           onClick={() =>
             publishMutation.mutate({ published: !vehicle.published, version: vehicle.updated_at })
           }
-          disabled={!vehicle.published && vehicle.status !== "available"}
+          disabled={
+            publishMutation.isPending ||
+            pendingVehicleAction.isLoading ||
+            pendingVehicleAction.isError ||
+            Boolean(pendingVehicleAction.data) ||
+            (!vehicle.published && vehicle.status !== "available")
+          }
         >
           {vehicle.published ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           {vehicle.published ? "Despublicar" : "Publicar"}
         </Button>
       </div>
 
+      {pendingVehicleAction.data && <VehicleActionRecovery attempt={pendingVehicleAction.data} />}
+      {pendingVehicleAction.isError && (
+        <p className="text-sm text-destructive">
+          Não foi possível verificar tentativas pendentes. Atualize a página antes de alterar a
+          publicação.
+        </p>
+      )}
       {pendingPreparation.data && (
         <Card className="border-warning/30 bg-warning/5">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">

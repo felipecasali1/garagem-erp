@@ -1,5 +1,7 @@
 import { useVehiclePhotoPreviews } from "@/modules/vehicles/hooks/use-vehicle-photo-previews";
 import { VehiclePhotoThumbnail } from "@/modules/vehicles/components/vehicle-photo-thumbnail";
+import { VehicleActionRecovery } from "@/modules/vehicles/components/vehicle-action-recovery";
+import { useAuth } from "@/shared/supabase/auth";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -29,6 +31,7 @@ import { useOperationalDate } from "@/modules/alerts/hooks/use-operational-date"
 import {
   countVehiclesByStatus,
   listVehiclesPage,
+  listPendingVehicleActions,
   setVehiclePublished,
   vehicleStatuses,
   vehicleKeys,
@@ -86,6 +89,7 @@ const fuelLabel: Record<string, string> = {
 const statusOptions = vehicleStatuses;
 
 function VehiclesPage() {
+  const { session } = useAuth();
   const [view, setView] = useState<"grid" | "table">("grid");
   const [publicationConflict, setPublicationConflict] = useState<{
     current: Vehicle | null;
@@ -116,6 +120,15 @@ function VehiclesPage() {
     queryFn: countVehiclesByStatus,
   });
   const vehicles = vehiclesPage?.data ?? [];
+  const pendingVehicleActions = useQuery({
+    queryKey: ["pending-vehicle-action", session?.user.id, "list"],
+    queryFn: listPendingVehicleActions,
+    enabled: Boolean(session?.user.id),
+    retry: false,
+  });
+  const pendingByVehicle = Object.fromEntries(
+    (pendingVehicleActions.data ?? []).map((attempt) => [attempt.vehicleId, attempt]),
+  );
   const { data: photoPreviews = {} } = useVehiclePhotoPreviews(
     vehicles.map((vehicle) => vehicle.id),
   );
@@ -145,11 +158,14 @@ function VehiclesPage() {
   const publishMutation = useMutation({
     mutationFn: ({ id, published, version }: { id: number; published: boolean; version: string }) =>
       setVehiclePublished(id, published, version),
-    onSuccess: (vehicle) => {
+    onSuccess: ({ value: vehicle, recovered }) => {
       queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ["pending-vehicle-action"] });
+      if (recovered) toast.success("Tentativa anterior recuperada");
     },
     onError: (mutationError, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ["pending-vehicle-action"] });
       if (mutationError instanceof StaleRecordError) {
         setPublicationConflict({
           current: mutationError.current as Vehicle | null,
@@ -264,6 +280,31 @@ function VehiclesPage() {
         </CardContent>
       </Card>
 
+      {pendingVehicleActions.isError && (
+        <p className="mb-3 text-sm text-destructive">
+          Não foi possível verificar tentativas pendentes. Atualize a página antes de alterar a
+          publicação.
+        </p>
+      )}
+      {(pendingVehicleActions.data ?? []).length > 0 && (
+        <Card className="mb-3">
+          <CardContent className="p-4 space-y-3">
+            <p className="text-sm font-medium">Ações de veículos sem confirmação nesta aba</p>
+            {pendingVehicleActions.data!.map((attempt) => (
+              <div key={attempt.vehicleId} className="flex flex-wrap items-center gap-3">
+                <Link
+                  className="text-sm underline"
+                  to="/vehicles/$id"
+                  params={{ id: String(attempt.vehicleId) }}
+                >
+                  Veículo #{attempt.vehicleId}
+                </Link>
+                <VehicleActionRecovery attempt={attempt} />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
       {vehicles.length === 0 ? (
         <Card>
           <CardContent className="p-12 text-center">
@@ -292,7 +333,13 @@ function VehiclesPage() {
                       version: v.updated_at,
                     });
                   }}
-                  disabled={!v.published && v.status !== "available"}
+                  disabled={
+                    publishMutation.isPending ||
+                    pendingVehicleActions.isLoading ||
+                    pendingVehicleActions.isError ||
+                    Boolean(pendingByVehicle[v.id]) ||
+                    (!v.published && v.status !== "available")
+                  }
                   className="absolute top-3 right-3 z-10 h-8 w-8 rounded-full bg-background/80 backdrop-blur flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
                   title={
                     v.published
@@ -426,7 +473,13 @@ function VehiclesPage() {
                             version: v.updated_at,
                           });
                         }}
-                        disabled={!v.published && v.status !== "available"}
+                        disabled={
+                          publishMutation.isPending ||
+                          pendingVehicleActions.isLoading ||
+                          pendingVehicleActions.isError ||
+                          Boolean(pendingByVehicle[v.id]) ||
+                          (!v.published && v.status !== "available")
+                        }
                         aria-label={v.published ? `Despublicar ${v.plate}` : `Publicar ${v.plate}`}
                       >
                         {v.published ? (

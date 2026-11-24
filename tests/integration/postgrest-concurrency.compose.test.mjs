@@ -971,6 +971,117 @@ test(
       },
     );
 
+    await t.test("vehicle publication replays a confirmed attempt", async () => {
+      const user = fixtures.users[0];
+      const vehicle = await createVehicle(5124, "available");
+      const args = {
+        p_idempotency_key: randomUUID(),
+        p_vehicle_id: vehicle.id,
+        p_expected_updated_at: vehicle.updated_at,
+        p_published: true,
+      };
+      const [first, retry] = await Promise.all([
+        callRpc(user, "set_vehicle_published_idempotent", args),
+        callRpc(user, "set_vehicle_published_idempotent", args),
+      ]);
+      assert.equal(first.response.status, 200, JSON.stringify(first.data));
+      assert.equal(retry.response.status, 200, JSON.stringify(retry.data));
+      assert.deepEqual(retry.data, first.data);
+      assert.equal(first.data.published, true);
+      const changed = await callRpc(user, "set_vehicle_published_idempotent", {
+        ...args,
+        p_published: false,
+      });
+      assert.equal(changed.response.status, 409);
+    });
+
+    await t.test(
+      "archive and publication preserve retries, authorization and rollback",
+      async () => {
+        const user = fixtures.users[0];
+        const vehicle = await createVehicle(5125, "available");
+        const publish = {
+          p_idempotency_key: randomUUID(),
+          p_vehicle_id: vehicle.id,
+          p_expected_updated_at: vehicle.updated_at,
+          p_published: true,
+        };
+        const denied = await callRpc(
+          fixtures.financialOnlyUser,
+          "set_vehicle_published_idempotent",
+          publish,
+        );
+        assert.equal(denied.response.status, 403);
+        const legacy = await callRpc(user, "update_vehicle_with_version", {
+          p_vehicle_id: vehicle.id,
+          p_expected_updated_at: vehicle.updated_at,
+          p_changes: { published: true },
+        });
+        assert.equal(legacy.response.ok, false);
+        const published = await callRpc(user, "set_vehicle_published_idempotent", publish);
+        assert.equal(published.response.status, 200, JSON.stringify(published.data));
+        const unpublish = {
+          ...publish,
+          p_idempotency_key: randomUUID(),
+          p_expected_updated_at: published.data.updated_at,
+          p_published: false,
+        };
+        const unpublished = await callRpc(user, "set_vehicle_published_idempotent", unpublish);
+        assert.equal(unpublished.response.status, 200, JSON.stringify(unpublished.data));
+        const replay = await callRpc(user, "set_vehicle_published_idempotent", publish);
+        assert.deepEqual(replay.data, published.data);
+        const [current] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=published&id=eq.${vehicle.id}`,
+        );
+        assert.equal(current.published, false);
+        const archive = {
+          p_idempotency_key: randomUUID(),
+          p_vehicle_id: vehicle.id,
+          p_expected_updated_at: unpublished.data.updated_at,
+        };
+        const [first, retry] = await Promise.all([
+          callRpc(user, "archive_vehicle_idempotent", archive),
+          callRpc(user, "archive_vehicle_idempotent", archive),
+        ]);
+        assert.equal(first.response.status, 200, JSON.stringify(first.data));
+        assert.equal(retry.response.status, 200, JSON.stringify(retry.data));
+        assert.equal(first.data.status, "archived");
+        assert.deepEqual(retry.data, first.data);
+        const changed = await callRpc(user, "archive_vehicle_idempotent", {
+          ...archive,
+          p_expected_updated_at: "2020-01-01T00:00:00Z",
+        });
+        assert.equal(changed.response.status, 409);
+        const forbidden = await callRpc(fixtures.financialOnlyUser, "archive_vehicle_idempotent", {
+          ...archive,
+          p_idempotency_key: randomUUID(),
+        });
+        assert.equal(forbidden.response.status, 403);
+        const blockedVehicle = await createVehicle(5126, "in_repair");
+        const bad = {
+          p_idempotency_key: randomUUID(),
+          p_vehicle_id: blockedVehicle.id,
+          p_expected_updated_at: blockedVehicle.updated_at,
+          p_published: true,
+        };
+        const blocked = await callRpc(user, "set_vehicle_published_idempotent", bad);
+        assert.equal(blocked.response.ok, false);
+        const [unchanged] = await authenticatedRows(
+          user,
+          "vehicles",
+          `select=published,status&id=eq.${blockedVehicle.id}`,
+        );
+        assert.equal(unchanged.published, false);
+        const corrected = await callRpc(user, "set_vehicle_published_idempotent", {
+          ...bad,
+          p_published: false,
+        });
+        assert.equal(corrected.response.status, 200, JSON.stringify(corrected.data));
+      },
+    );
+
     await t.test("the initial accessory catalog is available to authorized users", async () => {
       const result = await requestJson(`${apiBase.rest}/accessories?select=name,active`, {
         token: fixtures.managerUser.accessToken,
@@ -2026,7 +2137,8 @@ test(
         const created = await callCreatePurchase(user, purchaseArguments({ fixtures, vehicle }));
         assert.equal(created.response.status, 200, JSON.stringify(created.data));
 
-        const archiveAttempt = await callRpc(user, "archive_vehicle_with_version", {
+        const archiveAttempt = await callRpc(user, "archive_vehicle_idempotent", {
+          p_idempotency_key: randomUUID(),
           p_vehicle_id: vehicle.id,
           p_expected_updated_at: vehicle.updated_at,
         });
@@ -2901,13 +3013,17 @@ test(
         "vehicles",
         `select=id,status,cost_price,updated_at&id=eq.${vehicle.id}`,
       );
-      const firstSave = await callRpc(user, "update_vehicle_with_version", {
+      const firstSave = await callRpc(user, "update_vehicle_configuration", {
+        p_idempotency_key: randomUUID(),
+        p_accessories: [],
         p_vehicle_id: vehicle.id,
         p_expected_updated_at: loadedVehicle.updated_at,
         p_changes: { cost_price: 51000 },
       });
       assert.equal(firstSave.response.status, 200, JSON.stringify(firstSave.data));
-      const staleSave = await callRpc(user, "update_vehicle_with_version", {
+      const staleSave = await callRpc(user, "update_vehicle_configuration", {
+        p_idempotency_key: randomUUID(),
+        p_accessories: [],
         p_vehicle_id: vehicle.id,
         p_expected_updated_at: loadedVehicle.updated_at,
         p_changes: { cost_price: 52000 },

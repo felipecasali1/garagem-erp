@@ -59,6 +59,23 @@ export function storedAttemptPayloads<T>(namespace: string, userId: string): T[]
   });
 }
 
+export function storedAttemptPayloadsByPrefix<T>(namespacePrefix: string, userId: string): T[] {
+  const prefix = `garagem-erp:pending-command:${namespacePrefix}`;
+  const userSegment = `:${userId}:`;
+  return Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.key(index))
+    .filter((key): key is string => Boolean(key?.startsWith(prefix) && key.includes(userSegment)))
+    .flatMap((storageKey) => {
+      try {
+        const record = JSON.parse(sessionStorage.getItem(storageKey) ?? "null");
+        return record && typeof record.key === "string" && record.payload
+          ? [record.payload as T]
+          : [];
+      } catch {
+        return [];
+      }
+    });
+}
+
 export async function discardStoredAttempt(namespace: string, userId: string, payload: object) {
   const storageKey = await storedAttemptKey(namespace, userId, payload);
   if ((runningAttempts.get(storageKey) ?? 0) > 0) return;

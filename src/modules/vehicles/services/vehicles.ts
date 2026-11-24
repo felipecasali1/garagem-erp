@@ -7,6 +7,7 @@ import { DEFAULT_PAGE_SIZE, normalizePage, type PaginatedResult } from "@/shared
 import { StaleRecordError } from "@/shared/lib/stale-record";
 import {
   getPendingStatusAttempt,
+  getPendingStatusAttemptsByPrefix,
   runStatusAttempt,
   StatusCommandError,
 } from "@/shared/supabase/status-attempt";
@@ -321,7 +322,7 @@ export async function updateVehicle(
   expectedUpdatedAt: string,
   idempotencyKey: string,
 ) {
-  const { status: _status, ...changes } = toVehiclePayload(draft);
+  const { status: _status, published: _published, ...changes } = toVehiclePayload(draft);
   await unwrapVehicleRpc(
     supabase.rpc("update_vehicle_configuration", {
       p_idempotency_key: idempotencyKey,
@@ -335,29 +336,61 @@ export async function updateVehicle(
   return getVehicleById(id);
 }
 
-export async function archiveVehicle(id: number, expectedUpdatedAt: string) {
-  return unwrapVehicleRpc(
-    supabase.rpc("archive_vehicle_with_version", {
-      p_vehicle_id: id,
-      p_expected_updated_at: expectedUpdatedAt,
-    }),
-    id,
-  );
+export type VehicleActionAttempt =
+  | { action: "archive"; vehicleId: number; expectedUpdatedAt: string }
+  | { action: "publication"; vehicleId: number; expectedUpdatedAt: string; published: boolean };
+
+export function getPendingVehicleAction(id: number) {
+  return getPendingStatusAttempt<VehicleActionAttempt>(`vehicle-action:${id}`);
 }
 
-export async function setVehiclePublished(
-  id: number,
-  published: boolean,
-  expectedUpdatedAt: string,
-) {
-  return unwrapVehicleRpc(
-    supabase.rpc("set_vehicle_published_with_version", {
-      p_vehicle_id: id,
-      p_expected_updated_at: expectedUpdatedAt,
-      p_published: published,
-    }),
-    id,
-  );
+export function listPendingVehicleActions() {
+  return getPendingStatusAttemptsByPrefix<VehicleActionAttempt>("vehicle-action:");
+}
+
+export async function runVehicleAction(attempt: VehicleActionAttempt) {
+  const id = attempt.vehicleId;
+  try {
+    return await runStatusAttempt(`vehicle-action:${id}`, attempt, async (key) => {
+      const args = {
+        p_idempotency_key: key,
+        p_vehicle_id: id,
+        p_expected_updated_at: attempt.expectedUpdatedAt,
+      };
+      const { data, error } =
+        attempt.action === "archive"
+          ? await supabase.rpc("archive_vehicle_idempotent", args)
+          : await supabase.rpc("set_vehicle_published_idempotent", {
+              ...args,
+              p_published: attempt.published,
+            });
+      if (error) throw new StatusCommandError(error.message, error.code);
+      if (!data) throw new Error("Veículo não encontrado.");
+      return getVehicleById(id);
+    });
+  } catch (error) {
+    if (error instanceof StatusCommandError && error.message.includes("STALE_RECORD:")) {
+      let current: Vehicle | null = null;
+      try {
+        current = await getVehicleById(id);
+      } catch {
+        /* The vehicle may have been removed. */
+      }
+      throw new StaleRecordError(
+        "O veículo mudou. Confira os dados atuais antes de continuar.",
+        current,
+      );
+    }
+    throw error;
+  }
+}
+
+export function archiveVehicle(id: number, expectedUpdatedAt: string) {
+  return runVehicleAction({ action: "archive", vehicleId: id, expectedUpdatedAt });
+}
+
+export function setVehiclePublished(id: number, published: boolean, expectedUpdatedAt: string) {
+  return runVehicleAction({ action: "publication", vehicleId: id, expectedUpdatedAt, published });
 }
 
 export type PreparationAttempt = { p_vehicle_id: number; p_expected_updated_at: string };

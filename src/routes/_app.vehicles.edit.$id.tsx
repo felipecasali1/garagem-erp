@@ -7,7 +7,6 @@ import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
 import { Textarea } from "@/shared/components/ui/textarea";
-import { Switch } from "@/shared/components/ui/switch";
 import { Badge } from "@/shared/components/ui/badge";
 import {
   Select,
@@ -30,6 +29,8 @@ import {
   vehicleKeys,
 } from "@/modules/vehicles/services/vehicles";
 import { VehicleChecklist } from "@/modules/checklist/components/vehicle-checklist";
+import { VehicleActionRecovery } from "@/modules/vehicles/components/vehicle-action-recovery";
+import { usePendingVehicleAction } from "@/modules/vehicles/hooks/use-pending-vehicle-action";
 import { StaleRecordError } from "@/shared/lib/stale-record";
 import { StaleRecordConflictDialog } from "@/shared/components/stale-record-conflict-dialog";
 import type { Vehicle } from "@/shared/types/domain";
@@ -69,6 +70,7 @@ function EditVehicle() {
   const navigate = useNavigate();
   const numericId = Number(id);
   const queryClient = useQueryClient();
+  const pendingVehicleAction = usePendingVehicleAction(numericId);
   const {
     data: v,
     isLoading,
@@ -84,6 +86,7 @@ function EditVehicle() {
   });
   const suggestedAccessories = catalogAccessories.map((accessory) => accessory.name);
   const [draft, setDraft] = useState<VehicleDraft | null>(null);
+  const initialDraftRef = useRef<VehicleDraft | null>(null);
   const [baselineUpdatedAt, setBaselineUpdatedAt] = useState<string | null>(null);
   const updateAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const [conflict, setConflict] = useState<{
@@ -119,6 +122,7 @@ function EditVehicle() {
 
   useEffect(() => {
     if (!v) return;
+    if (!initialDraftRef.current) initialDraftRef.current = vehicleToDraft(v);
     setDraft((current) => current ?? vehicleToDraft(v));
     setBaselineUpdatedAt((current) => current ?? v.updated_at);
   }, [v]);
@@ -166,13 +170,15 @@ function EditVehicle() {
   });
   const archiveMutation = useMutation({
     mutationFn: (expectedUpdatedAt: string) => archiveVehicle(numericId, expectedUpdatedAt),
-    onSuccess: (vehicle) => {
+    onSuccess: ({ value: vehicle, recovered }) => {
       queryClient.setQueryData(vehicleKeys.detail(vehicle.id), vehicle);
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.all });
-      toast.success("Veículo arquivado");
+      void queryClient.invalidateQueries({ queryKey: ["pending-vehicle-action"] });
+      toast.success(recovered ? "Tentativa anterior recuperada" : "Veículo arquivado");
       void navigate({ to: "/vehicles" });
     },
     onError: (mutationError) => {
+      void queryClient.invalidateQueries({ queryKey: ["pending-vehicle-action"] });
       if (mutationError instanceof StaleRecordError) {
         setConflict({ current: mutationError.current as Vehicle | null, action: "archive" });
         return;
@@ -266,7 +272,14 @@ function EditVehicle() {
           variant="outline"
           type="button"
           onClick={() => setConfirmArchiveOpen(true)}
-          disabled={archiveMutation.isPending || draft.status === "archived" || isSaleManagedStatus}
+          disabled={
+            archiveMutation.isPending ||
+            pendingVehicleAction.isLoading ||
+            pendingVehicleAction.isError ||
+            Boolean(pendingVehicleAction.data) ||
+            draft.status === "archived" ||
+            isSaleManagedStatus
+          }
         >
           <Archive className="h-4 w-4" /> Arquivar
         </Button>
@@ -275,6 +288,12 @@ function EditVehicle() {
         </Button>
       </div>
 
+      {pendingVehicleAction.data && <VehicleActionRecovery attempt={pendingVehicleAction.data} />}
+      {pendingVehicleAction.isError && (
+        <p className="text-sm text-destructive">
+          Não foi possível verificar tentativas pendentes. Atualize a página antes de arquivar.
+        </p>
+      )}
       <Card>
         <CardContent className="p-6 space-y-4">
           <h2 className="font-display font-semibold">Identificação</h2>
@@ -332,7 +351,12 @@ function EditVehicle() {
         title="Arquivar veículo?"
         description="O veículo será preservado no histórico, despublicado e marcado como arquivado."
         confirmLabel={archiveMutation.isPending ? "Arquivando..." : "Arquivar"}
-        confirmDisabled={archiveMutation.isPending}
+        confirmDisabled={
+          archiveMutation.isPending ||
+          pendingVehicleAction.isLoading ||
+          pendingVehicleAction.isError ||
+          Boolean(pendingVehicleAction.data)
+        }
         onConfirm={() => {
           setConfirmArchiveOpen(false);
           if (baselineUpdatedAt) archiveMutation.mutate(baselineUpdatedAt);
@@ -388,6 +412,7 @@ function EditVehicle() {
         onReload={() => {
           const current = conflict?.current;
           if (!current) return;
+          initialDraftRef.current = vehicleToDraft(current);
           setDraft(vehicleToDraft(current));
           setBaselineUpdatedAt(current.updated_at);
           queryClient.setQueryData(vehicleKeys.detail(current.id), current);
@@ -497,14 +522,25 @@ function EditVehicle() {
             <div>
               <div className="font-medium text-sm">Publicado no site</div>
               <div className="text-xs text-muted-foreground">
-                Apenas veículos disponíveis podem ficar visíveis para clientes externos
+                {v?.published ? "Publicado" : "Não publicado"}. Altere a publicação na página de
+                detalhes do veículo.
               </div>
             </div>
-            <Switch
-              checked={draft.status === "available" && draft.published}
-              disabled={draft.status !== "available"}
-              onCheckedChange={(checked) => updateDraft({ published: checked })}
-            />
+            <Button type="button" variant="outline" asChild>
+              <Link
+                to="/vehicles/$id"
+                params={{ id }}
+                onClick={(event) => {
+                  if (
+                    JSON.stringify(draft) !== JSON.stringify(initialDraftRef.current) &&
+                    !window.confirm("Há alterações não salvas. Deseja sair e descartá-las?")
+                  )
+                    event.preventDefault();
+                }}
+              >
+                Alterar nos detalhes
+              </Link>
+            </Button>
           </div>
           <Field label="Observações">
             <Textarea
