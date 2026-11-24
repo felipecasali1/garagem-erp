@@ -183,6 +183,9 @@ services:
       SUPABASE_PUBLISHABLE_KEY: ${GARAGEM_LOCAL_ANON_KEY:-}
       SUPABASE_SECRET_KEY: ${GARAGEM_LOCAL_SERVICE_ROLE_KEY:-}
       ENABLED_FEATURES_LOGS_ALL: "false"
+      SNIPPETS_MANAGEMENT_FOLDER: /app/snippets
+    volumes:
+      - garagem-erp-studio-snippets:/app/snippets
     healthcheck:
       test:
         [
@@ -294,3 +297,5 @@ volumes:
     name: ${GARAGEM_LOCAL_DB_VOLUME_NAME:-garagem-erp-db}
   garagem-erp-storage:
     name: ${GARAGEM_LOCAL_STORAGE_VOLUME_NAME:-garagem-erp-storage}
+  garagem-erp-studio-snippets:
+    name: ${GARAGEM_LOCAL_STUDIO_SNIPPETS_VOLUME_NAME:-garagem-erp-studio-snippets}

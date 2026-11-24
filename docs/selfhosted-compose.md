@@ -33,7 +33,9 @@ npm run selfhosted:healthcheck
 npm run selfhosted:down
 ```
 
-O comando de parada remove os containers e a rede, mas preserva os volumes `garagem-erp-db` e `garagem-erp-storage`. A próxima execução de `selfhosted:up` reinicia os serviços e verifica migrations pendentes. Não use `docker compose down -v` para uma parada normal: `-v` apagaria os dados persistidos.
+O comando de parada remove os containers e a rede, mas preserva os volumes `garagem-erp-db`, `garagem-erp-storage` e `garagem-erp-studio-snippets`. O último guarda as consultas salvas no editor SQL do Studio e deve ser incluído em backups quando essas consultas precisarem ser preservadas. A próxima execução de `selfhosted:up` reinicia os serviços e verifica migrations pendentes. Não use `docker compose down -v` para uma parada normal: `-v` apagaria os dados persistidos.
+
+Para verificar o editor SQL do Studio em um container e volume descartáveis, execute `npm run test:integration:studio`.
 
 As portas da aplicação e do gateway são publicadas apenas em `127.0.0.1`; o Postgres não publica porta no host. Dentro da rede Docker, a aplicação usa `http://api-gw:8000`. O navegador usa `http://127.0.0.1:8000`. O `.env` Cloud e `.env.docker` não são lidos pelo Compose. Se alterar as portas em `.env.compose`, as URLs internas e os redirecionamentos são derivados delas.
 

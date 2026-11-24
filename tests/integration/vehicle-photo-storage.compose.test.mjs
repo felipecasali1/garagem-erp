@@ -107,6 +107,7 @@ async function initializeCompose() {
     GARAGEM_LOCAL_NETWORK_NAME: `${projectName}-network`,
     GARAGEM_LOCAL_DB_VOLUME_NAME: `${projectName}-db`,
     GARAGEM_LOCAL_STORAGE_VOLUME_NAME: `${projectName}-storage`,
+    GARAGEM_LOCAL_STUDIO_SNIPPETS_VOLUME_NAME: `${projectName}-studio-snippets`,
   };
   await writeFile(
     config.envFile,

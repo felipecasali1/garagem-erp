@@ -45,6 +45,7 @@ function createEnvironmentFile() {
     GARAGEM_LOCAL_APP_PORT: "3101",
     GARAGEM_LOCAL_API_PORT: "8000",
     GARAGEM_LOCAL_STORAGE_VOLUME_NAME: "garagem-erp-storage",
+    GARAGEM_LOCAL_STUDIO_SNIPPETS_VOLUME_NAME: "garagem-erp-studio-snippets",
   };
   const contents = [
     "# Gerado pelo GaragemERP para o Supabase self-hosted via Docker Compose.",
