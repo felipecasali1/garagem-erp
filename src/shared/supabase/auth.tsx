@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import type { EmployeeAccessRole } from "@/modules/employees/types";
 import { supabase } from "@/shared/supabase/client";
@@ -42,8 +42,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<SystemUserProfile | null>(null);
   const [accessError, setAccessError] = useState<string | null>(null);
+  const syncVersion = useRef(0);
 
   async function syncProfile(nextSession: Session | null) {
+    const version = ++syncVersion.current;
     if (!nextSession) {
       setSession(null);
       setProfile(null);
@@ -58,7 +60,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         "id, active, access_role, is_admin, auth_user_id, person_id, employee_id, person:people(name), employee:employees(active)",
       )
       .eq("auth_user_id", nextSession.user.id)
+      .setHeader("Authorization", `Bearer ${nextSession.access_token}`)
       .maybeSingle();
+
+    if (version !== syncVersion.current) return;
 
     if (error) {
       setAccessError(error.message);
@@ -111,9 +116,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    const initialVersion = syncVersion.current;
 
     void supabase.auth.getSession().then(({ data, error }) => {
-      if (!active) return;
+      if (!active || initialVersion !== syncVersion.current) return;
       if (error) {
         console.error(error);
       }
@@ -129,6 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       active = false;
+      syncVersion.current++;
       subscription.unsubscribe();
     };
   }, []);
